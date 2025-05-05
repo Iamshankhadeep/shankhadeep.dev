@@ -3,7 +3,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import "./globals.css";
 import type { Metadata } from "next";
-import type { NextWebVitalsMetric } from "next/app";
+// import type { NextWebVitalsMetric } from "next/app";
 import { Geist, Geist_Mono } from "next/font/google";
 import Analytics from "../components/Analytics";
 
@@ -34,26 +34,26 @@ export const metadata: Metadata = {
 };
 
 // Function to report Core Web Vitals to Analytics
-export function reportWebVitals(metric: NextWebVitalsMetric) {
-	// Check if gtag is available (Analytics component should have loaded it)
-	if (typeof window !== "undefined" && window.gtag) {
-		window.gtag("event", metric.name, {
-			event_category: "Web Vitals",
-			// Google Analytics metrics must be integers, so the value is rounded.
-			// For CLS the value is first multiplied by 1000 for greater precision
-			// (note: increase the multiplier for greater precision if needed).
-			value: Math.round(
-				metric.name === "CLS" ? metric.value * 1000 : metric.value,
-			),
-			// The metric ID is unique to the current page load. When sending multiple
-			// values from the same page (e.g. for CLS), TTI entries having the same ID
-			// are related to the same display experience.
-			event_label: metric.id,
-			// Use a non-interaction event to avoid affecting bounce rate.
-			non_interaction: true,
-		});
-	}
-}
+// export function reportWebVitals(metric: NextWebVitalsMetric) {
+// 	// Check if gtag is available (Analytics component should have loaded it)
+// 	if (typeof window !== "undefined" && window.gtag) {
+// 		window.gtag("event", metric.name, {
+// 			event_category: "Web Vitals",
+// 			// Google Analytics metrics must be integers, so the value is rounded.
+// 			// For CLS the value is first multiplied by 1000 for greater precision
+// 			// (note: increase the multiplier for greater precision if needed).
+// 			value: Math.round(
+// 				metric.name === "CLS" ? metric.value * 1000 : metric.value,
+// 			),
+// 			// The metric ID is unique to the current page load. When sending multiple
+// 			// values from the same page (e.g. for CLS), TTI entries having the same ID
+// 			// are related to the same display experience.
+// 			event_label: metric.id,
+// 			// Use a non-interaction event to avoid affecting bounce rate.
+// 			non_interaction: true,
+// 		});
+// 	}
+// }
 
 interface LayoutProps {
 	children: React.ReactNode;
