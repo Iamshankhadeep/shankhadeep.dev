@@ -9,6 +9,9 @@ const withBundleAnalyzer = bundleAnalyzer({
 
 const nextConfig: NextConfig = {
   /* config options here */
+  images: {
+    domains: ['picsum.photos'],
+  },
 };
 
 // Wrap the config with the bundle analyzer
