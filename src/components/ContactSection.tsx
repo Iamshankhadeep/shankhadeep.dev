@@ -1,4 +1,6 @@
 // src/components/ContactSection.tsx
+"use client";
+
 import React, { useState } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { FaEnvelope } from "react-icons/fa"; // Import email icon
