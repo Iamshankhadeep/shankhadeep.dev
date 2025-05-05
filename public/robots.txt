@@ -1,0 +1,6 @@
+# Allow all crawlers access to all content
+User-agent: *
+Allow: /
+
+# Specify the location of the sitemap (optional but recommended)
+# Sitemap: https://shankhadeep.dev/sitemap.xml # Replace with your actual domain
