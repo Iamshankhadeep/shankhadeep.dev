@@ -34,3 +34,21 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Contact Form with Google Sheets Integration
+
+This project uses Google Sheets API to store contact form submissions. Follow these steps to set up the integration:
+
+1. Create a Google Cloud project at [console.cloud.google.com](https://console.cloud.google.com/)
+2. Enable the Google Sheets API for your project
+3. Create a service account and download the JSON credentials
+4. Create a Google Sheet and share it with the service account email (with editor permissions)
+5. Set the following environment variables in your `.env.local` file:
+
+```bash
+GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account-email@your-project.iam.gserviceaccount.com
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYour Private Key Here\n-----END PRIVATE KEY-----\n"
+GOOGLE_SHEETS_SPREADSHEET_ID=your-spreadsheet-id
+```
+
+The spreadsheet ID can be found in the URL of your Google Sheet: `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`

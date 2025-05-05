@@ -1,5 +1,5 @@
 // src/app/sitemap.ts
-import { MetadataRoute } from 'next';
+import type { MetadataRoute } from 'next';
 
 // TODO: Replace with your actual domain when deploying
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://shankhadeep.dev';
