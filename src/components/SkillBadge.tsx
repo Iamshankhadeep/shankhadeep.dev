@@ -1,5 +1,6 @@
 // src/components/SkillBadge.tsx
 import React from 'react';
+import { Badge } from "@/components/ui/badge";
 import { Skill } from '@/data/skills'; // Import the Skill interface
 
 interface SkillBadgeProps {
@@ -10,14 +11,13 @@ const SkillBadge: React.FC<SkillBadgeProps> = ({ skill }) => {
   const IconComponent = skill.icon;
 
   return (
-    <span 
-      className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium 
-                 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 
-                 border border-blue-300 dark:border-blue-700 shadow-sm"
+    <Badge 
+      variant="secondary" 
+      className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium shadow-sm"
     >
-      {IconComponent && <IconComponent className="w-4 h-4 mr-1.5" aria-hidden="true" />}
+      {IconComponent && <IconComponent className="w-4 h-4" aria-hidden="true" />}
       {skill.name}
-    </span>
+    </Badge>
   );
 };
 

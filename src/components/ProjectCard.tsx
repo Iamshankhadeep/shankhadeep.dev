@@ -2,6 +2,10 @@
 import React from 'react';
 import Image from 'next/image';
 import { FaGithub, FaExternalLinkAlt } from 'react-icons/fa';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Project } from '../data/projects';
 
 interface ProjectCardProps {
@@ -12,70 +16,75 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   const { title, description, imageUrl, technologies } = project;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl">
+    <Card className="overflow-hidden transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl">
       {/* Image Section */}
-      <div className="relative w-full h-48 bg-gray-200 dark:bg-gray-700"> {/* Fixed height container */}
+      <div className="relative w-full h-48 bg-muted">
         {imageUrl ? (
           <Image
             src={imageUrl}
             alt={`${title} screenshot`}
-            layout="fill" // Fill the container
-            objectFit="cover" // Cover the area, cropping if needed
-            className="transition-opacity duration-300 ease-in-out"
+            fill
+            className="object-cover transition-opacity duration-300 ease-in-out"
           />
         ) : (
           <div className="flex items-center justify-center h-full">
-            <span className="text-gray-500 dark:text-gray-400">No Image Available</span>
+            <span className="text-muted-foreground">No Image Available</span>
           </div>
         )}
       </div>
 
       {/* Content Section */}
-      <div className="p-6">
-        <h3 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">{title}</h3>
-        <p className="text-gray-700 dark:text-gray-300 mb-4 text-sm leading-relaxed line-clamp-3">
+      <CardHeader>
+        <CardTitle className="text-xl">{title}</CardTitle>
+        <CardDescription className="text-sm leading-relaxed line-clamp-3">
           {description}
-        </p>
+        </CardDescription>
+      </CardHeader>
 
+      <CardContent className="space-y-4">
         {/* Technologies Section */}
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {technologies.map((tech, index) => (
-            <span
-              key={index}
-              className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full"
-            >
+            <Badge key={index} variant="secondary" className="text-xs">
               {tech}
-            </span>
+            </Badge>
           ))}
         </div>
 
         {/* Links */}
-        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-end space-x-4">
-          {project.liveUrl && (
-            <a
-              href={project.liveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors duration-200"
-            >
-              <FaExternalLinkAlt className="mr-1.5 h-4 w-4" />
-              Live Demo
-            </a>
-          )}
-          {project.repoUrl && (
-            <a
-              href={project.repoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors duration-200"
-            >
-              <FaGithub className="mr-1.5 h-4 w-4" />
-              GitHub
-            </a>
-          )}
+        <div className="pt-4">
+          <Separator className="mb-4" />
+          <div className="flex justify-end space-x-2">
+            {project.liveUrl && (
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={project.liveUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <FaExternalLinkAlt className="h-3 w-3" />
+                  Live Demo
+                </a>
+              </Button>
+            )}
+            {project.repoUrl && (
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={project.repoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <FaGithub className="h-3 w-3" />
+                  GitHub
+                </a>
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 
