@@ -1,30 +1,41 @@
 // src/components/EducationSection.tsx
-import React from 'react';
-import EducationCard from './EducationCard';
-import { educationHistory } from '@/data/education';
+"use client";
+
+import type React from "react";
+import { educationHistory } from "@/data/education";
+import EducationCard from "./EducationCard";
+import { motion } from "motion/react";
 
 const EducationSection: React.FC = () => {
-  return (
-    <section id="education" className="py-16 md:py-24 bg-white dark:bg-gray-900">
-      <div className="container mx-auto px-4">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-gray-900 dark:text-white">
-          Education
-        </h2>
+	return (
+		<section id="education" className="py-16 md:py-24">
+			<motion.h2
+				initial={{ opacity: 0, y: 20 }}
+				animate={{ opacity: 1, y: 0 }}
+				transition={{ duration: 0.7, ease: "easeOut" }}
+				className="text-3xl md:text-4xl font-bold mb-12"
+			>
+				Education
+			</motion.h2>
 
-        <div className="max-w-4xl mx-auto">
-          {/* Map over education history and render cards */}
-          {educationHistory.map((entry) => (
-            <EducationCard key={entry.id} entry={entry} />
-          ))}
-          
-          {/* Add message if history is empty */}
-          {educationHistory.length === 0 && (
-             <p className="text-center text-gray-600 dark:text-gray-400">Education details coming soon.</p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
+			<div className="flex flex-col space-y-8">
+				{educationHistory.map((entry, index) => (
+					<motion.div
+						key={entry.id}
+						initial={{ opacity: 0, y: 20 }}
+						animate={{ opacity: 1, y: 0 }}
+						transition={{
+							duration: 0.7,
+							delay: 0.2 * (index + 1),
+							ease: "easeOut",
+						}}
+					>
+						<EducationCard entry={entry} />
+					</motion.div>
+				))}
+			</div>
+		</section>
+	);
 };
 
 export default EducationSection;

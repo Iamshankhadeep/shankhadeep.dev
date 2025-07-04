@@ -1,38 +1,51 @@
 // src/components/SkillsSection.tsx
-import React from 'react';
-import { skillCategories } from '@/data/skills'; // Import categorized skills data
-import SkillBadge from './SkillBadge';         // Import the SkillBadge component
+"use client";
+
+import type React from "react";
+import { skillCategories } from "@/data/skills";
+import SkillBadge from "./SkillBadge";
+import { motion } from "motion/react";
 
 const SkillsSection: React.FC = () => {
-  return (
-    <section id="skills" className="py-16 md:py-24 bg-white dark:bg-gray-800">
-      <div className="container mx-auto px-4">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-gray-900 dark:text-white">
-          My Skills
-        </h2>
+	return (
+		<section id="skills" className="py-16 md:py-24">
+			<motion.h2
+				initial={{ opacity: 0, y: 20 }}
+				animate={{ opacity: 1, y: 0 }}
+				transition={{ duration: 0.7, ease: "easeOut" }}
+				className="text-3xl md:text-4xl font-bold mb-12"
+			>
+				Skills
+			</motion.h2>
 
-        <div className="space-y-12"> {/* Add space between categories */}
-          {skillCategories.map((category) => (
-            <div key={category.title}>
-              <h3 className="text-xl md:text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100 border-l-4 border-blue-500 pl-4">
-                {category.title}
-              </h3>
-              <div className="flex flex-wrap gap-3"> {/* Use flex-wrap for badges */}
-                {category.skills.map((skill) => (
-                  <SkillBadge key={skill.name} skill={skill} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+			<div className="flex flex-col space-y-8">
+				{skillCategories.map((category, index) => (
+					<motion.div
+						key={category.title}
+						initial={{ opacity: 0, y: 20 }}
+						animate={{ opacity: 1, y: 0 }}
+						transition={{
+							duration: 0.7,
+							delay: 0.2 * (index + 1),
+							ease: "easeOut",
+						}}
+					>
+						<h3 className="text-xl font-semibold mb-4">{category.title}</h3>
+						<div className="flex flex-wrap gap-2">
+							{category.skills.map((skill) => (
+								<SkillBadge key={skill.name} skill={skill} />
+							))}
+						</div>
+					</motion.div>
+				))}
+			</div>
 
-        {/* Optional: Add a note about continuously learning */} 
-        {/* <p className="text-center text-gray-600 dark:text-gray-400 mt-16">
-          ...and I'm always eager to learn more!
-        </p> */}
-      </div>
-    </section>
-  );
+			{/* Optional: Add a note about continuously learning */} 
+			{/* <p className="text-center text-gray-600 dark:text-gray-400 mt-16">
+				...and I'm always eager to learn more!
+			</p> */}
+		</section>
+	);
 };
 
 export default SkillsSection;

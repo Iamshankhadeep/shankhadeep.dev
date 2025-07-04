@@ -1,24 +1,27 @@
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import { motion } from "motion/react";
+
 export default function Resume() {
 	return (
-		<div className="container mx-auto py-8">
-			<h1 className="text-3xl font-bold mb-6 text-center">Resume</h1>
-			<div className="flex flex-col items-center">
-				<a
-					href="/resume_shankhadeep.pdf"
-					target="_blank"
-					rel="noopener noreferrer"
-					className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded mb-6"
-				>
-					Download Resume
-				</a>
-				<div className="w-full max-w-4xl h-[800px] border border-gray-300 rounded-lg overflow-hidden">
+		<div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+			<Header />
+			<motion.div
+				initial={{ opacity: 0, y: 20 }}
+				animate={{ opacity: 1, y: 0 }}
+				transition={{ duration: 0.7, ease: "easeOut" }}
+				className="py-16 md:py-24"
+			>
+				<h1 className="text-3xl md:text-4xl font-bold mb-12">Resume</h1>
+				<div className="w-full h-[800px] border border-border rounded-lg overflow-hidden">
 					<iframe
 						src="/resume_shankhadeep.pdf"
 						className="w-full h-full"
 						title="Shankhadeep Dey Resume"
 					/>
 				</div>
-			</div>
+			</motion.div>
+			<Footer />
 		</div>
 	);
 }

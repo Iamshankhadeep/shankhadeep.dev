@@ -1,53 +1,40 @@
 // src/components/EducationCard.tsx
-import React from 'react';
-import Image from 'next/image';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { EducationEntry } from '@/data/education'; // Import the interface
+import React from "react";
+import { EducationEntry } from "@/data/education";
 
 interface EducationCardProps {
-  entry: EducationEntry;
+	entry: EducationEntry;
 }
 
 const EducationCard: React.FC<EducationCardProps> = ({ entry }) => {
-  return (
-    <Card className="mb-6 transition-shadow duration-300 hover:shadow-lg">
-      <CardHeader>
-        <div className="flex items-start space-x-4">
-          {/* Optional Logo */}
-          {entry.logoUrl && (
-            <div className="flex-shrink-0">
-              <Image
-                src={entry.logoUrl}
-                alt={`${entry.institution} logo`}
-                width={48} // Adjust size as needed
-                height={48}
-                className="rounded-full object-contain bg-white p-1 border border-border"
-              />
-            </div>
-          )}
-          <div className="flex-grow">
-            <CardTitle className="text-xl">{entry.institution}</CardTitle>
-            <p className="text-md font-medium text-primary">{entry.degree}</p>
-            <p className="text-sm text-muted-foreground mb-1">{entry.fieldOfStudy}</p>
-            <p className="text-xs text-muted-foreground">
-              {entry.startDate} - {entry.endDate || 'Present'}
-            </p>
-          </div>
-        </div>
-      </CardHeader>
+	const { institution, degree, fieldOfStudy, startDate, endDate, description } =
+		entry;
 
-      {/* Optional Description/Details */}
-      {entry.description && entry.description.length > 0 && (
-        <CardContent>
-          <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-            {entry.description.map((item, index) => (
-              <li key={index}>{item}</li>
-            ))}
-          </ul>
-        </CardContent>
-      )}
-    </Card>
-  );
+	return (
+		<div className="border border-border rounded-lg p-6 transition-all duration-300 hover:bg-neutral-50">
+			<div className="flex flex-col space-y-2">
+				<div className="flex justify-between items-start">
+					<div className="flex flex-col">
+						<h3 className="text-xl font-semibold">{institution}</h3>
+						<p className="text-md font-medium text-muted-foreground">
+							{degree}
+						</p>
+					</div>
+					<p className="text-sm text-muted-foreground">
+						{startDate} - {endDate || "Present"}
+					</p>
+				</div>
+				<p className="text-sm text-muted-foreground">{fieldOfStudy}</p>
+				{description && description.length > 0 && (
+					<ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+						{description.map((item, index) => (
+							<li key={index}>{item}</li>
+						))}
+					</ul>
+				)}
+			</div>
+		</div>
+	);
 };
 
 export default EducationCard;
