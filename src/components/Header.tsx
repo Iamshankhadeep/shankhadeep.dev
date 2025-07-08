@@ -7,7 +7,6 @@ const navItems = [
 	{ name: "About", href: "/about" },
 	{ name: "Projects", href: "/projects" },
 	{ name: "Resume", href: "/resume" },
-	{ name: "Contact", href: "/contact" },
 ];
 
 const Header: React.FC = () => {
@@ -42,6 +41,21 @@ const Header: React.FC = () => {
 							</Link>
 						</motion.div>
 					))}
+					<motion.div
+						key="Contact"
+						initial={{ opacity: 0, y: -20 }}
+						animate={{ opacity: 1, y: 0 }}
+						transition={{ duration: 0.5, delay: 0.1 * (navItems.length + 1) }}
+					>
+						<Link
+							href="https://cal.com/iamshankhadeep/30min"
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-base text-muted-foreground hover:text-foreground transition-colors"
+						>
+							Contact
+						</Link>
+					</motion.div>
 				</div>
 			</nav>
 		</header>
