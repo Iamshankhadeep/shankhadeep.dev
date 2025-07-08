@@ -24,7 +24,7 @@ const ContactSection = () => {
 				transition={{ duration: 0.7, delay: 0.2, ease: "easeOut" }}
 				className="text-lg text-muted-foreground mb-12 max-w-xl mx-auto"
 			>
-				I'm always open to discussing new projects, creative ideas, or
+				I&apos;m always open to discussing new projects, creative ideas, or
 				opportunities to be part of an amazing team. Feel free to schedule a
 				30-minute meeting with me.
 			</motion.p>
