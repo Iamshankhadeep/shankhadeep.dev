@@ -3,6 +3,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import Analytics from "../components/Analytics";
+import FloatingContactButton from "../components/FloatingContactButton";
 
 const ibmPlexMono = IBM_Plex_Mono({
 	variable: "--font-ibm-plex-mono",
@@ -40,6 +41,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 				<div className="flex flex-col min-h-screen">
 					<main className="flex-grow">{children}</main>
 				</div>
+				<FloatingContactButton />
 				<Analytics />
 			</body>
 		</html>

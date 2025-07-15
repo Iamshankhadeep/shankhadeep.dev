@@ -19,7 +19,7 @@ export const personalInfo: PersonalInfo = {
   socialLinks: [
     {
       name: 'LinkedIn',
-      url: 'https://linkedin.com/in/shankhadeep-dey',
+      url: 'https://linkedin.com/in/iamshankhadeep',
       icon: FaLinkedin,
     },
     {

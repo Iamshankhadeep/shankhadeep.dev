@@ -29,6 +29,26 @@ export interface Project {
  */
 export const projects: Project[] = [
   {
+    id: 'ccseva',
+    title: 'CCSeva - Claude Code Usage Tracker',
+    description: 'A beautiful macOS menu bar app for tracking Claude Code usage in real-time. Features 30-second updates, smart plan detection, 7-day analytics, and elegant glass morphism design.',
+    technologies: ['Electron', 'React', 'TypeScript', 'Tailwind CSS', 'Radix UI'],
+    liveUrl: 'https://github.com/iamshankhadeep/ccseva/releases',
+    repoUrl: 'https://github.com/iamshankhadeep/ccseva',
+    features: ['Real-time Token Monitoring', 'Smart Plan Detection', '7-day Analytics', 'Cost Tracking', 'Smart Notifications', 'Glass Morphism UI'],
+    category: 'Desktop Application',
+  },
+  {
+    id: 'claudecode-directory',
+    title: 'Claude Code Directory',
+    description: 'The ultimate resource hub for Claude developers. A community-driven platform featuring 1000+ curated tools, prompts, and resources with smart search and voting system.',
+    technologies: ['Next.js', 'React', 'TypeScript', 'Tailwind CSS'],
+    liveUrl: 'https://claudecode.directory',
+    repoUrl: 'https://github.com/iamshankhadeep/claudecode-directory',
+    features: ['1000+ Curated Resources', 'Community Voting', 'Smart Search & Filters', 'Resource Submission', 'Claude.md Config Hub', 'CLI Commands Directory'],
+    category: 'Web Platform',
+  },
+  {
     id: 'portfolio-website',
     title: 'Personal Portfolio Website',
     description: 'My personal corner of the internet, showcasing my skills, experience, and projects. Built with Next.js, Tailwind CSS, and TypeScript.',
