@@ -20,7 +20,7 @@ export const experiences: WorkExperience[] = [
     company: 'Camcorder.Ai',
     title: 'Full Stack Developer',
     startDate: 'Aug 2023',
-    endDate: 'Present',
+    endDate: 'Jun 2025',
     responsibilities: [
       'Integrated Remotion player and Remotion lambda as their video pipeline.',
       'Added transcript editor and support for deleting and editing words in the transcript.',
@@ -34,7 +34,7 @@ export const experiences: WorkExperience[] = [
     company: 'Funnel Rolodex (ClickFunnels sister company)',
     title: 'Full Stack Developer',
     startDate: 'May 2021',
-    endDate: 'Present',
+    endDate: 'Jul 2023',
     responsibilities: [
       'Integrated Stripe for end to end payment infrastructure, with webhook to support realtime update.',
       'Design and Implemented a Real Time messaging center for 50k users, using hasura and graphql subscription.',
