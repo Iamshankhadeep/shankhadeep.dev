@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-This is a Next.js 15 project with TypeScript. Common commands:
+This is a Next.js 16 project with TypeScript. Common commands:
 
-- `npm run dev` - Start development server with Turbopack (runs on http://localhost:3000)
+- `npm run dev` - Start development server (Turbopack) (runs on http://localhost:3000)
 - `npm run build` - Build production application
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint checks
@@ -15,7 +15,7 @@ This is a Next.js 15 project with TypeScript. Common commands:
 
 This is a personal portfolio website built with:
 
-- **Framework**: Next.js 15 with App Router
+- **Framework**: Next.js 16 with App Router
 - **Styling**: Tailwind CSS v4 with custom IBM Plex Mono font
 - **UI Components**: shadcn/ui components in `src/components/ui/`
 - **Icons**: Lucide React icons and React Icons

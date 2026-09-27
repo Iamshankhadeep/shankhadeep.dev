@@ -25,6 +25,13 @@ export const metadata: Metadata = {
 		locale: "en_US",
 		type: "website",
 	},
+	twitter: {
+		card: "summary_large_image",
+		title: "Shankhadeep Dey - Full Stack Developer Portfolio",
+		description:
+			"Explore the projects and skills of Shankhadeep Dey, a full-stack developer.",
+		creator: "@Iamshankhadeep",
+	},
 	icons: {
 		icon: "/logo.svg",
 	},
