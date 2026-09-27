@@ -6,13 +6,14 @@ import { motion } from "motion/react";
 const navItems = [
 	{ name: "About", href: "/about" },
 	{ name: "Projects", href: "/projects" },
+	{ name: "Blog", href: "/blog" },
 	{ name: "Resume", href: "/resume" },
 ];
 
 const Header: React.FC = () => {
 	return (
 		<header className="py-8">
-			<nav className="flex justify-between items-center">
+			<nav className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center">
 				<motion.div
 					initial={{ opacity: 0, y: -20 }}
 					animate={{ opacity: 1, y: 0 }}
@@ -25,7 +26,7 @@ const Header: React.FC = () => {
 						Shankhadeep Dey
 					</Link>
 				</motion.div>
-				<div className="flex space-x-6 items-center">
+				<div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
 					{navItems.map((item, index) => (
 						<motion.div
 							key={item.name}
