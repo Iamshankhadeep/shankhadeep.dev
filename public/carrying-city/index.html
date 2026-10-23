@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>The Carrying City</title>
+    <meta name="description" content="A leather suitcase that unfolds into a working miniature mechanical city. Real-time Three.js." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect x=%221%22 y=%225%22 width=%2214%22 height=%229%22 rx=%221.5%22 fill=%22%235a1a17%22/%3E%3Crect x=%225.5%22 y=%222%22 width=%225%22 height=%223.5%22 rx=%221%22 fill=%22none%22 stroke=%22%23c8a15c%22/%3E%3C/svg%3E" />
+    <script type="module" crossorigin src="/carrying-city/assets/index-skrlUiyV.js"></script>
+    <link rel="stylesheet" crossorigin href="/carrying-city/assets/index-BLQPaTeN.css">
+  </head>
+  <body>
+    <canvas id="scene" aria-label="3D view of a suitcase that unfolds into a miniature city" role="img"></canvas>
+
+    <div id="fallback" class="fallback" hidden>
+      <p class="fallback-title">The Carrying City</p>
+      <p>This piece needs WebGL 2, which this browser or device has disabled.</p>
+      <p>Try a current version of Chrome, Firefox, Safari or Edge with hardware acceleration turned on.</p>
+    </div>
+
+    <header class="title" id="title">
+      <h1>The Carrying City</h1>
+    </header>
+
+    <section class="caption" id="caption" aria-live="polite" hidden>
+      <p class="caption-name" id="caption-name"></p>
+      <p class="caption-text" id="caption-text"></p>
+      <p class="caption-live" id="caption-live"></p>
+    </section>
+
+    <nav class="bar" id="bar" aria-label="Playback and view controls">
+      <div class="group">
+        <button id="btn-open" type="button" class="primary">Open</button>
+        <button id="btn-play" type="button" aria-label="Play">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path id="icon-play" d="M4 2.5v11l9-5.5z" /></svg>
+        </button>
+        <button id="btn-replay" type="button" aria-label="Replay from closed">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3a5 5 0 1 1-4.6 3H1.6A6.6 6.6 0 1 0 3.2 3.6L1.5 2v4.4h4.4L4.3 4.8A5 5 0 0 1 8 3z" /></svg>
+        </button>
+        <label class="scrub">
+          <span class="sr">Deployment</span>
+          <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" />
+          <output id="scrub-out" for="scrub">0.00</output>
+        </label>
+      </div>
+      <div class="group" role="group" aria-label="Camera view">
+        <button type="button" class="view" data-view="hero" aria-keyshortcuts="1">Hero</button>
+        <button type="button" class="view" data-view="mechanism" aria-keyshortcuts="2">Mechanism</button>
+        <button type="button" class="view" data-view="street" aria-keyshortcuts="3">Street</button>
+        <button type="button" class="view" data-view="overhead" aria-keyshortcuts="4">Overhead</button>
+      </div>
+      <div class="group">
+        <label class="select">
+          <span class="sr">Inspect a mechanism</span>
+          <select id="inspect">
+            <option value="">Inspect…</option>
+            <option value="tower">Tower lift</option>
+            <option value="hinge">Platform hinge</option>
+            <option value="bridge">Bridge linkage</option>
+          </select>
+        </label>
+        <label class="light">
+          <span class="light-label">Day</span>
+          <input id="evening" type="range" min="0" max="1" step="0.01" value="0.35" aria-label="Day to evening lighting" />
+          <span class="light-label">Eve</span>
+        </label>
+        <button id="btn-sound" type="button" aria-pressed="false">Sound off</button>
+        <button id="btn-more" type="button" aria-expanded="false" aria-controls="more">More</button>
+      </div>
+      <div class="more" id="more" hidden>
+        <button id="btn-showcase" type="button">Showcase</button>
+        <button id="btn-quality" type="button">Quality: high</button>
+        <button id="btn-debug" type="button" aria-pressed="false">Mechanism debug</button>
+        <button id="btn-hide" type="button">Hide UI (H)</button>
+        <p class="keys">Space play · O open/close · ← → scrub · 1–4 views · I inspect · H hide UI · D debug</p>
+      </div>
+    </nav>
+
+    <p class="restore" id="restore" hidden>Press H or Esc to show controls</p>
+    <div class="debug" id="debug" hidden></div>
+  </body>
+</html>

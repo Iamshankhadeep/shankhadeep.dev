@@ -19,6 +19,12 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // The Carrying City is a standalone Vite build in public/carrying-city/; serve its index for the bare path.
+  async rewrites() {
+    return [
+      { source: '/carrying-city', destination: '/carrying-city/index.html' },
+    ];
+  },
 };
 
 // Wrap the config with the bundle analyzer
