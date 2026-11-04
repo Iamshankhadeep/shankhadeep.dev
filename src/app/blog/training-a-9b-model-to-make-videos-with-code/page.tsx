@@ -37,6 +37,13 @@ const costRows = [
 	{ item: "The original 600 reels, and the judge calls", cost: "not tracked" },
 ];
 
+const perVideoRows = [
+	{ model: "Claude Opus 5.5", working: "3 / 4", call: "$0.224", video: "~$0.30" },
+	{ model: "Claude Sonnet 5.5", working: "3 / 4", call: "$0.152", video: "~$0.20" },
+	{ model: "Claude Haiku 5.5", working: "0 / 4", call: "$0.007", video: "none worked" },
+	{ model: "This 9B model (A100 at $1.79/h)", working: "247 / 320", call: "~$0.004", video: "~$0.006" },
+];
+
 const pairs = [
 	{ id: "189", title: "River shrimp", note: "Passes the full video gate." },
 	{ id: "255", title: "Bamboo copter", note: "Passes the full video gate." },
@@ -345,6 +352,51 @@ export default function MakeVideosWithCodePost() {
 							Making the data cost about forty times as much as training on it.
 							The RunPod figure for rounds 3 to 5 is estimated from their run
 							times.
+						</p>
+					</section>
+
+					<section className="space-y-4">
+						<h2 className="text-2xl font-semibold">What one video costs</h2>
+						<p className="leading-7 text-muted-foreground">
+							Once it&apos;s trained, how does the small model compare with just
+							asking Claude? I gave each model the same system prompt and brief
+							the 9B model gets, one call per brief, and ran every result through
+							the same gate:
+						</p>
+						<div className="overflow-x-auto">
+							<table className="w-full border-collapse text-sm">
+								<thead>
+									<tr className="border-b border-border">
+										<th className="text-left py-2 pr-4">Model</th>
+										<th className="text-left py-2 pr-4">Working videos</th>
+										<th className="text-left py-2 pr-4">Cost per call</th>
+										<th className="text-left py-2">Cost per working video</th>
+									</tr>
+								</thead>
+								<tbody>
+									{perVideoRows.map((r) => (
+										<tr key={r.model} className="border-b border-border">
+											<td className="py-3 pr-4">{r.model}</td>
+											<td className="py-3 pr-4">{r.working}</td>
+											<td className="py-3 pr-4">{r.call}</td>
+											<td className="py-3 whitespace-nowrap">{r.video}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						<p className="leading-7 text-muted-foreground">
+							The 9B model is 35 to 50 times cheaper per working video than Sonnet
+							or Opus. Most of Claude&apos;s cost is thinking: the scene itself is
+							2,000 to 4,000 tokens of code, but each call wrote 10,000 to 14,000
+							output tokens. Haiku is cheap but got none of its four to work.
+						</p>
+						<p className="leading-7 text-muted-foreground">
+							The comparison is not like for like. Claude&apos;s working videos are
+							much richer than the 9B model&apos;s. The Claude rows are 4 held-out
+							briefs each, so treat them as rough. The 9B figure is an upper bound:
+							320 videos took 46 minutes on the A100, and that includes rendering
+							and judging every one.
 						</p>
 					</section>
 
