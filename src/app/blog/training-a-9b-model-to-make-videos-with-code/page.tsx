@@ -65,6 +65,12 @@ export const metadata: Metadata = {
 		type: "article",
 		publishedTime: "2026-11-05",
 	},
+	twitter: {
+		card: "summary_large_image",
+		title: "Training a 9B Model to Make Videos with Code",
+		description:
+			"From 0/100 to 247/320 working videos: SFT, GRPO, a content judge, a motion reward, and 2,000 training reels.",
+	},
 };
 
 function Reel({ id, title }: { id: string; title: string }) {
