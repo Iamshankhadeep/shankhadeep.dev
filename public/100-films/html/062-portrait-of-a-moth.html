@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 062 — Portrait of a Moth</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+<script src="../assets/img/062-moth.js"></script>
+<style>
+  #cap { position: absolute; left: 0; right: 0; top: 936px; text-align: center; z-index: 6; white-space: nowrap;
+    font-family: "Cormorant Garamond Variable", serif; color: #eadcbc; line-height: 1; }
+  #cap .sp { font-style: italic; font-weight: 400; font-size: 46px; letter-spacing: 0.012em; }
+  #cap .rule { display: inline-block; width: 46px; height: 1.5px; background: #c8964a; vertical-align: middle; margin: 0 26px 6px 28px; transform-origin: 50% 50%; }
+  #cap .cn { font-weight: 500; font-size: 30px; letter-spacing: 0.3em; text-transform: uppercase; color: #cdb98f; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="cap"><span class="sp">Pulvera lunaris</span><span class="rule"></span><span class="cn">the dust emperor</span></div></div>
+<script>
+/* Nº 062 — PORTRAIT OF A MOTH
+ * One macro photograph of an invented moth is sampled into ~165k dust particles (instanced quads, three.js).
+ * Every particle is a pure function of (its attributes, t): it drifts in out of focus, spirals home (body first,
+ * wing tips last, the four eye-spots closing exactly on the downbeat of bar 4), lives through three slow wingbeats
+ * that shed fine dust, and on the downbeat of bar 6 one strong beat throws the whole portrait back into the dark.
+ * 6 bars at 72 bpm (3.333 s each), C# minor. */
+const { ease: E, prog, clamp01, lerp, smoothstep, TAU } = Stage;
+const BT = 60 / 72, T4 = 12 * BT, TD = 20 * BT;                 // beat length, bar-4 downbeat (10 s), dispersal (16.667 s)
+const WB = [[14, 0.34], [16, 0.45], [18, 0.58]];                // wingbeats: [beat, amplitude in rad]
+const N_MOTH = 150000, N_SHED = 13000, N_AMB = 2400, N = N_MOTH + N_SHED + N_AMB;
+const FOV = 30, PXK = 1080 / (2 * Math.tan(FOV * Math.PI / 360));
+
+// one wingbeat: slow up-stroke, quick down-stroke that begins on the beat, small overshoot, long settle
+function pulse(t, tb, A, up, down, settle, over) {
+  const x = t - (tb - 0.04);
+  if (x <= -up || x >= down + settle) return 0;
+  if (x < 0) return A * E.inOutSine(1 + x / up);
+  if (x < down) return A * (1 - (1 + over) * E.inOutCubic(x / down));
+  return -over * A * (1 - E.inOutSine((x - down) / settle));
+}
+// amplitude of the glass tremolo at time t (smooth-ish, taken from the score itself)
+function tremAmp(t) {
+  const ev = Stage.lastEvent('glass', t); if (!ev) return 0;
+  const x = t - ev.t; return ev.vel * Math.exp(-Math.max(0, x - 0.11) / 0.09);
+}
+function wing(t) {
+  let th = 0.2 * (1 - E.inOutSine(prog(t, 9.6, 1.6)));                              // cupped while assembling; opens flat as the eyes close
+  th += 0.035 * Math.sin((t - T4) * TAU / (4 * BT)) * smoothstep(9.6, 11.2, t);      // breath: one per bar
+  for (const [b, A] of WB) th += pulse(t, b * BT, A, 0.72, 0.26, 1.0, 0.14);
+  th += pulse(t, TD, 1.12, 1.05, 0.24, 1.7, 0.2);                                     // the strong beat
+  th += 0.022 * tremAmp(t) * Math.sin(Math.PI * t / (BT / 8)) * smoothstep(9.8, 10.6, t);   // quiver locked to the tremolo
+  return th;
+}
+
+const BEAM = `
+const vec2 BEAM_O = vec2(0., .3), BEAM_D = vec2(.788, -.616); const float BEAM_W = 1.2, BEAM_K = .085;
+`;
+const BG = BEAM + `
+uniform float uGlow, uPulse, uBeam, uSpan;
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  // the shaft of light the dust drifts through (same geometry as in the particle shader)
+  vec2 w = vec2(0., -.13) + p * uSpan, bq = w - BEAM_O;
+  float bs = dot(bq, BEAM_D), bw = max(.4, BEAM_W + BEAM_K * bs), bp = bq.x * BEAM_D.y - bq.y * BEAM_D.x;
+  float shaft = exp(-bp * bp / (bw * bw * 1.6)) * (.55 + .45 * fbm(w * .45 + vec2(uTime * .05, -uTime * .03))) * mix(1.25, .55, smoothstep(-9., 9., bs));
+  float r = length(p);
+  vec3 c = vec3(.030, .026, .030) * (1. - .7 * smoothstep(.15, 1.05, r));
+  float d = length(p * vec2(.58, 1.) - vec2(0., .02));
+  float haze = exp(-d * d * 5.2) * (.75 + .25 * fbm(p * 2.2 + vec2(uTime * .03, 0.)));
+  c += vec3(.30, .17, .07) * haze * (.05 + .12 * uGlow + .06 * uPulse);
+  c += vec3(.10, .08, .09) * (fbm(p * 1.3 + vec2(3.1, uTime * .02)) - .45) * .05;
+  c += vec3(.34, .21, .10) * shaft * uBeam * .15;
+  fragColor = vec4(max(c, 0.) + dither(gl_FragCoord.xy, float(uFrame)), 1.);
+}`;
+
+const VERT = BEAM + `
+attribute vec3 aHome, aOff, aCol; attribute vec4 aRnd, aTim;
+uniform float uBeam, uT, uTh0, uTh1, uFocus, uAp, uBlur, uGain, uSize, uPxK, uEye, uGlint, uGSeed; uniform vec2 uView;
+varying vec3 vCol; varying vec2 vUv; varying float vBok;
+vec3 mod289(vec3 x){ return x - floor(x * (1. / 289.)) * 289.; } vec4 mod289(vec4 x){ return x - floor(x * (1. / 289.)) * 289.; }
+vec4 permute(vec4 x){ return mod289(((x * 34.) + 1.) * x); } vec4 tis(vec4 r){ return 1.79284291400159 - .85373472095314 * r; }
+float snoise(vec3 v){
+  const vec2 C = vec2(1. / 6., 1. / 3.); const vec4 D = vec4(0., .5, 1., 2.);
+  vec3 i = floor(v + dot(v, C.yyy)), x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz), l = 1. - g, i1 = min(g.xyz, l.zxy), i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx, x2 = x0 - i2 + C.yyy, x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(i.z + vec4(0., i1.z, i2.z, 1.)) + i.y + vec4(0., i1.y, i2.y, 1.)) + i.x + vec4(0., i1.x, i2.x, 1.));
+  float n_ = .142857142857; vec3 ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49. * floor(p * ns.z * ns.z), x_ = floor(j * ns.z), y_ = floor(j - 7. * x_);
+  vec4 x = x_ * ns.x + ns.yyyy, y = y_ * ns.x + ns.yyyy, h = 1. - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy), b1 = vec4(x.zw, y.zw), s0 = floor(b0) * 2. + 1., s1 = floor(b1) * 2. + 1., sh = -step(h, vec4(0.));
+  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy, a1 = b1.xzyw + s1.xzyw * sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x), p1 = vec3(a0.zw, h.y), p2 = vec3(a1.xy, h.z), p3 = vec3(a1.zw, h.w);
+  vec4 norm = tis(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3))); p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.); m = m * m;
+  return 42. * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+}
+vec3 n3(vec3 p){ return vec3(snoise(p), snoise(p + vec3(31.4, 17.2, -9.1)), snoise(p + vec3(-13.7, 41.3, 23.9))); }
+float lit(vec3 p){
+  vec2 q = p.xy - BEAM_O; float s = dot(q, BEAM_D), w = max(.4, BEAM_W + BEAM_K * s), d = q.x * BEAM_D.y - q.y * BEAM_D.x;
+  return .07 + 1.75 * exp(-d * d / (w * w));
+}
+// wings hinge on the body axis; the tips lag (uTh1 is the angle a moment ago), hind wings follow a little less
+vec3 flex(vec3 h, out float lift, out float fore){
+  float s = h.x < 0. ? -1. : 1., ax = abs(h.x), u = max(ax - .2, 0.);
+  float hk = mix(1., .8, smoothstep(.2, -.6, h.y)), th = mix(uTh0, uTh1, clamp(u / 2.8, 0., 1.)) * hk;
+  lift = sin(th) * u;
+  // a tilted (or whipping) wing packs its scales closer on screen: scale exposure by the stretch d(screen x)/du so it never burns out
+  float jac = abs(cos(th) - u * sin(th) * (u < 2.8 ? (uTh1 - uTh0) * hk / 2.8 : 0.));
+  fore = mix(1., clamp(jac, .14, 1.), .9 * smoothstep(0., .35, u));
+  return vec3(s * (min(ax, .2) + u * cos(th)), h.y + .06 * uTh0, h.z + lift);
+}
+void main(){
+  float kind = aTim.w, a = 1., bright = 1., feat = 0., lift = 0., fore = 1., lk = 1.; vec4 r = aRnd; vec3 p;
+  if (kind < .5) {                                              // ── a scale of the moth
+    vec3 hf = flex(aHome, lift, fore);
+    float st = aTim.x - aTim.y, x = clamp((uT - st) / aTim.y, 0., 1.);
+    float e = 1. - pow(1. - pow(x, 1.7), 3.2), k = 1. - e;
+    vec3 q = aOff + .32 * vec3(sin(uT * .31 + r.x * 6.283), sin(uT * .27 + r.y * 6.283), sin(uT * .23 + r.z * 6.283));
+    float ang = (aHome.x < 0. ? -1. : 1.) * (.5 + 1.5 * r.w) * pow(k, 1.4) + .035 * (uT - 10.) * k;
+    float ca = cos(ang), sa = sin(ang); q.xy = vec2(ca * q.x - sa * q.y, sa * q.x + ca * q.y);
+    p = hf + q * k;
+    feat = step(r.x, .04);
+    a *= feat > .5 ? 1. : mix(.5, 1., smoothstep(st - 1., st + .8, uT));
+    lk = k;
+    bright *= 1. + .85 * k * sin(uT * (2.5 + 5. * r.y) + r.z * 40.);          // tumbling scales glint in transit
+    bright *= 1. + .07 * e * sin(uT * 1.7 + r.w * 60.);                        // settled: faint shimmer
+    bright *= (1. + .2 * clamp(lift, -.5, .9)) * fore;                         // a raised wing catches the light
+    bright *= 1. + uGlint * 2.2 * step(.93, fract(r.z + uGSeed));              // chimes: a few scales flash
+    if (kind > .1) bright *= 1. + uEye;                                        // the eye-spots open
+    float tau = uT - aTim.z;
+    if (tau > 0.) {                                             // ── dispersal
+      vec3 dir = normalize(vec3(aHome.x * .9, (aHome.y - .3) * .6 + .12, .15 + 1.3 * (r.x - .4)));
+      p += dir * (.3 + 3.0 * r.y * r.y) * (1. - exp(-2.2 * tau));
+      p += n3(aHome * .5 + vec3(0., 0., 2.7 + .1 * tau)) * 2.0 * tau / (tau + 1.2);
+      p += n3(aHome * 1.7 + 9.1) * .55 * tau / (tau + .6);
+      p.y += .05 * tau * tau;
+      a *= 1. - smoothstep(.5 + r.z, 2.2 + 1.3 * r.z, tau) * (r.w < .12 ? .5 : 1.);
+      bright *= 1. + .8 * exp(-tau * 3.);
+      lk = smoothstep(.3, 1.6, tau);
+    }
+  } else if (kind < 1.5) {                                      // ── shed dust
+    float tau = uT - aTim.z, life = aTim.y;
+    vec3 hf = flex(aHome, lift, fore);
+    p = mix(aHome, hf, exp(-4. * max(tau, 0.)));
+    p += aOff * (1. - exp(-1.5 * tau)) / 1.5 + vec3(0., -.09 * tau - .02 * tau * tau, 0.);
+    p += n3(aHome * .8 + r.xyz * .5 + .15 * tau) * .4 * tau / (tau + 1.);
+    a = smoothstep(0., .3, tau) * (1. - smoothstep(.4 * life, life, tau));
+    bright = 1. + .6 * sin(uT * (4. + 6. * r.y) + r.z * 30.);
+    feat = 1.;
+  } else {                                                      // ── ambient motes
+    p = aHome + aOff * uT + .3 * vec3(sin(uT * .2 + r.x * 6.283), sin(uT * .17 + r.y * 6.283), sin(uT * .13 + r.z * 6.283));
+    a = .5 + .5 * sin(uT * (.6 + r.w) + r.x * 30.);
+    feat = 1.;
+  }
+  bright *= mix(1., lit(p), uBeam * lk);
+  vec4 mv = viewMatrix * vec4(p, 1.);
+  float dist = -mv.z;
+  if (a < .002 || dist < .6) { gl_Position = vec4(3., 3., 3., 1.); return; }
+  float sw = uSize * (.8 + .5 * r.y);
+  float d0 = sw * uPxK / dist;
+  float coc = abs(dist - uFocus) * uAp + uBlur * (.4 + r.w);
+  float dd = clamp(d0 + coc * uPxK / dist, 1.7, 110.);
+  float en = min(1., d0 * d0 / (dd * dd));
+  vBok = smoothstep(5., 15., dd);
+  a *= mix(en, pow(en, .58), feat) * mix(1., .3, vBok);
+  vCol = aCol * (a * bright * uGain);
+  vUv = position.xy;
+  vec4 c = projectionMatrix * mv;
+  c.xy += position.xy * dd / uView * c.w;
+  gl_Position = c;
+}`;
+const FRAG = `
+varying vec3 vCol; varying vec2 vUv; varying float vBok;
+void main(){
+  float d = length(vUv); if (d > 1.) discard;
+  float g = exp(-d * d * 4.5), disc = smoothstep(1., .8, d) * (.7 + .3 * d * d);
+  gl_FragColor = vec4(vCol * mix(g, disc, vBok), 1.);
+}`;
+
+let bg, T3, mat, capSp, capCn, capRule;
+
+Stage.create({
+  no: 62, title: 'Portrait of a Moth', subtitle: 'image → 165k particles · 72 bpm',
+  duration: 20, background: '#060506', grain: 0.06, vignette: 0.28, poster: 12.4,
+  fonts: ['italic 400 46px "Cormorant Garamond Variable"', '500 30px "Cormorant Garamond Variable"'],
+  fade: { in: 1.4, out: 1.3, color: '#040304' },
+  slate: { at: 0.8, hold: 3.2, color: 'rgba(234,220,188,0.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 62 });
+    M.master({ reverb: { decay: 4.6, size: 1.3, damp: 0.5 }, fadeIn: 0.5, fadeOut: 2.6 });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.55, gain: (t) => 0.55 + 0.45 * Math.min(1, t / 10), params: { cutoff: 2600 },
+      lowpass: (t) => 650 + 2100 * Math.min(1, Math.max(0, (t - 3.3) / 6.7)) - 900 * Math.min(1, Math.max(0, (t - 17.2) / 2.5)) });   // the pad opens as the moth assembles, closes as it leaves
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.6 });
+    const glass = M.track('glass', { reverb: 0.6, gain: 0.8, delay: { time: 0.75, fb: 0.3, mix: 0.18 }, params: { R: 0.5, index: 1.5 } });
+    const chime = M.track('chime', { reverb: 0.7, gain: 0.85, delay: { time: 1.5, fb: 0.3, mix: 0.2 } });
+    const thump = M.track('thump', { inst: 'softkick', reverb: 0.4, gain: 0.5, lowpass: 320 });
+    const boom = M.track('impact', { reverb: 0.6, gain: 0.5 });
+    const wh = M.track('whoosh', { reverb: 0.5, gain: 0.85 });
+    const air = M.track('air', { reverb: 0.2, gain: 0.8 });
+    air.hit(0, 0.8, M.beats);
+    // harmony — C#m9 | Amaj9 | F#m9 · G#7sus4 | C#m9 (arrival) | Amaj9 · Badd9 | C#m9 (dispersal)
+    pad.chord(0, 'C#m9', 4, 0.5); pad.chord(4, 'Amaj9', 4, 0.55);
+    pad.chord(8, 'F#m9', 2, 0.6); pad.chord(10, 'G#7sus4', 2, 0.66);
+    pad.chord(12, 'C#m9', 4, 0.74); pad.chord(16, 'Amaj9', 2, 0.72); pad.chord(18, 'Badd9', 2, 0.76);
+    pad.chord(20, 'C#m9', 4, 0.7);
+    sub.note(8, 'F#1', 1.9, 0.45); sub.note(10, 'G#1', 1.9, 0.55);
+    sub.note(12, 'C#1', 3.8, 0.8); sub.note(16, 'A0', 1.9, 0.75); sub.note(18, 'B0', 1.9, 0.8); sub.note(20, 'C#1', 3.6, 0.85);
+    // fluttering tremolo: two notes alternating in 32nds under a hairpin that peaks at `pk` (0..1 through the figure)
+    const trem = (b0, len, n1, n2, peak, pk) => {
+      const st = 0.125, n = Math.round(len / st);
+      for (let k = 0; k < n; k++) { const x = k / (n - 1), h = x < pk ? x / pk : 1 - (x - pk) / (1 - pk + 1e-6); glass.note(b0 + k * st, k % 2 ? n2 : n1, 0.2, peak * (0.18 + 0.82 * Math.pow(Math.max(0, h), 1.4))); }
+    };
+    trem(2.5, 1.25, 'G#5', 'B5', 0.22, 0.6);
+    trem(4.5, 1.5, 'E5', 'G#5', 0.3, 0.6); trem(6.5, 1.5, 'B5', 'C#6', 0.34, 0.6);
+    trem(8.25, 1.5, 'A5', 'C#6', 0.38, 0.6); trem(10, 2, 'G#5', 'C#6', 0.5, 0.98);          // rising into the arrival
+    WB.forEach(([b], i) => trem(b - 1, 1.5, ['G#5', 'E5', 'F#5'][i], ['B5', 'G#5', 'B5'][i], 0.4 + 0.07 * i, 0.66));
+    trem(19, 1, 'G#5', 'D#6', 0.62, 0.99);
+    // chimes: dust glints, a rising line through the assembly, the eyes opening, a falling scatter at the end
+    chime.note(1, 'G#5', 2, 0.3); chime.note(3, 'E5', 2, 0.26);
+    chime.seq(4, 1, ['C#5', null, 'E5', null, 'F#5', 'A5', 'G#5', 'B5'], { vel: 0.36, gate: 2 });
+    chime.chord(12, ['C#5', 'G#5', 'E6'], 4, 0.6, { strum: 0.06 });
+    chime.note(15, 'D#6', 2, 0.34); chime.note(17, 'C#6', 2, 0.34); chime.note(19, 'F#6', 1, 0.3);
+    chime.chord(20, ['C#6', 'G#6'], 4, 0.5, { strum: 0.05 });
+    const pent = S.scale('C#5', 'minorPent', 2), r = S.rng(9);
+    for (let b = 20.5; b < 23.4; b += 0.25) if (r() < 0.6) chime.note(b, pent[Math.max(0, Math.round((1 - (b - 20.5) / 3.2) * (pent.length - 1) - r() * 2))], 1, 0.3 * (1 - (b - 20.5) / 3.6));
+    // wingbeats and the strong beat
+    WB.forEach(([b], i) => thump.hit(b, 0.55 + 0.12 * i, 1));
+    thump.hit(12, 0.5, 1);
+    boom.hit(20, 0.8, 4); wh.hit(18.5, 0.8, 3.2);
+    return M;
+  },
+
+  async setup() {
+    bg = Stage.shader({ frag: BG, z: 0 });
+    // ── sample the photograph
+    const img = await Stage.image('062-moth'), bw = img.naturalWidth, bh = img.naturalHeight;
+    const buf = Stage.buffer(bw, bh); buf.drawImage(img, 0, 0);
+    const px = buf.getImageData(0, 0, bw, bh).data;
+    const lumAt = (x, y) => { const k = (y * bw + x) * 4; return (0.2126 * px[k] + 0.7152 * px[k + 1] + 0.0722 * px[k + 2]) / 255; };
+    let x0 = bw, x1 = 0, y0 = bh, y1 = 0;
+    for (let y = 0; y < bh; y += 2) for (let x = 0; x < bw; x += 2) if (lumAt(x, y) > 0.1) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    const S = 6.4 / (x1 - x0), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const EYES = [[1.66, 0.79, 0.40], [-1.66, 0.79, 0.40], [1.17, -0.51, 0.44], [-1.17, -0.51, 0.44]];
+
+    const home = new Float32Array(N * 3), off = new Float32Array(N * 3), col = new Float32Array(N * 3), rnd = new Float32Array(N * 4), tim = new Float32Array(N * 4);
+    const r = Stage.rng(62), g = () => (r() + r() + r() - 1.5) / 1.5, lin = (v) => Math.pow(v / 255, 2.2);
+    let n = 0;
+    while (n < N_MOTH) {
+      const x = x0 + r() * (x1 - x0), y = y0 + r() * (y1 - y0), xi = x | 0, yi = y | 0, l = lumAt(xi, yi);
+      if (l < 0.045) continue;
+      const w = Math.min(1, 0.2 + Math.pow(l, 0.8)); if (r() > w) continue;
+      const k = (yi * bw + xi) * 4, hx = (x - cx) * S, hy = -(y - cy) * S, hz = 0.12 * l + 0.22 * Math.exp(-(hx * hx) / 0.09) + (r() - 0.5) * 0.03;
+      const v = (0.88 + 0.24 * r()) / w;
+      home.set([hx, hy, hz], n * 3); col.set([lin(px[k]) * v, lin(px[k + 1]) * v, lin(px[k + 2]) * v], n * 3);
+      const rn = Math.min(1, Math.hypot(hx / 3.3, (hy - 0.5) / 1.9));
+      let arrive = Math.min(9.8, 5.3 + 4.1 * Math.pow(rn, 0.85) + (r() - 0.5) * 1.0), dur = 3.2 + 2.2 * r(), eye = 0;
+      // start: the moth blown outward into wisps, scattered in depth
+      const sp = 1.3 + 2.4 * r(), f = 0.42;
+      let ox = hx * sp + 2.4 * Stage.noise3(hx * f, hy * f, 1.7) + 0.7 * g(), oy = (hy - 0.5) * sp + 2.4 * Stage.noise3(hx * f, hy * f, 7.3) + 0.7 * g(), oz = (r() - 0.42) * 7.5;
+      for (const [ex, ey, er] of EYES) {
+        const d = Math.hypot(hx - ex, hy - ey) / er;
+        if (d < 1 && r() < smoothstep(1.0, 0.7, d)) { eye = 1; arrive = T4 - 0.02 - 0.5 * d - 0.05 * r(); dur = 2.3 + 1.3 * r(); const an = r() * TAU, rad = 0.9 + 1.7 * r(); ox = Math.cos(an) * rad; oy = Math.sin(an) * rad; oz = 0.6 + 3.2 * r(); }
+      }
+      off.set([ox, oy, oz], n * 3);
+      rnd.set([r(), r(), r(), r()], n * 4);
+      const release = TD + 0.02 + 0.5 * (1 - rn) + 0.36 * (0.5 + 0.5 * Stage.noise3(hx * 0.8, hy * 0.8, 5.1));
+      tim.set([arrive, dur, release, eye ? 0.25 : 0], n * 4);
+      n++;
+    }
+    // shed dust: copies of moth scales that leave on the wingbeats, in a slow trickle, and in one last burst
+    const wbT = WB.map(([b]) => b * BT);
+    for (let i = 0; i < N_SHED; i++, n++) {
+      const j = (r() * N_MOTH) | 0, hx = home[j * 3], hy = home[j * 3 + 1], hz = home[j * 3 + 2], u = r();
+      let rel, vz = 0.35 + 2.4 * r() * r(), vs = 1;
+      if (u < 0.5) { const q = r(), kk = q < 0.24 ? 0 : q < 0.57 ? 1 : 2; rel = wbT[kk] - 0.05 + 0.5 * Math.pow(r(), 1.5); }
+      else if (u < 0.76) rel = lerp(9.4, 16.3, r());
+      else { rel = TD - 0.02 + 0.5 * r(); vz = 0.8 + 5.5 * r() * r(); vs = 1.8; }
+      home.set([hx, hy, hz], n * 3);
+      off.set([vs * ((hx < 0 ? -1 : 1) * (0.25 + 0.9 * r()) + 0.3 * g()), vs * (r() - 0.35) * 0.8, vz], n * 3);
+      const c0 = [col[j * 3], col[j * 3 + 1], col[j * 3 + 2]], m = Math.max(0.02, c0[0], c0[1], c0[2]), bst = 1.1 + 1.6 * r();
+      col.set([lerp(c0[0] / m, 0.95, 0.5) * bst, lerp(c0[1] / m, 0.78, 0.5) * bst, lerp(c0[2] / m, 0.5, 0.5) * bst], n * 3);
+      rnd.set([r(), r(), r(), r()], n * 4); tim.set([0, 2.6 + 2.4 * r(), rel, 1], n * 4);
+    }
+    // ambient motes, present from the first frame to the last
+    for (let i = 0; i < N_AMB; i++, n++) {
+      home.set([(r() - 0.5) * 22, (r() - 0.5) * 12, (r() - 0.45) * 9], n * 3);
+      off.set([0.05 + 0.06 * r(), 0.02 * g(), 0.03 * g()], n * 3);
+      const warm = r(), b = 0.25 + 0.9 * r() * r();
+      col.set([b * lerp(0.95, 0.9, warm), b * lerp(0.82, 0.55, warm), b * lerp(0.6, 0.2, warm)], n * 3);
+      rnd.set([r(), r(), r(), r()], n * 4); tim.set([0, 0, 0, 2], n * 4);
+    }
+
+    // ── three: instanced quads, additive, bloom
+    T3 = Stage.three({ fov: FOV, antialias: false, bloom: { strength: 0.3, radius: 0.7, threshold: 0.6 }, exposure: 1.0, z: 1, near: 0.2, far: 80 });
+    T3.canvas.style.mixBlendMode = 'screen';
+    T3.renderer.setClearColor(0x000000, 1);
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const ia = (name, arr, sz) => geo.setAttribute(name, new THREE.InstancedBufferAttribute(arr, sz));
+    ia('aHome', home, 3); ia('aOff', off, 3); ia('aCol', col, 3); ia('aRnd', rnd, 4); ia('aTim', tim, 4);
+    geo.instanceCount = N;
+    mat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, transparent: true,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      uniforms: { uT: { value: 0 }, uTh0: { value: 0 }, uTh1: { value: 0 }, uFocus: { value: 10 }, uAp: { value: 0.022 }, uBlur: { value: 0 }, uBeam: { value: 0 }, uGain: { value: 1 },
+        uSize: { value: 0.0165 }, uPxK: { value: PXK }, uEye: { value: 0 }, uGlint: { value: 0 }, uGSeed: { value: 0 }, uView: { value: new THREE.Vector2(1920, 1080) } }
+    });
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; T3.scene.add(mesh);
+
+    capSp = Stage.split(document.querySelector('#cap .sp'), 'chars');
+    capCn = Stage.split(document.querySelector('#cap .cn'), 'chars');
+    capRule = document.querySelector('#cap .rule');
+  },
+
+  frame(t) {
+    const formed = smoothstep(4.5, 10.2, t) * (1 - smoothstep(TD, TD + 2.2, t));
+    const chimeHit = Stage.hit('chime', t, 0.7), thumpHit = Stage.hit('thump', t, 0.45), boomHit = Stage.hit('impact', t, 1.2);
+    const beam = Math.max(1 - E.inOutSine(prog(t, 3.0, 5.2)), 0.94 * E.inOutSine(prog(t, 17.0, 1.8)));
+
+    // camera: one slow push-in through the assembly and the portrait, easing back as the dust leaves
+    const cam = T3.camera;
+    const z = 12.2 - 2.75 * E.inOutSine(prog(t, 0, 10.6)) - 0.6 * E.inOutSine(prog(t, 10, 6.7)) + 1.5 * E.inOutCubic(prog(t, 16.4, 3.6));
+    cam.position.set(0.6 * Math.sin(t * 0.19 + 0.6), 0.08 + 0.32 * Math.sin(t * 0.23 + 2.0), z);
+    cam.lookAt(0, -0.13, 0);
+    cam.updateMatrixWorld();
+    bg.draw(t, { uGlow: formed, uPulse: 0.6 * thumpHit + 0.5 * chimeHit + boomHit, uBeam: beam, uSpan: 2 * cam.position.length() * Math.tan(FOV * Math.PI / 360) });
+
+    const u = mat.uniforms;
+    u.uT.value = t; u.uTh0.value = wing(t); u.uTh1.value = wing(t - 0.07);
+    u.uFocus.value = cam.position.length();
+    u.uBeam.value = beam;
+    u.uBlur.value = 0.04 * (1 - E.inOutSine(prog(t, 1.2, 7.2))) + 0.05 * E.inQuad(prog(t, TD + 0.4, 2.9));   // focus pull in, drift out
+    u.uGain.value = 0.8 * (1 + 0.1 * thumpHit + 0.22 * boomHit);
+    u.uEye.value = 1.15 * Math.exp(-Math.max(0, t - T4) / 0.8) * smoothstep(T4 - 0.25, T4, t);
+    u.uGlint.value = chimeHit; u.uGSeed.value = Stage.count('chime', t) * 0.377;
+    T3.render();
+
+    // caption: a specimen label that arrives after the moth and leaves before it does
+    const show = (els, t0, gap) => els.forEach((ch, i) => {
+      const a = prog(t, t0 + i * gap, 1.0, E.outQuart), out = prog(t, 15.5 + i * 0.012, 0.9, E.inCubic), v = a * (1 - out);
+      ch.style.opacity = v.toFixed(3);
+      ch.style.transform = `translateY(${((1 - a) * 16 - out * 8).toFixed(2)}px)`;
+      ch.style.filter = v > 0.995 ? 'none' : `blur(${((1 - a) * 6 + out * 5).toFixed(2)}px)`;
+    });
+    show(capSp, 10.5, 0.04); show(capCn, 11.2, 0.035);
+    const ra = prog(t, 11.0, 0.9, E.outExpo) * (1 - prog(t, 15.6, 0.8, E.inCubic));
+    capRule.style.transform = `scaleX(${ra.toFixed(3)})`; capRule.style.opacity = (0.8 * ra).toFixed(3);
+  }
+});
+</script>
+</body>
+</html>

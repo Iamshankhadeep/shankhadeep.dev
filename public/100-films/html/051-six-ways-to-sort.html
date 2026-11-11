@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 051 — Six Ways to Sort</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 051 — SIX WAYS TO SORT
+ * Six sorting algorithms race on the same shuffled data, and every comparison is a note.
+ * The sorts are run once, up front; every operation is recorded with the state it leaves behind, then replayed
+ * at one common rate, so the fast algorithms really do finish first. The score is generated from the same
+ * recording (pitch = the value being touched). Twelve bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, N = 48, T0 = 2.0, T_END = 15.4, SWEEP = 22, CHART = 16.4;
+const ramp = Stage.color.ramp(['#4a2148', '#8f3a5e', '#d8604e', '#f0a26e', '#f6e6c8']);
+const RUN = record();
+let ctx;
+
+function record() {
+  const r = Stage.rng(51), base = Array.from({ length: N }, (_, i) => i); for (let i = N - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [base[i], base[j]] = [base[j], base[i]]; }
+  const run = (name, fn) => { const a = base.slice(), ops = []; const snap = (i, j) => ops.push({ i, j, s: Uint8Array.from(a) }); const cmp = (i, j) => { snap(i, j); return a[i] - a[j]; }, swap = (i, j) => { [a[i], a[j]] = [a[j], a[i]]; snap(i, j); }, set = (i, v) => { a[i] = v; snap(i, i); }; fn(a, cmp, swap, set); return { name, ops }; };
+  const algos = [
+    run('BUBBLE', (a, cmp, swap) => { for (let n = N; n > 1; n--) { let sw = false; for (let i = 0; i < n - 1; i++) if (cmp(i, i + 1) > 0) { swap(i, i + 1); sw = true; } if (!sw) break; } }),
+    run('INSERTION', (a, cmp, swap) => { for (let i = 1; i < N; i++) for (let j = i; j > 0 && cmp(j - 1, j) > 0; j--) swap(j - 1, j); }),
+    run('SHELL', (a, cmp, swap) => { for (const g of [23, 10, 4, 1]) for (let i = g; i < N; i++) for (let j = i; j >= g && cmp(j - g, j) > 0; j -= g) swap(j - g, j); }),
+    run('MERGE', (a, cmp, swap, set) => { const ms = (lo, hi) => { if (hi - lo < 2) return; const mid = (lo + hi) >> 1; ms(lo, mid); ms(mid, hi); const L = a.slice(lo, mid), R = a.slice(mid, hi); let i = 0, j = 0, k = lo; while (i < L.length && j < R.length) { cmp(lo + i, mid + j); set(k++, L[i] <= R[j] ? L[i++] : R[j++]); } while (i < L.length) set(k++, L[i++]); while (j < R.length) set(k++, R[j++]); }; ms(0, N); }),
+    run('HEAP', (a, cmp, swap) => { const sift = (i, n) => { for (;;) { let m = i; const l = 2 * i + 1, rr = l + 1; if (l < n && cmp(l, m) > 0) m = l; if (rr < n && cmp(rr, m) > 0) m = rr; if (m === i) return; swap(i, m); i = m; } }; for (let i = (N >> 1) - 1; i >= 0; i--) sift(i, N); for (let n = N - 1; n > 0; n--) { swap(0, n); sift(0, n); } }),
+    run('QUICK', (a, cmp, swap) => { const qs = (lo, hi) => { if (lo >= hi) return; let p = lo; for (let i = lo; i < hi; i++) if (cmp(i, hi) < 0) { if (i !== p) swap(i, p); p++; } if (p !== hi) swap(p, hi); qs(lo, p - 1); qs(p + 1, hi); }; qs(0, N - 1); })
+  ];
+  const max = Math.max(...algos.map((a) => a.ops.length)), rate = max / (T_END - T0);
+  algos.forEach((a) => { a.done = T0 + a.ops.length / rate; });
+  return { algos, base, rate };
+}
+
+Stage.create({
+  no: 51, title: 'Six Ways to Sort', subtitle: 'every comparison is a note · 120 bpm',
+  duration: 24, background: '#15171c', grain: 0.045, poster: 9.5,
+  fonts: ['500 18px "JetBrains Mono Variable"', '500 14px "JetBrains Mono Variable"'],
+  slate: { at: 0.4, hold: 1.5, pos: 'bc' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 24, seed: 51 });
+    M.master({ reverb: { decay: 1.8, size: 0.9, damp: 0.45 }, fadeOut: 1.6 });
+    const mar = [M.track('m0', { inst: 'marimba', reverb: 0.3, gain: 0.8, pan: -0.5 }), M.track('m1', { inst: 'marimba', reverb: 0.3, gain: 0.8, pan: 0 }), M.track('m2', { inst: 'pluck', reverb: 0.3, gain: 0.9, pan: 0.5, params: { decay: 0.8, bright: 0.6 } })];
+    const pad = M.track('warmpad', { reverb: 0.5, gain: 0.5 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.7 }), sub = M.track('sub', { reverb: 0.05, gain: 0.45 }), ch = M.track('celesta', { reverb: 0.5, gain: 0.8 }), sh = M.track('shaker', { reverb: 0.1, gain: 0.3 });
+    const sc = S.scale('C3', 'pentatonic', 4), pitch = (v) => sc[Math.round(v / (N - 1) * (sc.length - 1))];
+    // one sixteenth-note slot at a time, each panel column takes its turn: the op in progress there becomes a note
+    for (let slot = 0; slot < (T_END - T0) / 0.125; slot++) {
+      const t = T0 + slot * 0.125;
+      for (let col = 0; col < 3; col++) { if ((slot + col) % 3 !== 0 && slot % 2) continue; const a = RUN.algos[col + 3 * ((slot >> 1) % 2)]; const k = Math.floor((t - T0) * RUN.rate); if (k >= a.ops.length) continue; const op = a.ops[k]; mar[col].note(M.b(t), pitch(op.s[op.i]), 0.3, 0.38 + 0.25 * (slot % 4 === 0)); }
+    }
+    RUN.algos.forEach((a, i) => { const b = M.b(a.done); [0, 4, 7, 12].forEach((d, k) => ch.note(b + k * 0.125, 72 + d + (i % 2) * 2, 1, 0.6)); });
+    const prog = ['C', 'Am7', 'Fmaj7', 'G6'], rt = ['C2', 'A1', 'F1', 'G1'];
+    for (let bar = 0; bar < 12; bar++) { const b = bar * 4; pad.chord(b, prog[bar % 4], 4, 0.5, { octave: 3 }); if (bar >= 1 && bar < 11) { kick.pattern(b, 1, 'x.x.', { vel: 0.8 }); sub.note(b, rt[bar % 4], 3.5, 0.6); sh.pattern(b, 0.5, '.x.x.x.x', { vel: 0.5 }); } }
+    // the tally: one note as each result lands, fastest first
+    RUN.algos.slice().sort((a, b) => a.ops.length - b.ops.length).forEach((a, k) => { ch.note(M.b(CHART + 0.5 + k * 0.5), sc[8 + k * 2], 1.5, 0.6); mar[k % 3].note(M.b(CHART + 0.5 + k * 0.5), sc[4 + k * 2], 0.5, 0.6); });
+    // the final sweep: every panel as a rising scale
+    for (let k = 0; k < 24; k++) { const b = M.b(SWEEP) + k * (3 / 24); mar[k % 3].note(b, sc[Math.round(k / 23 * (sc.length - 1))], 0.4, 0.6); }
+    ch.chord(M.b(SWEEP) + 3.2, ['C5', 'E5', 'G5', 'C6'], 3, 0.6, { strum: 0.05 });
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const PW = 540, PH = 330, GX = 60, GY = 110, X0 = (W - 3 * PW - 2 * GX) / 2, Y0 = 118;
+    const k = Math.max(0, Math.floor((t - T0) * RUN.rate)), sweep = prog(t, SWEEP, 1.5);
+    RUN.algos.forEach((a, idx) => {
+      const col = idx % 3, row = (idx / 3) | 0, x0 = X0 + col * (PW + GX), y0 = Y0 + row * (PH + GY), inn = prog(t, 0.3 + idx * 0.12, 0.9, E.outCubic);
+      const fin = k >= a.ops.length, op = fin ? null : (t >= T0 ? a.ops[k] : null), st = t < T0 ? RUN.base : (fin ? a.ops[a.ops.length - 1].s : op.s);
+      const since = t - a.done, glow = fin ? Math.exp(-Math.max(0, since) * 1.6) : 0;
+      // panel
+      c.fillStyle = `rgba(255,255,255,${0.035 + 0.05 * glow})`; c.beginPath(); c.roundRect(x0 - 18, y0 - 18, PW + 36, PH + 78, 10); c.fill();
+      const bw = PW / N;
+      for (let i = 0; i < N; i++) {
+        const v = st[i], h = (PH - 10) * (0.06 + 0.94 * v / (N - 1)) * inn, active = op && (i === op.i || i === op.j), sw = sweep > 0 && Math.abs(i - sweep * (N + 4) + 2) < 2.5;
+        c.fillStyle = active || sw ? '#fbf3e2' : ramp(v / (N - 1)); c.fillRect(x0 + i * bw + 1, y0 + PH - h, bw - 2, h);
+        if (active) { c.fillStyle = 'rgba(251,243,226,.16)'; c.fillRect(x0 + i * bw + 1, y0, bw - 2, PH - h); }
+      }
+      // label, counter, progress line, check mark
+      c.textBaseline = 'alphabetic'; c.textAlign = 'left'; c.font = '500 18px "JetBrains Mono Variable"'; c.fillStyle = `rgba(246,230,200,${0.92 * inn})`; c.fillText(a.name.split('').join(' '), x0, y0 + PH + 38);
+      c.textAlign = 'right'; c.font = '500 14px "JetBrains Mono Variable"'; c.fillStyle = `rgba(246,230,200,${0.5 * inn})`; c.fillText(String(Math.min(k, a.ops.length)).padStart(4, ' ') + ' OPS', x0 + PW - (fin ? 34 : 0), y0 + PH + 37);
+      c.fillStyle = 'rgba(246,230,200,.14)'; c.fillRect(x0, y0 + PH + 12, PW, 2); c.fillStyle = fin ? '#f0a26e' : 'rgba(246,230,200,.75)'; c.fillRect(x0, y0 + PH + 12, PW * clamp01(k / a.ops.length) * (t >= T0 ? 1 : 0), 2);
+      if (fin) { const e = prog(since, 0, 0.4, E.outBack); c.strokeStyle = '#f0a26e'; c.lineWidth = 3; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); const cx = x0 + PW - 14, cy = y0 + PH + 31; c.moveTo(cx - 9 * e, cy - 1); c.lineTo(cx - 3 * e, cy + 5 * e); c.lineTo(cx + 9 * e, cy - 8 * e); c.stroke(); }
+    });
+    // ── the tally (bars 9–11): operations each algorithm needed, fastest first
+    const ca = win(t, CHART, SWEEP - 0.5, 0.7, 0.6, E.inOutCubic);
+    if (ca > 0) {
+      c.fillStyle = `rgba(21,23,28,${0.88 * ca})`; c.fillRect(0, 0, W, H);
+      const rank = RUN.algos.slice().sort((a, b) => a.ops.length - b.ops.length), max = rank[5].ops.length, bx = 560, by = 250, bh = 58, gap = 40;
+      c.textBaseline = 'middle'; c.font = '500 18px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.fillStyle = `rgba(246,230,200,${0.55 * ca})`; c.fillText('O P E R A T I O N S   T O   S O R T   4 8   V A L U E S', bx - 230, by - 70);
+      rank.forEach((a, k) => {
+        const e = prog(t, CHART + 0.5 + k * 0.5, 0.9, E.outExpo) * ca, y = by + k * (bh + gap), w = 1000 * a.ops.length / max * e;
+        c.fillStyle = `rgba(246,230,200,${0.9 * Math.min(1, e * 3) * ca})`; c.textAlign = 'right'; c.fillText(a.name.split('').join(' '), bx - 30, y + bh / 2);
+        const g = c.createLinearGradient(bx, 0, bx + 1000, 0); g.addColorStop(0, '#8f3a5e'); g.addColorStop(0.5, '#d8604e'); g.addColorStop(1, '#f6e6c8'); c.globalAlpha = ca; c.fillStyle = g; c.fillRect(bx, y, w, bh); c.globalAlpha = 1;
+        c.textAlign = 'left'; c.fillStyle = `rgba(246,230,200,${Math.min(1, e * 3) * ca})`; c.fillText(String(Math.round(a.ops.length * e)).padStart(4, ' '), bx + w + 22, y + bh / 2);
+      });
+    }
+    // heading
+    const ha = prog(t, 0.2, 0.9, E.outCubic); c.textAlign = 'left'; c.font = '500 18px "JetBrains Mono Variable"'; c.fillStyle = `rgba(246,230,200,${0.55 * ha})`; c.fillText('4 8   V A L U E S   ·   O N E   S H U F F L E   ·   S I X   A L G O R I T H M S', X0, 62);
+    c.textAlign = 'right'; if (ca < 0.5) c.fillText(t < T0 ? 'R E A D Y' : t < T_END ? 'S O R T I N G' : 'S O R T E D', W - X0, 62);
+  }
+});
+</script>
+</body>
+</html>

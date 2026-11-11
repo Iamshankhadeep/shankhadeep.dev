@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 018 — Penrose</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 018 — PENROSE
+ * Order without repetition: a decagon of ten triangles is subdivided five times by the golden ratio into the
+ * thick and thin rhombs of a Penrose tiling. Each deflation step first scores its cut lines, then the new pieces
+ * take their colours and settle. Nine bars at 108 bpm (2.22 s); the view slowly pulls back so the pattern,
+ * finer at every step, grows to fill the frame. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 108, PHI = (1 + Math.sqrt(5)) / 2, CX = 960, CY = 540;
+const TERRA = '#c9613a', TEAL = '#1e7775', CREAM = '#f4ecdb', GROUND = '#ece2cf';
+const STEP_T = [BAR * 1.0, BAR * 2.35, BAR * 3.7, BAR * 5.05, BAR * 6.4], STEP_D = 2.4, FIN = BAR * 7.75;
+let ctx, gens = [];
+
+function subdivide(tris) {
+  const out = [];
+  for (const [col, A, B, C] of tris) {
+    if (col === 0) { const P = [A[0] + (B[0] - A[0]) / PHI, A[1] + (B[1] - A[1]) / PHI]; out.push([0, C, P, B, col], [1, P, C, A, col]); }
+    else { const Q = [B[0] + (A[0] - B[0]) / PHI, B[1] + (A[1] - B[1]) / PHI], R = [B[0] + (C[0] - B[0]) / PHI, B[1] + (C[1] - B[1]) / PHI]; out.push([1, R, C, A, col], [1, Q, R, B, col], [0, R, Q, A, col]); }
+  }
+  return out;
+}
+
+Stage.create({
+  no: 18, title: 'Penrose', subtitle: 'deflation · canvas 2d · 108 bpm',
+  duration: 20, background: GROUND, grain: 0.055, poster: 18.6,
+  fade: { in: 0.8, out: 1.0, color: GROUND },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(60,40,30,.86)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 18 });
+    M.master({ reverb: { decay: 2.6, size: 1.0, damp: 0.4 }, fadeOut: 1.8 });
+    const vib = M.track('vibes', { reverb: 0.45, gain: 0.9 }), plk = M.track('pluck', { reverb: 0.35, gain: 1.1, pan: 0.2, delay: { time: 0.75, fb: 0.25, mix: 0.18 } });
+    const br = M.track('brush', { reverb: 0.2, gain: 0.7 }), rim = M.track('rim', { reverb: 0.25, gain: 0.6 }), bass = M.track('bass', { reverb: 0.05, gain: 0.7, params: { cutoff: 420, envAmt: 1.5 } });
+    const tick = M.track('tick', { reverb: 0.3, gain: 0.7, params: { tone: 1400 } }), ch = M.track('chime', { reverb: 0.7, gain: 0.55 });
+    // F lydian (F G A B C D E). Chords struck in groups of five eighths against the bar.
+    const chords = [['F3', 'A3', 'C4', 'E4'], ['G3', 'B3', 'D4', 'F4'], ['A3', 'C4', 'E4', 'G4'], ['G3', 'B3', 'D4', 'E4']];
+    for (let k = 0; k * 2.5 < 31; k++) { const b = 2 + k * 2.5; vib.chord(b, chords[k % 4], 2.2, k % 2 ? 0.45 : 0.6, { strum: 0.03 }); }
+    const mel = ['C5', null, 'E5', 'B4', null, 'D5', 'A4', null, 'G4', null, 'B4', 'C5', null, 'E5', null, null];
+    for (let bar = 1; bar < 8; bar++) { const b = bar * 4; plk.seq(b, 0.5, mel.slice(bar % 2 ? 0 : 8, bar % 2 ? 8 : 16).map((n) => n && (bar >= 5 ? S.midi(n) + 12 : n)), { vel: 0.6, gate: 1.4 }); br.pattern(b, 0.5, 'x.xxx.x.', { vel: 0.5 }); if (bar >= 3) rim.pattern(b, 0.5, '..x....x', { vel: 0.5 }); bass.note(b, ['F1', 'G1', 'A1', 'G1'][bar % 4], 1.5, 0.8); bass.note(b + 2.5, ['F1', 'G1', 'A1', 'G1'][bar % 4], 1, 0.6); }
+    STEP_T.forEach((t) => { tick.hit(M.b(t), 0.9); tick.hit(M.b(t) + 0.25, 0.5); });
+    ch.note(M.b(FIN), 'F5', 3, 0.6); ch.note(M.b(FIN) + 0.5, 'C6', 3, 0.5); ch.note(M.b(FIN) + 1, 'E6', 3, 0.45);
+    vib.chord(32, ['F3', 'C4', 'E4', 'A4', 'B4'], 4, 0.6, { strum: 0.08 }); bass.note(32, 'F1', 4, 0.9);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    let tris = [];
+    for (let i = 0; i < 10; i++) { let B = [Math.cos((2 * i - 1) * Math.PI / 10), Math.sin((2 * i - 1) * Math.PI / 10)], C = [Math.cos((2 * i + 1) * Math.PI / 10), Math.sin((2 * i + 1) * Math.PI / 10)]; if (i % 2 === 0) [B, C] = [C, B]; tris.push([0, [0, 0], B, C, 0]); }
+    gens.push(tris); for (let g = 0; g < 5; g++) { tris = subdivide(tris); gens.push(tris); }
+  },
+
+  frame(t) {
+    const c = ctx; c.fillStyle = GROUND; c.fillRect(0, 0, W, H);
+    // which generation, and how far into the current step
+    let g = 0, e = 1; for (let k = 0; k < 5; k++) if (t >= STEP_T[k]) { g = k + 1; e = clamp01((t - STEP_T[k]) / STEP_D); }
+    const gCont = g === 0 ? 0 : g - 1 + E.inOutCubic(e);
+    const scale = 370 * Math.pow(1.262, gCont) * (1 + 0.03 * prog(t, FIN, 3, E.inOutSine)), rot = -Math.PI / 2 + 0.05 * Math.sin(t * 0.2) + 0.012 * t;
+    c.save(); c.translate(CX, CY); c.rotate(rot); c.scale(scale, scale);
+    const lw = 3.0 / scale, tris = gens[g];
+    const cut = prog(e, 0, 0.42, E.inOutCubic), turn = prog(e, 0.30, 0.70, E.inOutCubic);
+    const shade = prog(t, FIN, 1.6, E.inOutCubic);
+    c.lineJoin = 'round'; c.lineCap = 'round';
+    const intro = g === 0;
+    tris.forEach(([col, A, B, C, pcol], i) => {
+      const mx = (A[0] + B[0] + C[0]) / 3, my = (A[1] + B[1] + C[1]) / 3, r = Math.hypot(mx, my);
+      // pieces settle in a ripple from the centre outwards
+      const te = g === 0 ? prog(t, 0.5 + i * 0.09, 0.7, E.outBack) : clamp01(turn * 1.5 - r * 0.5), ee = E.inOutCubic(clamp01(te));
+      let fill = g === 0 ? TERRA : Stage.color.mix(pcol ? TEAL : TERRA, col ? TEAL : TERRA, ee);
+      if (shade > 0) { const ang = Math.atan2(B[1] + C[1] - 2 * A[1], B[0] + C[0] - 2 * A[0]), k = Math.round(((ang + TAU) % TAU) / (TAU / 10)) % 5; fill = Stage.color.mix(fill, k % 2 ? '#2a2420' : CREAM, shade * (0.10 + 0.07 * (k % 3))); }
+      const s = g === 0 ? clamp01(te) : 1 - 0.085 * Math.sin(Math.PI * clamp01(te));
+      const px = (P) => [mx + (P[0] - mx) * s, my + (P[1] - my) * s], a = px(A), b = px(B), cc = px(C);
+      if (g === 0 && te <= 0) return;
+      c.fillStyle = fill; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(cc[0], cc[1]); c.closePath(); c.fill();
+      c.strokeStyle = fill; c.lineWidth = lw * 0.5; c.stroke();                         // close hairline seams between the two halves of a rhomb
+    });
+    // cream gaps: outline the two outer edges of every half-rhomb (C–A and A–B)
+    c.strokeStyle = CREAM; c.lineWidth = lw;
+    if (g > 0 && e < 1) {       // new cut lines score themselves across the old tiles
+      c.globalAlpha = 1; c.beginPath();
+      for (const [col, A, B, C] of gens[g - 1]) { c.moveTo(C[0], C[1]); c.lineTo(A[0], A[1]); c.lineTo(B[0], B[1]); }
+      c.stroke();
+      c.beginPath();
+      for (const [col, A, B, C] of tris) { const r = Math.hypot(A[0], A[1]), u = clamp01(cut * 1.6 - r * 0.6); if (u <= 0) continue; c.moveTo(lerp(A[0], C[0], u), lerp(A[1], C[1], u)); c.lineTo(A[0], A[1]); c.lineTo(lerp(A[0], B[0], u), lerp(A[1], B[1], u)); }
+      c.stroke();
+    } else {
+      c.beginPath(); for (const [col, A, B, C] of tris) { c.moveTo(C[0], C[1]); c.lineTo(A[0], A[1]); c.lineTo(B[0], B[1]); } c.globalAlpha = g === 0 ? prog(t, 1.2, 0.8) : 1; c.stroke(); c.globalAlpha = 1;
+    }
+    c.restore();
+    // soft paper vignette
+    const v = c.createRadialGradient(CX, CY, 420, CX, CY, 1150); v.addColorStop(0, 'rgba(70,40,20,0)'); v.addColorStop(1, 'rgba(70,40,20,.22)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 033 — Ribbon Dance</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 033 — RIBBON DANCE
+ * Three silk ribbons waltzing (three.js, custom strip geometry rebuilt every frame from a closed-form path).
+ * Each ribbon is a moving window on an endless looping curve, so the cloth flows along its own length;
+ * for two bars the three paths are pulled into a shared braid around the centre. Ten bars of 3/4 at 90 bpm (2 s). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 2, SEG = 520, TAU = Math.PI * 2;
+const RIB = [
+  { col: '#ee6a52', sheen: '#ffd0c4', enter: 0.3, w: 0.44, len: 5.4, sp: 0.62, A: [3.3, 1.5, 1.3], f: [1.0, 1.7, 1.3], ph: [0.0, 1.2, 2.1], dir: 1, tw: 1.3 },
+  { col: '#f4ab84', sheen: '#fff0e0', enter: BAR * 2, w: 0.38, len: 5.0, sp: 0.66, A: [3.0, 1.7, 1.5], f: [1.0, 1.4, 1.9], ph: [2.6, 0.3, 4.0], dir: -1, tw: 1.7 },
+  { col: '#f3e3cb', sheen: '#ffffff', enter: BAR * 4, w: 0.34, len: 4.6, sp: 0.7, A: [2.7, 1.3, 1.7], f: [1.0, 2.1, 1.5], ph: [4.4, 3.1, 0.7], dir: 1, tw: 2.1 }
+];
+let T3;
+
+function pathAt(r, u, braid, k, t) {
+  // free path: a Lissajous-like loop
+  const x = r.A[0] * Math.sin(r.f[0] * u + r.ph[0]), y = r.A[1] * Math.sin(r.f[1] * u + r.ph[1]) + 0.25 * Math.sin(u * 3.1 + k), z = r.A[2] * Math.sin(r.f[2] * u + r.ph[2]);
+  if (braid <= 0) return [x, y, z];
+  // braid: three strands spiralling round a slowly tilting axis
+  const a = u * 2.2 * r.dir + k * TAU / 3, rad = 0.78 + 0.18 * Math.sin(u * 1.3), bx = 3.4 * Math.sin(u * 0.9 * r.dir + k * 0.5), by = rad * Math.cos(a) + 0.5 * Math.sin(u * 0.9), bz = rad * Math.sin(a);
+  return [lerp(x, bx, braid), lerp(y, by, braid), lerp(z, bz, braid)];
+}
+
+Stage.create({
+  no: 33, title: 'Ribbon Dance', subtitle: 'three.js · a waltz in 3/4 · 90 bpm',
+  duration: 20, background: '#b9afa6', grain: 0.05, poster: 13.4, vignette: 0.3,
+  fade: { in: 1.0, out: 1.6, color: '#c9c0b7' },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(52,40,36,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 20, seed: 33, meter: 3 });
+    M.master({ reverb: { decay: 3.2, size: 1.15, damp: 0.4 }, fadeOut: 2.2 });
+    const str = M.track('strings', { reverb: 0.55, gain: 0.95, params: { cutoff: 3400, A: 0.25, R: 0.9 } }), harp = M.track('harp', { reverb: 0.5, gain: 0.9 });
+    const bass = M.track('pluck', { reverb: 0.3, gain: 1.3, params: { decay: 2.2, bright: 0.35, damp: 0.6 } }), sub = M.track('sub', { reverb: 0.05, gain: 0.45 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.45 });
+    const cel = M.track('celesta', { reverb: 0.6, gain: 0.5 });
+    // A major waltz: A — F#m — D — E | A — C#m — D E — A   (one chord per bar, the last two bars cadence)
+    const prog = ['A', 'F#m', 'D', 'E', 'A', 'C#m', 'D', 'E7', 'A', 'A'], roots = ['A1', 'F#1', 'D2', 'E2', 'A1', 'C#2', 'D2', 'E2', 'A1', 'A1'];
+    const mel = [['E5', 3], ['C#5', 1.5, 'E5', 1.5], ['F#5', 2, 'A5', 1], ['G#5', 3], ['A5', 2, 'C#6', 1], ['E6', 1.5, 'C#6', 1.5], ['A5', 1, 'F#5', 1, 'A5', 1], ['G#5', 2, 'B5', 1], ['A5', 3], []];
+    prog.forEach((c, i) => {
+      const b = i * 3, n = S.chord(c, 3);
+      bass.note(b, roots[i], 2.6, 0.85); sub.note(b, roots[i], 2.6, 0.6);
+      if (i < 9) { harp.chord(b + 1, [n[1] + 12, n[2] + 12, n[0] + 24], 0.9, 0.45, { strum: 0.04 }); harp.chord(b + 2, [n[1] + 12, n[2] + 12, n[0] + 24], 0.9, 0.38, { strum: 0.04 }); }
+      pad.chord(b, c, 3, 0.5, { octave: 3 });
+      let q = b; const m = mel[i]; for (let j = 0; j < m.length; j += 2) { str.note(q, m[j], m[j + 1] * 0.96, i >= 6 ? 0.72 : 0.58); if (i >= 6 && i < 9) str.note(q, S.midi(m[j]) - 12, m[j + 1] * 0.96, 0.4); q += m[j + 1]; }
+    });
+    harp.arp(27, ['A3', 'E4', 'A4', 'C#5', 'E5', 'A5'], 0.25, 1.5, { vel: 0.5 }); cel.note(27, 'A6', 3, 0.5); cel.note(18, 'E6', 2, 0.4);
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ fov: 30, bloom: { strength: 0.1, radius: 0.6, threshold: 0.95 }, exposure: 1.0, z: 1 });
+    const { scene, renderer, camera } = T3;
+    const bg = Stage.buffer(64, 512), g = bg.createLinearGradient(0, 0, 0, 512); g.addColorStop(0, '#cfc6bd'); g.addColorStop(0.55, '#b8aea5'); g.addColorStop(1, '#948a82'); bg.fillStyle = g; bg.fillRect(0, 0, 64, 512);
+    const bt = new T.CanvasTexture(bg.canvas); bt.colorSpace = T.SRGBColorSpace; scene.background = bt;
+    scene.fog = new T.Fog('#b4aaa1', 13, 26);
+    const pm = new T.PMREMGenerator(renderer); scene.environment = pm.fromScene(new T.RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.5;
+    scene.add(new T.HemisphereLight('#fff6ec', '#7b6f66', 0.9));
+    const key = new T.DirectionalLight('#fff1e2', 2.6); key.position.set(-5, 8, 7); scene.add(key);
+    const rim = new T.DirectionalLight('#ffd9c8', 1.2); rim.position.set(6, 2, -6); scene.add(rim);
+    RIB.forEach((r) => {
+      const geo = new T.BufferGeometry(), n = (SEG + 1) * 2;
+      r.pos = new Float32Array(n * 3); r.nor = new Float32Array(n * 3); const uv = new Float32Array(n * 2), idx = [];
+      for (let i = 0; i <= SEG; i++) { uv[i * 4] = i / SEG; uv[i * 4 + 1] = 0; uv[i * 4 + 2] = i / SEG; uv[i * 4 + 3] = 1; if (i < SEG) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
+      geo.setAttribute('position', new T.BufferAttribute(r.pos, 3)); geo.setAttribute('normal', new T.BufferAttribute(r.nor, 3)); geo.setAttribute('uv', new T.BufferAttribute(uv, 2)); geo.setIndex(idx);
+      r.mesh = new T.Mesh(geo, new T.MeshPhysicalMaterial({ color: r.col, side: T.DoubleSide, roughness: 0.42, metalness: 0.0, sheen: 1, sheenColor: r.sheen, sheenRoughness: 0.35, clearcoat: 0.15, clearcoatRoughness: 0.5 }));
+      r.mesh.frustumCulled = false; scene.add(r.mesh);
+    });
+    camera.position.set(0, 0.4, 13.5);
+  },
+
+  frame(t) {
+    const { camera } = T3;
+    const braid = win(t, BAR * 5.6, BAR * 8.2, 1.6, 1.5, E.inOutSine), leave = prog(t, BAR * 8.1, 3.0, E.inCubic);
+    RIB.forEach((r, k) => {
+      const age = t - r.enter, vis = prog(age, 0, 2.6, E.outCubic), head = (t * r.sp + k * 2.1) * r.dir;
+      // the last two ribbons sweep out of frame; the first settles
+      const out = k === 0 ? 0 : leave, slow = k === 0 ? 1 - 0.55 * prog(t, BAR * 8.5, 3, E.inOutSine) : 1;
+      const p = r.pos, nn = r.nor; let prevN = null;
+      for (let i = 0; i <= SEG; i++) {
+        const s = i / SEG, u = head * slow - s * r.len * r.dir * (0.2 + 0.8 * vis), e = 0.004;
+        const a = pathAt(r, u, braid, k, t), b = pathAt(r, u + e, braid, k, t);
+        let tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+        // a frame that turns smoothly along the ribbon: reference normal from a slowly rotating up vector, plus twist and a travelling ripple
+        let ux = 0.25 * Math.sin(u * 0.7), uy = 1, uz = 0.35 * Math.cos(u * 0.5);
+        let nx = ty * uz - tz * uy, ny = tz * ux - tx * uz, nz = tx * uy - ty * ux; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+        const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+        const tw = r.tw * u + 0.5 * Math.sin(u * 2.3 + t), c = Math.cos(tw), sn = Math.sin(tw);
+        const wx = nx * c + bx * sn, wy = ny * c + by * sn, wz = nz * c + bz * sn;          // across the cloth
+        const fx = bx * c - nx * sn, fy = by * c - ny * sn, fz = bz * c - nz * sn;          // face normal
+        const rip = 0.05 * Math.sin(u * 9 - t * 4) * (1 - braid * 0.5), taper = Math.min(1, s * 14, (1 - s) * 9), hw = r.w * (0.25 + 0.75 * taper);
+        const ox = out * (k === 1 ? -16 : 16), oy = out * (k === 1 ? 5 : -4);
+        const cx = a[0] + fx * rip + ox, cy = a[1] + fy * rip + oy, cz = a[2] + fz * rip;
+        const j = i * 6; p[j] = cx - wx * hw; p[j + 1] = cy - wy * hw; p[j + 2] = cz - wz * hw; p[j + 3] = cx + wx * hw; p[j + 4] = cy + wy * hw; p[j + 5] = cz + wz * hw;
+        nn[j] = fx; nn[j + 1] = fy; nn[j + 2] = fz; nn[j + 3] = fx; nn[j + 4] = fy; nn[j + 5] = fz;
+      }
+      r.mesh.geometry.attributes.position.needsUpdate = true; r.mesh.geometry.attributes.normal.needsUpdate = true;
+      r.mesh.visible = age > 0; r.mesh.geometry.setDrawRange(0, Math.floor(SEG * (0.02 + 0.98 * vis)) * 6);
+    });
+    const beat = Stage.beat(t), sway = Math.sin(beat.barPhase * TAU) * 0.12;
+    camera.position.set(1.2 * Math.sin(t * 0.16) + sway, 0.4 + 0.3 * Math.sin(t * 0.11), 13.5 - 1.6 * braid); camera.lookAt(0, 0, 0);
+    T3.render();
+  }
+});
+</script>
+</body>
+</html>

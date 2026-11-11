@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 030 — Counterform</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 030 — COUNTERFORM
+ * The holes inside letters become doorways: an endless zoom through the counters of O, a, B and e.
+ * Every letter is drawn as geometry (no bitmaps), and each scene lives inside the counter of the one before,
+ * so edges stay perfectly sharp at any magnification. The camera zooms about the fixed point of each nesting,
+ * which makes the passage from one letter to the next seamless. Nine bars at 108 bpm (2.22 s). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, VIEW = H * 0.78;      // a letter one unit tall fills 78% of the frame height
+const TOMATO = '#e8472b', COBALT = '#1f44c8', MUSTARD = '#e9b22c', PAPER = '#f2ede2', INK = '#151413';
+// scenes: background, letter colour, letter path, counter path, counter centre and inscribed radius
+const SCENES = [
+  { bg: PAPER, fg: TOMATO, cx: 0, cy: 0, r: 0.25,
+    letter(c) { c.ellipse(0, 0, 0.47, 0.5, 0, 0, TAU); },
+    counter(c) { c.ellipse(0, 0, 0.25, 0.31, 0, 0, TAU); } },
+  { bg: COBALT, fg: MUSTARD, cx: -0.07, cy: 0.12, r: 0.19,
+    letter(c) { c.arc(-0.07, 0.12, 0.39, 0, TAU); c.closePath(); c.rect(0.14, -0.27, 0.20, 0.78); },
+    counter(c) { c.arc(-0.07, 0.12, 0.19, 0, TAU); } },
+  { bg: INK, fg: PAPER, cx: -0.035, cy: -0.235, r: 0.105,
+    letter(c) { c.rect(-0.37, -0.5, 0.22, 1); bowl(c, -0.2, -0.5, 0.50, 0.53); bowl(c, -0.2, -0.03, 0.60, 0.53); },
+    counter(c) { bowlHole(c, -0.15, -0.34, 0.24, 0.21); },
+    extra(c) { bowlHole(c, -0.15, 0.13, 0.33, 0.21); } },
+  { bg: TOMATO, fg: INK, cx: -0.01, cy: 0.035, r: 0.102,
+    letter(c) { c.arc(0, 0.12, 0.39, 0.62, TAU - 0.02); c.lineTo(0, 0.12); c.closePath(); },
+    counter(c) { c.arc(-0.01, 0.12, 0.21, Math.PI, TAU); c.closePath(); },
+    extra(c) { c.arc(-0.01, 0.12, 0.21, 0.62, Math.PI); c.lineTo(-0.22, 0.20); c.lineTo(0.2, 0.20); c.closePath(); },
+    bar: true },
+  { bg: PAPER, fg: INK, word: true }
+];
+function bowl(c, x, y, w, h) { c.moveTo(x, y); c.lineTo(x + w - h / 2, y); c.arc(x + w - h / 2, y + h / 2, h / 2, -Math.PI / 2, Math.PI / 2); c.lineTo(x, y + h); c.closePath(); }
+function bowlHole(c, x, y, w, h) { c.moveTo(x, y); c.lineTo(x + w - h / 2, y); c.arc(x + w - h / 2, y + h / 2, h / 2, -Math.PI / 2, Math.PI / 2); c.lineTo(x, y + h); c.closePath(); }
+SCENES.forEach((s) => { if (!s.word) s.f = s.r * 0.72; });
+const ZOOMS = [2.0, 6.15, 10.3, 14.45], ZD = 3.5;
+let ctx;
+
+function drawScene(c, k, depth) {
+  const s = SCENES[k];
+  if (s.word) {
+    c.fillStyle = s.fg; c.font = 'italic 400 100px "Fraunces Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.save(); c.scale(0.00125, 0.00125); c.fillText('counterform', 0, -10); c.restore();
+    c.fillRect(-0.085, 0.095, 0.17, 0.0022);
+    return;
+  }
+  c.fillStyle = s.fg; c.beginPath(); s.letter(c); c.fill('nonzero');
+  // holes that are not doorways show this scene's own background
+  if (s.extra) { c.fillStyle = s.bg; c.beginPath(); s.extra(c); c.fill(); }
+  if (s.bar) { c.fillStyle = s.fg; c.fillRect(-0.36, 0.12, 0.74, 0.085); }
+  if (depth <= 0) { c.fillStyle = SCENES[k + 1].bg; c.beginPath(); s.counter(c); c.fill(); return; }
+  // through the counter: the next scene, scaled to sit inside it
+  c.save(); c.beginPath(); s.counter(c); c.clip();
+  c.fillStyle = SCENES[k + 1].bg; c.beginPath(); s.counter(c); c.fill();
+  c.translate(s.cx, s.cy); c.scale(s.f, s.f); drawScene(c, k + 1, depth - 1);
+  c.restore();
+}
+
+Stage.create({
+  no: 30, title: 'Counterform', subtitle: 'vector zoom · 108 bpm',
+  duration: 20, background: PAPER, grain: 0.05, poster: 7.6,
+  fonts: ['italic 400 100px "Fraunces Variable"'],
+  fade: { in: 0.6, out: 1.2, color: PAPER },
+  slate: { at: 0.7, hold: 1.7, color: 'rgba(21,20,19,.85)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 30 });
+    M.master({ reverb: { decay: 1.8, size: 0.9, damp: 0.45 }, fadeOut: 2.0 });
+    const kick = M.track('kick', { inst: 'softkick', reverb: 0.04, gain: 0.85 }), hat = M.track('ohat', { reverb: 0.1, gain: 0.3, params: { decay: 0.12 } }), clap = M.track('clap', { reverb: 0.3, gain: 0.5 });
+    const stab = M.track('stab', { reverb: 0.4, gain: 1.3, params: { cutoff: 1300, fD: 0.22 }, delay: { time: 0.75, fb: 0.35, mix: 0.25 }, duck: { by: 'kick', depth: 0.3 } });
+    const bass = M.track('bass', { reverb: 0.03, gain: 0.6, params: { cutoff: 420, envAmt: 1.6 }, duck: { by: 'kick', depth: 0.5 } }), pad = M.track('pad', { reverb: 0.6, gain: 0.4, duck: { by: 'kick', depth: 0.35 } });
+    const rise = M.track('riser', { reverb: 0.4, gain: 0.5 }), wh = M.track('whoosh', { reverb: 0.4, gain: 0.55 }), bell = M.track('vibes', { reverb: 0.5, gain: 0.7 });
+    const prog = ['Am9', 'Fmaj9', 'Dm9', 'E7sus4'], roots = ['A1', 'F1', 'D1', 'E1'];
+    for (let bar = 0; bar < 9; bar++) {
+      const b = bar * 4, k = bar % 4;
+      if (bar < 8) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.6 }); if (bar >= 1) clap.pattern(b, 1, '.x.x', { vel: 0.6 }); bass.seq(b, 0.5, [null, roots[k], null, roots[k], null, roots[k], S.midi(roots[k]) + 12, roots[k]], { vel: 0.85, gate: 0.7 }); stab.chord(b + 0.5, prog[k], 0.3, 0.7, { octave: 3 }); stab.chord(b + 2, prog[k], 0.3, 0.6, { octave: 3 }); stab.chord(b + 3.5, prog[k], 0.3, 0.55, { octave: 3 }); pad.chord(b, prog[k], 4, 0.5, { octave: 3 }); }
+    }
+    // a riser into, and a whoosh through, every doorway
+    ZOOMS.forEach((t, i) => { rise.hit(M.b(t + 0.2), 0.6, M.b(ZD * 0.55)); wh.hit(M.b(t + ZD * 0.45), 0.8, 2.2); bell.note(M.b(t + ZD - 0.15), ['E5', 'A5', 'C6', 'E6'][i], 2, 0.6); });
+    pad.chord(32, ['A2', 'E3', 'B3', 'C4', 'E4'], 4, 0.6); bell.chord(32, ['A4', 'E5', 'B5'], 4, 0.5, { strum: 0.2 });
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.setTransform(2, 0, 0, 2, 0, 0);
+    // which doorway, and how far through it
+    let k = 0, u = 0; for (let i = 0; i < 4; i++) { if (t >= ZOOMS[i]) { k = i; u = prog(t, ZOOMS[i], ZD, E.inOutCubic); } }
+    if (u >= 1 && k < 4) { k += 1; u = 0; }
+    const s = SCENES[k];
+    c.fillStyle = s.bg; c.fillRect(0, 0, W, H);
+    c.save(); c.translate(W / 2, H / 2);
+    const intro = k === 0 && u === 0 ? prog(t, 0.15, 1.5, E.outExpo) : 1, kick = Stage.hit('kick', t, 0.14);
+    let size = 1, px = 0, py = 0;
+    if (!s.word && u > 0) { const f = s.f, fx = s.cx / (1 - f), fy = s.cy / (1 - f); size = Math.pow(f, u); px = fx * (1 - size); py = fy * (1 - size); }
+    const sc = VIEW / size * (0.55 + 0.45 * intro) * (1 + 0.012 * kick);
+    c.rotate(0.10 * Math.sin(u * Math.PI) * (k % 2 ? -1 : 1) + (1 - intro) * -0.25);
+    c.scale(sc, sc); c.translate(-px, -py);
+    drawScene(c, k, 2);
+    c.restore();
+  }
+});
+</script>
+</body>
+</html>

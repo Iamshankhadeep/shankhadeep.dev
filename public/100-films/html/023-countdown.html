@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 023 — Countdown</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 023 — COUNTDOWN
+ * Ten numerals, ten typographic ideas: 10 → 1, one numeral per bar. Black, warm cream and one red.
+ * Ten bars at 120 bpm with swing (2 s each); every card wipes in on its downbeat with a rim shot. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2, CX = 960, CY = 540;
+const K = '#0e0d0c', C = '#efe6d3', R = '#d6391e';
+const ANTON = '"Anton"', PLAY = '"Playfair Display Variable"', BIG = '"Big Shoulders Display Variable"';
+let ctx, buf, dots = [];
+
+function text(c, s, font, x, y, fill, align) { c.font = font; c.textAlign = align || 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = fill; c.fillText(s, x, y); }
+
+// each card: (c, u) with u = seconds since its downbeat
+const CARDS = {
+  10(c, u) {          // a field of dots
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    for (const d of dots) { const a = prog(u, 0.05 + d.x / W * 0.45, 0.5, E.outBack); if (a <= 0) continue; const r = d.r * a * (1 + 0.25 * Math.sin(u * 3 + d.x * 0.01)); c.fillStyle = d.red ? R : C; c.beginPath(); c.arc(d.x, d.y, Math.max(0, r), 0, TAU); c.fill(); }
+  },
+  9(c, u) {           // a giant serif, cropped by the frame
+    c.fillStyle = C; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0, 0.9, E.outExpo), dr = u * 14;
+    c.save(); c.translate(CX + 150 - dr, CY + 640 + (1 - a) * 500); c.rotate(-0.06 + 0.06 * a); text(c, '9', `900 1640px ${PLAY}`, 0, 0, K); c.restore();
+    c.fillStyle = R; c.fillRect(150, 150, 110 * prog(u, 0.3, 0.6, E.outCubic), 10);
+    text(c, 'nine', `italic 500 54px ${PLAY}`, 150, 232, K, 'left');
+  },
+  8(c, u) {           // two rings
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0, 0.8, E.outExpo);
+    [[CY - 205, 195, R, 1], [CY + 215, 225, C, -1]].forEach(([y, r, col, dir], i) => {
+      const sw = prog(u, i * 0.12, 0.9, E.inOutCubic) * TAU, st = -Math.PI / 2 + dir * u * 0.5;
+      c.strokeStyle = col; c.lineWidth = 92; c.lineCap = 'butt'; const whole = sw >= TAU - 1e-4; c.beginPath(); c.arc(CX, y, r, whole ? 0 : st, whole ? TAU : st + dir * sw, whole ? false : dir < 0); c.stroke();   // a full turn is drawn as 0…2π: start+2π can round to a zero-length arc
+      c.strokeStyle = K; c.lineWidth = 5; for (let k = 0; k < 24; k++) { const an = st + k / 24 * TAU; c.beginPath(); c.moveTo(CX + Math.cos(an) * (r - 46), y + Math.sin(an) * (r - 46)); c.lineTo(CX + Math.cos(an) * (r - 20), y + Math.sin(an) * (r - 20)); c.stroke(); }
+    });
+    c.globalAlpha = a; text(c, 'VIII', `900 46px ${BIG}`, W - 150, H - 150, C, 'right'); c.globalAlpha = 1;
+  },
+  7(c, u) {           // a slab, sliced
+    c.fillStyle = R; c.fillRect(0, 0, W, H);
+    buf.clearRect(0, 0, W, H); text(buf, '7', `900 1000px ${BIG}`, CX, CY + 350, K);
+    const N = 9, sh = H / N;
+    for (let i = 0; i < N; i++) { const a = prog(u, 0.04 * i, 0.75, E.outExpo), off = (i % 2 ? 1 : -1) * (1 - a) * 900 + (i % 2 ? 1 : -1) * 14 * Math.sin(u * 2.4 + i) * a; c.drawImage(buf.canvas, 0, i * sh, W, sh, off, i * sh, W, sh); }
+    c.fillStyle = K; for (let i = 1; i < N; i++) c.fillRect(0, i * sh - 1, W, 2);
+  },
+  6(c, u) {           // a spiral
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0.05, 1.3, E.inOutCubic), pts = [];
+    for (let i = 0; i <= 300; i++) { const s = i / 300; let x, y; if (s < 0.3) { const q = s / 0.3; x = CX + 190 - 330 * Math.sin(q * 1.25) + 0 * q; y = CY - 420 + 430 * q * q + 20 * q; } else { const q = (s - 0.3) / 0.7, th = Math.PI + q * TAU * 2.1, r = 238 * (1 - 0.86 * q); x = CX + 20 + r * Math.cos(th); y = CY + 150 + r * Math.sin(th); } pts.push([x, y]); }
+    // join the tail to the spiral start smoothly
+    c.strokeStyle = C; c.lineWidth = 86; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); const m = Math.floor(a * 300); for (let i = 0; i <= m; i++) i ? c.lineTo(pts[i][0], pts[i][1]) : c.moveTo(pts[i][0], pts[i][1]); c.stroke();
+    if (m > 2) { c.fillStyle = R; c.beginPath(); c.arc(pts[m][0], pts[m][1], 22, 0, TAU); c.fill(); }
+  },
+  5(c, u) {           // extruded stripes
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    const n = Math.round(22 * prog(u, 0, 1.0, E.outExpo)), sw = 0.3 * Math.sin(u * 1.6);
+    for (let k = n; k >= 0; k--) text(c, '5', `400 820px ${ANTON}`, CX - 110 + k * (10 + sw * 3), CY + 400 - k * 7, k === 0 ? C : (k % 2 ? R : '#7d1f10'));
+  },
+  4(c, u) {           // built from three lines
+    c.fillStyle = C; c.fillRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(214,57,30,.55)'; c.lineWidth = 2; const g = prog(u, 0, 0.5, E.outCubic);
+    c.beginPath(); c.arc(CX + 120, CY + 130, 330 * g, 0, TAU); c.moveTo(CX - 520 * g, CY + 130); c.lineTo(CX + 620 * g, CY + 130); c.moveTo(CX + 120, CY - 460 * g); c.lineTo(CX + 120, CY + 470 * g); c.stroke();
+    c.strokeStyle = K; c.lineWidth = 120; c.lineCap = 'butt';
+    const l = (x0, y0, x1, y1, t0) => { const a = prog(u, t0, 0.5, E.inOutCubic); if (a <= 0) return; c.beginPath(); c.moveTo(x0, y0); c.lineTo(lerp(x0, x1, a), lerp(y0, y1, a)); c.stroke(); };
+    l(CX + 120, CY - 400, CX + 120, CY + 430, 0.12); l(CX + 180, CY + 130, CX - 400, CY + 130, 0.42); l(CX - 358, CY + 172, CX + 150, CY - 420, 0.72);
+  },
+  3(c, u) {           // mirrored
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0, 0.9, E.outExpo), gap = (1 - a) * 700 + 8 + 10 * Math.sin(u * 2);
+    c.save(); c.translate(CX + gap, 0); text(c, '3', `900 860px ${PLAY}`, 228, CY + 300, C); c.restore();
+    c.save(); c.translate(CX - gap, 0); c.scale(-1, 1); text(c, '3', `900 860px ${PLAY}`, 228, CY + 300, R); c.restore();
+  },
+  2(c, u) {           // a ribbon
+    c.fillStyle = C; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0.05, 1.2, E.inOutCubic), P = new Path2D(); P.moveTo(CX - 250, CY - 190); P.bezierCurveTo(CX - 230, CY - 480, CX + 300, CY - 470, CX + 260, CY - 170); P.bezierCurveTo(CX + 230, CY + 40, CX - 180, CY + 150, CX - 290, CY + 380); P.lineTo(CX + 330, CY + 380);
+    c.setLineDash([2600]); c.lineDashOffset = 2600 * (1 - a); c.lineCap = 'butt'; c.lineJoin = 'round';
+    c.strokeStyle = '#8f2010'; c.lineWidth = 128; c.save(); c.translate(14, 14); c.stroke(P); c.restore();
+    c.strokeStyle = R; c.lineWidth = 128; c.stroke(P); c.strokeStyle = 'rgba(239,230,211,.5)'; c.lineWidth = 4; c.stroke(P); c.setLineDash([]);
+  },
+  1(c, u) {           // one bar, which becomes a line to end on
+    c.fillStyle = C; c.fillRect(0, 0, W, H);
+    const a = prog(u, 0, 0.6, E.outExpo), turn = prog(u, 1.15, 0.7, E.inOutCubic), hh = lerp(820, 6, turn) * a, ww = lerp(150, 1500, turn);
+    c.fillStyle = K; c.fillRect(CX - ww / 2, CY - hh / 2, ww, hh);
+    c.fillStyle = R; c.beginPath(); c.arc(CX + ww / 2 + 46 * (1 - turn) - 20 * turn, CY - hh / 2 + 60 * (1 - turn), 18 * (1 - turn), 0, TAU); c.fill();
+  }
+};
+
+Stage.create({
+  no: 23, title: 'Countdown', subtitle: 'ten numerals · 120 bpm swing',
+  duration: 20, background: K, grain: 0.06, poster: 6.9,
+  fonts: [`400 100px ${ANTON}`, `900 100px ${PLAY}`, `italic 900 100px ${PLAY}`, `italic 500 54px ${PLAY}`, `900 100px ${BIG}`],
+  fade: { in: 0.4, out: 0.9, color: C, inColor: K },
+  slate: { at: 2.35, hold: 1.45, pos: 'bl', color: 'rgba(14,13,12,.88)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 23, swing: 0.3 });
+    M.master({ reverb: { decay: 1.5, size: 0.8, damp: 0.5 }, fadeOut: 1.2 });
+    const bass = M.track('bass', { inst: 'fmbass', reverb: 0.08, gain: 0.8, params: { index: 2.0, D: 0.7, R: 0.15 }, humanize: 0.3 });
+    const ride = M.track('ride', { reverb: 0.15, gain: 0.55, humanize: 0.4 }), br = M.track('brush', { reverb: 0.2, gain: 0.7 }), rim = M.track('rim', { reverb: 0.25, gain: 0.8 });
+    const vib = M.track('vibes', { reverb: 0.4, gain: 0.95 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.5 });
+    // a ten-bar blues in Bb, walking in quarters
+    const ch = ['Bb7', 'Eb7', 'Bb7', 'Bb7', 'Eb7', 'Eb7', 'Bb7', 'G7', 'Cm7', 'F7'];
+    const walk = { Bb7: ['Bb1', 'D2', 'F2', 'G2'], Eb7: ['Eb2', 'G2', 'Bb2', 'A2'], G7: ['G1', 'B1', 'D2', 'F2'], Cm7: ['C2', 'Eb2', 'G2', 'Gb2'], F7: ['F1', 'A1', 'C2', 'A1'] };
+    ch.forEach((c, i) => {
+      const b = i * 4; bass.seq(b, 1, walk[c], { vel: 0.8, gate: 0.9 });
+      ride.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.5 }); br.pattern(b, 0.5, '..x...x.', { vel: 0.55 }); kick.hit(b, 0.7);
+      rim.hit(b, 0.9);
+      const v = S.chord(c, 3).slice(1); vib.chord(b + 0.5, v, 0.4, 0.55); vib.chord(b + (i % 2 ? 2.5 : 3), v, 0.5, 0.45);
+      if (i % 2) vib.seq(b + 2, 0.5, [v[2] + 12, null, v[1] + 12, v[2] + 12], { vel: 0.5 });
+    });
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 }); buf = Stage.buffer(W, H);
+    // dot mask for "10"
+    const m = Stage.buffer(W, H); text(m, '10', `400 780px ${ANTON}`, CX, CY + 300, '#fff');
+    const d = m.getImageData(0, 0, W, H).data, G = 30;
+    for (let y = G / 2 + 15; y < H; y += G) for (let x = G / 2; x < W; x += G) { const on = d[(Math.round(y) * W + Math.round(x)) * 4 + 3] > 127; dots.push({ x, y, r: on ? 12.5 : 2.2, red: on && hash(x * 7 + y, 3) < 0.07 }); }
+  },
+
+  frame(t) {
+    const c = ctx, bar = Math.min(9, Math.floor(t / BAR)), n = 10 - bar, u = t - bar * BAR;
+    c.setTransform(2, 0, 0, 2, 0, 0); c.globalAlpha = 1;
+    // previous card stays underneath while the new one wipes across
+    const wipe = bar === 0 ? 1 : prog(u, 0, 0.3, E.inOutCubic);
+    if (wipe < 1) CARDS[n + 1](c, BAR + u);
+    c.save(); c.beginPath(); if (bar % 2) c.rect(0, 0, W * wipe, H); else c.rect(0, H * (1 - wipe), W, H * wipe); c.clip();
+    CARDS[n](c, u);
+    // film-leader sweep: a hairline that goes round once per bar
+    const dark = [10, 8, 6, 5, 3].includes(n), an = -Math.PI / 2 + (u / BAR) * TAU;
+    c.strokeStyle = dark ? 'rgba(239,230,211,.16)' : 'rgba(14,13,12,.14)'; c.lineWidth = 1.5; c.beginPath(); c.arc(CX, CY, 500, 0, TAU); c.moveTo(CX, CY); c.lineTo(CX + 1200 * Math.cos(an), CY + 1200 * Math.sin(an)); c.stroke();
+    c.restore();
+  }
+});
+</script>
+</body>
+</html>

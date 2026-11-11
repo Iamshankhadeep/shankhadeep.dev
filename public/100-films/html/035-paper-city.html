@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 035 — Paper City</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 035 — PAPER CITY
+ * A pop-up-book city unfolds from a flat sheet, lives a day, and lights its windows at night (three.js, isometric).
+ * Every wall is a card hinged on its fold line; roofs drop on last. Eleven bars at 110 bpm (2.18 s each):
+ * blank sheet → blocks fold up row by row (bars 1–5) → trees, a tram, clouds on sticks (6–8) → dusk, and the
+ * windows light one by one on the music-box notes (9–10) → night. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 240 / 110, PAL = ['#f0e4cf', '#eea592', '#a9c2a0', '#a9c6dc', '#e9bd5c', '#d9cdb6'];
+let T3, cam, sheet, sunL, hemi, B = [], trees = [], clouds = [], tram, lightTimes = [];
+
+function wallTex(col) {
+  const S = 128, b = Stage.buffer(S, S), r = Stage.rng(7); b.fillStyle = col; b.fillRect(0, 0, S, S);
+  for (let i = 0; i < 900; i++) { b.fillStyle = `rgba(${r() > 0.5 ? '255,255,255' : '60,40,30'},${0.035 * r()})`; b.fillRect(r() * S, r() * S, 1 + r() * 2, 1 + r() * 2); }
+  b.fillStyle = 'rgba(52,58,78,.78)'; b.fillRect(22, 30, 32, 46); b.fillRect(76, 30, 32, 46);                 // two windows per unit of wall
+  b.fillStyle = 'rgba(255,255,255,.35)'; b.fillRect(22, 30, 32, 5); b.fillRect(76, 30, 32, 5);
+  const t = new THREE.CanvasTexture(b.canvas); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+}
+
+Stage.create({
+  no: 35, title: 'Paper City', subtitle: 'three.js · pop-up · 110 bpm',
+  duration: 24, background: '#e8dfd0', grain: 0.05, poster: 15.2,
+  fade: { in: 0.9, out: 1.6, color: '#e8dfd0', outColor: '#151a30' },
+  slate: { at: 0.7, hold: 2.8, color: 'rgba(70,56,48,.85)' },
+
+  music(S) {
+    const M = S.score({ bpm: 110, duration: 24, seed: 35 });
+    M.master({ reverb: { decay: 1.8, size: 0.85, damp: 0.45 }, fadeOut: 2.4 });
+    const mar = M.track('marimba', { reverb: 0.3, gain: 1.0 }), piz = M.track('pluck', { reverb: 0.3, gain: 1.2, params: { decay: 0.9, bright: 0.6 } });
+    const bass = M.track('bass', { inst: 'pluck', reverb: 0.2, gain: 1.4, params: { decay: 1.4, bright: 0.3, damp: 0.6 } }), wb = M.track('woodblock', { reverb: 0.2, gain: 0.6 }), sh = M.track('shaker', { reverb: 0.1, gain: 0.5 });
+    const mb = M.track('musicbox', { reverb: 0.55, gain: 1.0, delay: { time: 0.75, fb: 0.25, mix: 0.18 } }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.5 }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 });
+    const prog = ['C', 'Am', 'F', 'G', 'C', 'Em', 'F', 'G'], roots = ['C2', 'A1', 'F1', 'G1', 'C2', 'E1', 'F1', 'G1'];
+    for (let bar = 0; bar < 8; bar++) {
+      const b = bar * 4, n = S.chord(prog[bar], 4);
+      if (bar >= 0) wb.pattern(b, 0.5, bar < 1 ? 'x...x...' : 'x.x.x.xx', { vel: 0.5 });
+      if (bar >= 1) { piz.seq(b, 0.5, [n[0], n[2], n[1], n[2], n[0] + 12, n[2], n[1], n[2]], { vel: 0.55 }); bass.note(b, roots[bar], 1.5, 0.85); bass.note(b + 2, S.midi(roots[bar]) + 7, 1.5, 0.6); sub.note(b, roots[bar], 3.5, 0.5); }
+      if (bar >= 2) mar.seq(b, 0.5, bar % 2 ? [n[2] + 12, null, n[1] + 12, n[0] + 12, null, n[1] + 12, n[2] + 12, null] : [n[0] + 12, n[1] + 12, n[2] + 12, null, n[0] + 24, null, n[2] + 12, n[1] + 12], { vel: 0.6 });
+      if (bar >= 3) sh.pattern(b, 0.25, 'x.xxx.xxx.xxx.xx', { vel: 0.4 });
+    }
+    // dusk and night: the kit drops away; a music box plays, each note a window
+    pad.chord(32, ['A2', 'E3', 'C4', 'G4'], 4, 0.55); pad.chord(36, ['F2', 'C3', 'A3', 'E4'], 4, 0.55); pad.chord(40, ['C3', 'G3', 'E4', 'D5'], 4, 0.6); sub.note(32, 'A1', 4, 0.6); sub.note(36, 'F1', 4, 0.6); sub.note(40, 'C2', 4, 0.6);
+    const lull = ['E5', 'G5', 'C6', 'B5', 'G5', 'E5', 'A5', 'G5', 'C6', 'E6', 'D6', 'C6', 'A5', 'C6', 'G5', 'E5', 'F5', 'A5', 'C6', 'E6', 'D6', 'B5', 'G5', 'C6'];
+    lull.forEach((p, i) => mb.note(32 + i * 0.5, p, 1.5, 0.55)); mb.chord(44, ['C5', 'E5', 'G5', 'C6'], 0, 0.5);
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ bloom: { strength: 0.0, radius: 0.5, threshold: 0.8 }, exposure: 1.0, z: 1 });
+    const { scene, renderer } = T3;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    const asp = 16 / 9, V = 12.9; cam = new T.OrthographicCamera(-V * asp, V * asp, V, -V, 0.1, 200); cam.position.set(30, 26, 30); cam.lookAt(0, 1.6, 0); T3.composer.passes[0].camera = cam;
+    scene.background = new T.Color('#e8dfd0');
+    sheet = new T.Group(); scene.add(sheet);
+    // the sheet itself, with streets printed on it
+    const gb = Stage.buffer(1024, 1024), r0 = Stage.rng(3); gb.fillStyle = '#efe6d4'; gb.fillRect(0, 0, 1024, 1024);
+    for (let i = 0; i < 9000; i++) { gb.fillStyle = `rgba(${r0() > 0.5 ? '255,255,255' : '90,70,50'},${0.04 * r0()})`; gb.fillRect(r0() * 1024, r0() * 1024, 2, 2); }
+    gb.fillStyle = '#ded3bd'; const u = 1024 / 28; for (const s of [-8, -2.6, 2.6, 8]) { gb.fillRect(0, (s + 14) * u - u * 0.55, 1024, u * 1.1); gb.fillRect((s + 14) * u - u * 0.55, 0, u * 1.1, 1024); }
+    gb.strokeStyle = 'rgba(255,255,255,.75)'; gb.lineWidth = 2; gb.setLineDash([14, 14]); for (const s of [-8, -2.6, 2.6, 8]) { gb.beginPath(); gb.moveTo(0, (s + 14) * u); gb.lineTo(1024, (s + 14) * u); gb.moveTo((s + 14) * u, 0); gb.lineTo((s + 14) * u, 1024); gb.stroke(); }
+    const gt = new T.CanvasTexture(gb.canvas); gt.colorSpace = T.SRGBColorSpace; gt.anisotropy = 8;
+    const ground = new T.Mesh(new T.BoxGeometry(28, 0.18, 28), [0, 0, 0, 0, 0, 0].map((_, i) => new T.MeshStandardMaterial(i === 2 ? { map: gt, roughness: 1 } : { color: '#d8ccb6', roughness: 1 }))); ground.position.y = -0.09; ground.receiveShadow = true; sheet.add(ground);
+    // buildings on a 5×5 block grid (centre block left open as a square)
+    const tex = PAL.map(wallTex), em = (() => { const b = Stage.buffer(128, 128); b.fillStyle = '#000'; b.fillRect(0, 0, 128, 128); b.fillStyle = '#fff'; b.fillRect(22, 30, 32, 46); b.fillRect(76, 30, 32, 46); const t = new T.CanvasTexture(b.canvas); t.wrapS = t.wrapT = T.RepeatWrapping; return t; })();
+    const r = Stage.rng(35), centres = [-10.6, -5.3, 0, 5.3, 10.6];
+    centres.forEach((cz, zi) => centres.forEach((cx, xi) => {
+      if (xi === 2 && zi === 2) return;
+      const n = r() < 0.45 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        const w = n === 2 ? 1.7 + (r() < 0.5 ? 0 : 0.3) : 2.4 + Math.round(r() * 2) * 0.4, d = n === 2 ? 3.2 : 2.4 + Math.round(r() * 2) * 0.4, h = Math.max(1, Math.round((1.2 + 4.2 * r() * r() + (Math.abs(xi - 2) + Math.abs(zi - 2) < 2 ? 1.6 : 0)) * 1)) , ci = (r() * PAL.length) | 0;
+        const g = new T.Group(); g.position.set(cx + (n === 2 ? (k ? 1.05 : -1.05) : 0), 0, cz); sheet.add(g);
+        const mat = new T.MeshStandardMaterial({ map: tex[ci], roughness: 0.95, side: T.DoubleSide, emissive: new T.Color('#ffc46a'), emissiveMap: em, emissiveIntensity: 0 });
+        const walls = [];
+        [[0, d / 2, 0, w], [w / 2, 0, Math.PI / 2, d], [0, -d / 2, Math.PI, w], [-w / 2, 0, -Math.PI / 2, d]].forEach(([px, pz, ry, ww]) => {
+          const geo = new T.PlaneGeometry(ww, h); geo.translate(0, h / 2, 0); const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * Math.round(ww), uv.getY(i) * h);
+          const pivot = new T.Group(); pivot.position.set(px, 0.01, pz); pivot.rotation.y = ry; const m = new T.Mesh(geo, mat); m.castShadow = m.receiveShadow = true; pivot.add(m); g.add(pivot); walls.push(m);
+        });
+        const roof = new T.Mesh(new T.BoxGeometry(w + 0.16, 0.12, d + 0.16), new T.MeshStandardMaterial({ color: new T.Color(PAL[ci]).multiplyScalar(0.86), roughness: 1 })); roof.castShadow = true; g.add(roof);
+        B.push({ g, walls, roof, mat, h, t0: 1.2 + zi * 1.75 + xi * 0.22 + k * 0.12 + r() * 0.15, lit: 0 });
+      }
+    }));
+    // order in which windows come on: one building (or two) per music-box note
+    const ev = Stage.events('musicbox'); const order = B.map((_, i) => i).sort((a, b) => hash(a, 5) - hash(b, 5)); order.forEach((bi, k) => { B[bi].lit = ev[Math.min(ev.length - 1, Math.floor(k * ev.length / order.length))].t; });
+    // trees in the square and along streets
+    const tm = new T.MeshStandardMaterial({ color: '#8fb287', roughness: 1 }), km = new T.MeshStandardMaterial({ color: '#b08a66', roughness: 1 });
+    for (let i = 0; i < 16; i++) { const g = new T.Group(), a = i / 9 * Math.PI * 2; if (i < 9) g.position.set(Math.cos(a) * 1.5, 0, Math.sin(a) * 1.5); else g.position.set([-13, 13][i % 2] , 0, -12 + (i - 9) * 3.9); const tr = new T.Mesh(new T.CylinderGeometry(0.05, 0.05, 0.5), km); tr.position.y = 0.25; const cn = new T.Mesh(new T.ConeGeometry(0.42, 1.1, 7), tm); cn.position.y = 1.0; cn.castShadow = tr.castShadow = true; g.add(tr, cn); sheet.add(g); trees.push({ g, t0: BAR * 5 + i * 0.13 }); }
+    // the tram
+    tram = new T.Group(); const body = new T.Mesh(new T.BoxGeometry(2.2, 0.7, 0.75), new T.MeshStandardMaterial({ color: '#d9563f', roughness: 0.9 })); body.position.y = 0.5; body.castShadow = true; const top = new T.Mesh(new T.BoxGeometry(2.3, 0.1, 0.85), new T.MeshStandardMaterial({ color: '#f3ead8', roughness: 1 })); top.position.y = 0.9; tram.add(body, top); sheet.add(tram);
+    // clouds on sticks
+    const cb = Stage.buffer(256, 128); cb.fillStyle = '#fff'; [[70, 80, 44], [120, 62, 52], [176, 78, 42], [128, 92, 44]].forEach(([x, y, rr]) => { cb.beginPath(); cb.arc(x, y, rr, 0, 6.283); cb.fill(); }); const ct = new T.CanvasTexture(cb.canvas);
+    [[-7, 8.4, -9], [3, 9.6, -4], [9, 8.0, 5], [-4, 9.0, 8]].forEach(([x, y, z], i) => { const g = new T.Group(); g.position.set(x, 0, z); const st = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, y), new T.MeshStandardMaterial({ color: '#cbbfa8' })); st.position.y = y / 2; const cl = new T.Mesh(new T.PlaneGeometry(3.6, 1.8), new T.MeshStandardMaterial({ map: ct, transparent: true, alphaTest: 0.5, side: T.DoubleSide, roughness: 1 })); cl.position.y = y; cl.rotation.y = Math.PI / 4; cl.castShadow = true; g.add(st, cl); sheet.add(g); clouds.push({ g, t0: BAR * 5.6 + i * 0.5, y }); });
+    sunL = new T.DirectionalLight('#fff3e0', 2.5); sunL.castShadow = true; sunL.shadow.mapSize.set(4096, 4096); const sc = sunL.shadow.camera; sc.left = -22; sc.right = 22; sc.top = 22; sc.bottom = -22; sc.near = 1; sc.far = 120; sunL.shadow.bias = -0.0005; sunL.shadow.radius = 4; scene.add(sunL);
+    hemi = new T.HemisphereLight('#ffffff', '#d8c9b0', 1.3); scene.add(hemi);
+  },
+
+  frame(t) {
+    const { scene } = T3;
+    for (const b of B) {
+      const e = prog(t, b.t0, 1.15, E.outBack), fold = clamp01(1 - e) * Math.PI / 2;
+      b.walls.forEach((w) => { w.rotation.x = fold + (e > 1 ? (e - 1) * -0.6 : 0); });
+      const re = prog(t, b.t0 + 0.75, 0.6, E.outBounce); b.roof.position.y = b.h + 0.06 + (1 - re) * 3; b.roof.visible = re > 0.01; b.roof.scale.setScalar(0.2 + 0.8 * Math.min(1, re * 1.4));
+      b.mat.emissiveIntensity = b.lit ? 1.25 * prog(t, b.lit, 0.35, E.outCubic) * (1 + 0.5 * Math.exp(-Math.max(0, t - b.lit) * 5)) : 0;
+    }
+    trees.forEach((tr) => { const e = prog(t, tr.t0, 0.6, E.outBack); tr.g.scale.set(e, e, e); });
+    clouds.forEach((c, i) => { const e = prog(t, c.t0, 1.4, E.outBack); c.g.scale.set(1, Math.max(0.001, e), 1); c.g.rotation.z = 0.05 * Math.sin(t * 1.3 + i * 2); c.g.visible = e > 0.01; });
+    const tr = prog(t, BAR * 5.2, 8.5, E.inOutSine); tram.position.set(lerp(-16, 13.2, tr), 0, 2.6); tram.visible = t > BAR * 5.2;
+    // the day: morning → noon → dusk → night
+    const day = prog(t, 0, BAR * 8.2), dusk = smoothstep(BAR * 7.8, BAR * 9.4, t), night = smoothstep(BAR * 8.8, BAR * 10.2, t);
+    const az = lerp(-2.2, -0.2, day) + 0.9 * dusk, el = lerp(0.55, 1.15, Math.sin(day * Math.PI)) - 0.7 * dusk;
+    sunL.position.set(Math.cos(az) * Math.cos(el) * 60, Math.max(0.12, Math.sin(el)) * 60, Math.sin(az) * Math.cos(el) * 60);
+    sunL.color.set(Stage.color.mix(Stage.color.mix('#fff0dc', '#ffffff', Math.sin(day * Math.PI)), '#ff9a5c', dusk)); sunL.intensity = 2.6 * (1 - 0.93 * night);
+    hemi.color.set(Stage.color.mix('#ffffff', '#5b6bb0', night)); hemi.groundColor.set(Stage.color.mix('#d8c9b0', '#1a1f3a', night)); hemi.intensity = lerp(1.3, 0.75, night);
+    scene.background.set(Stage.color.mix(Stage.color.mix('#e8dfd0', '#f1c9a6', dusk), '#151a30', night));
+    T3.bloom.strength = 0.28 * night;
+    sheet.rotation.y = -0.12 + 0.3 * prog(t, 0, 24, E.inOutSine);
+    const z = lerp(1.0, 1.1, prog(t, 0, 24, E.inOutSine)); cam.zoom = z; cam.updateProjectionMatrix();
+    T3.render();
+  }
+});
+</script>
+</body>
+</html>

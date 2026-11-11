@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 010 — Fog Line</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 010 — FOG LINE
+ * An ink-wash mountain scroll drifting sideways while fog moves through it. Five ranges in diluted ink, each
+ * emerging from the mist in turn; one vermilion sun — the only colour — appears on the downbeat of bar 4 (10 s);
+ * four cranes cross. Six bars at 72 bpm. Everything is a pure function of t (Canvas 2D). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, BAR = 240 / 72;
+const PAPER = '#ece5d5', INK = [34, 36, 42];
+let ctx, paper, noiseA, noiseB;
+const N1 = Stage.makeNoise(101);
+
+// layers, far → near
+const LAYERS = [
+  { base: 560, amp: 150, f: 0.00115, a: 0.17, sp: 5, seed: 1.3, blur: 5, show: 6.2, rough: 0.10 },
+  { base: 640, amp: 190, f: 0.00150, a: 0.26, sp: 9, seed: 7.1, blur: 3.5, show: 4.6, rough: 0.12 },
+  { base: 730, amp: 230, f: 0.00190, a: 0.40, sp: 15, seed: 13.7, blur: 2, show: 3.0, rough: 0.14 },
+  { base: 850, amp: 250, f: 0.00240, a: 0.60, sp: 25, seed: 21.9, blur: 1, show: 1.2, rough: 0.16 },
+  { base: 1010, amp: 230, f: 0.00300, a: 0.90, sp: 42, seed: 34.2, blur: 0, show: -1, rough: 0.2 }
+];
+function ridge(L, x) {           // world x → ridge height (px above base)
+  const u = x * L.f + L.seed;
+  let h = 0, a = 1, f = 1, s = 0;
+  for (let o = 0; o < 5; o++) { const n = N1.noise2(u * f, L.seed * 3.1 + o * 5.7); h += a * (o < 2 ? 1 - Math.abs(n) : n * 0.5 + 0.5); s += a; a *= 0.46; f *= 2.13; }
+  h /= s;
+  return L.amp * Math.pow(h, 1.5) * 1.9;
+}
+
+Stage.create({
+  no: 10, title: 'Fog Line', subtitle: 'ink wash · canvas 2d · 72 bpm',
+  duration: 20, background: PAPER, grain: 0.05, poster: 13.2,
+  fonts: ['600 34px "Noto Serif JP Variable"'],
+  fade: { in: 1.4, out: 1.4, color: PAPER },
+  slate: { at: 0.9, hold: 3.2, pos: 'tl', color: 'rgba(34,36,42,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 10 });
+    M.master({ reverb: { decay: 3.6, size: 1.15, damp: 0.5 }, fadeIn: 0.3, fadeOut: 2.2 });
+    const koto = M.track('koto', { reverb: 0.55, gain: 1.0, delay: { time: 1.5, fb: 0.22, mix: 0.16 } });
+    const flute = M.track('flute', { reverb: 0.7, gain: 0.7, params: { A: 0.25, R: 0.9, noise: 0.09 } });
+    const tom = M.track('tom', { reverb: 0.6, gain: 0.75, params: { tone: 62, decay: 0.9 } });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.6, gain: 0.34, lowpass: 700 });
+    const air = M.track('wind', { reverb: 0.4, gain: 0.5 });
+    air.hit(0, 0.8, M.beats);
+    // D hirajoshi: D E F A Bb
+    pad.chord(0, ['D2', 'A2'], 12, 0.5); pad.chord(12, ['D2', 'A2', 'E3'], 12, 0.6);
+    koto.seq(1, 0.5, ['D4', null, 'A4', 'Bb4', null, null, 'A4', null, null, null, 'F4', 'E4', null, 'D4', null, null], { vel: 0.62, gate: 3 });
+    koto.seq(9.5, 0.5, ['A3', 'D4', null, 'E4', 'F4', null, null, null], { vel: 0.5, gate: 3 });
+    tom.hit(12, 0.9);                                                       // the sun
+    koto.seq(12, 0.5, [['D4', 'A4'], null, null, 'Bb4', 'A4', null, 'D5', null, null, 'E5', 'F5', null, 'E5', null, 'D5', null, null, 'Bb4', null, 'A4', null, null, null, null], { vel: 0.66, gate: 3 });
+    flute.note(5, 'A4', 3.5, 0.5); flute.note(13.5, 'D5', 2.2, 0.55); flute.note(16, 'F5', 1.4, 0.5); flute.note(17.5, 'E5', 3.6, 0.5); flute.note(21.5, 'D5', 2.4, 0.42);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 });
+    // paper: fibres and mottling, baked once
+    paper = Stage.buffer(W, H); const p = paper;
+    p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
+    const id = p.getImageData(0, 0, W, H), d = id.data, r = Stage.rng(77);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4, n = N1.fbm2(x * 0.004, y * 0.004, 3) * 7 + (r() - 0.5) * 9 + N1.noise2(x * 0.09, y * 0.012) * 3;
+      d[i] += n; d[i + 1] += n; d[i + 2] += n * 0.9;
+    }
+    p.putImageData(id, 0, 0);
+    p.strokeStyle = 'rgba(120,105,80,.10)'; p.lineWidth = 0.8;
+    for (let k = 0; k < 900; k++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 8 + r() * 34; p.beginPath(); p.moveTo(x, y); p.quadraticCurveTo(x + Math.cos(a) * l * 0.5 + (r() - 0.5) * 8, y + Math.sin(a) * l * 0.5 + (r() - 0.5) * 8, x + Math.cos(a) * l, y + Math.sin(a) * l); p.stroke(); }
+    const v = p.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.05); v.addColorStop(0, 'rgba(90,70,40,0)'); v.addColorStop(1, 'rgba(90,70,40,.20)'); p.fillStyle = v; p.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx;
+    c.globalAlpha = 1; c.filter = 'none'; c.drawImage(paper.canvas, 0, 0);
+    const pan = 60 + t * 1.0;                              // the scroll drifts right → left
+    // faint wash in the sky, darker toward the top like a graded wash
+    const sky = c.createLinearGradient(0, 0, 0, 620); sky.addColorStop(0, 'rgba(60,64,74,.16)'); sky.addColorStop(1, 'rgba(60,64,74,0)'); c.fillStyle = sky; c.fillRect(0, 0, W, 620);
+
+    // the sun: revealed as the fog lifts (bar 4)
+    const sunA = prog(t, 9.2, 2.2, E.outCubic) * (1 - 0.35 * prog(t, 17, 3, E.inOutSine)), sx = 1335 - t * 2.2, sy = 318 - 14 * prog(t, 9, 11, E.outSine);
+    if (sunA > 0) {
+      c.globalAlpha = sunA * 0.92; c.fillStyle = '#c33f27'; c.beginPath(); c.arc(sx, sy, 66, 0, 6.2832); c.fill();
+      c.globalAlpha = sunA * 0.10; c.beginPath(); c.arc(sx, sy, 96, 0, 6.2832); c.fill();
+    }
+    LAYERS.forEach((L, li) => {
+      const vis = L.show < 0 ? 1 : prog(t, L.show, 3.4, E.inOutSine);
+      const ox = pan * L.sp;
+      if (vis > 0) {
+        const top = L.base - L.amp * 1.9;
+        const g = c.createLinearGradient(0, top, 0, L.base + 150);
+        const a = L.a * vis, col = `${INK[0]},${INK[1]},${INK[2]}`;
+        g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.45, `rgba(${col},${a * 0.78})`); g.addColorStop(0.8, `rgba(${col},${a * (li === 4 ? 0.66 : 0.2)})`); g.addColorStop(1, `rgba(${col},${li === 4 ? a * 0.5 : 0})`);
+        c.globalAlpha = 1; c.fillStyle = g; c.filter = L.blur ? `blur(${L.blur}px)` : 'none';
+        c.beginPath(); c.moveTo(-20, H + 20);
+        for (let x = -20; x <= W + 20; x += 4) {
+          const wx = x + ox, y = L.base - ridge(L, wx) - L.rough * 14 * N1.noise2(wx * 0.045, li * 9.1);
+          c.lineTo(x, y);
+        }
+        c.lineTo(W + 20, H + 20); c.closePath(); c.fill();
+        // a darker, dry-brush line just under the crest gives each ridge its edge
+        if (li >= 2) {
+          c.filter = 'none'; c.strokeStyle = `rgba(${col},${0.22 * vis * (li - 1) / 3})`; c.lineWidth = 1.6 + li * 0.5; c.beginPath();
+          for (let x = -20; x <= W + 20; x += 4) { const wx = x + ox, y = L.base - ridge(L, wx) - L.rough * 14 * N1.noise2(wx * 0.045, li * 9.1) + 3 + 2.5 * N1.noise2(wx * 0.02, 5 + li); if (N1.noise2(wx * 0.006, li * 3.3) > -0.25) { c.lineTo(x, y); } else { c.stroke(); c.beginPath(); } }
+          c.stroke();
+        }
+        // pines on the two nearest ridges: quick brush dabs
+        if (li >= 3) {
+          c.filter = 'none';
+          const step = li === 4 ? 46 : 64, first = Math.floor((ox - 60) / step);
+          for (let k = first; k < first + (W + 160) / step; k++) {
+            if (hash(k, 40 + li) > (li === 4 ? 0.62 : 0.34)) continue;
+            const wx = k * step + (hash(k, 41 + li) - 0.5) * step * 0.8, x = wx - ox, yb = L.base - ridge(L, wx) + 4, hgt = (li === 4 ? 74 : 40) * (0.6 + 0.7 * hash(k, 42 + li));
+            c.fillStyle = `rgba(${col},${(li === 4 ? 0.92 : 0.5) * vis})`;
+            c.fillRect(x - 1.2, yb - hgt, 2.4, hgt + 6);
+            const tiers = 5 + ((hash(k, 43) * 3) | 0), sway = 2.5 * Math.sin(t * 0.7 + k);
+            for (let q = 0; q < tiers; q++) { const u = q / tiers, yy = yb - hgt * (1 - u * 0.86), w = hgt * (0.07 + 0.3 * u); c.beginPath(); c.moveTo(x + sway * (1 - u), yy - hgt * 0.13); c.quadraticCurveTo(x + w * 0.5, yy + 1, x + w, yy + hgt * 0.035); c.quadraticCurveTo(x, yy - 2, x - w, yy + hgt * 0.035); c.quadraticCurveTo(x - w * 0.5, yy + 1, x + sway * (1 - u), yy - hgt * 0.13); c.fill(); }
+          }
+        }
+      }
+      // fog bands sliding between the ranges
+      if (li < 4) {
+        c.filter = 'blur(26px)';
+        for (let b = 0; b < 3; b++) {
+          const sp = 14 + 9 * hash(b, li + 60), bw = 900 + 700 * hash(b, li + 61), period = W + bw * 2;
+          const x = Stage.mod(hash(b, li + 62) * period - t * sp * (li + 1) * 0.55 - pan * L.sp * 0.4, period) - bw, y = L.base + 40 + 70 * hash(b, li + 63) + 10 * Math.sin(t * 0.3 + b);
+          const fg = c.createRadialGradient(x + bw / 2, y, 10, x + bw / 2, y, bw / 2);
+          const fa = (0.62 - 0.22 * prog(t, 8, 4, E.inOutSine) + 0.25 * prog(t, 16.5, 3.5, E.inOutSine)) * (0.6 + 0.4 * hash(b, li + 64));
+          fg.addColorStop(0, `rgba(240,234,220,${fa})`); fg.addColorStop(1, 'rgba(240,234,220,0)');
+          c.fillStyle = fg; c.save(); c.translate(0, y); c.scale(1, 0.16); c.translate(0, -y); c.fillRect(x, y - bw / 2, bw, bw); c.restore();
+        }
+        c.filter = 'none';
+      }
+    });
+
+    // cranes — four small strokes crossing below the sun
+    const ct = prog(t, 11.6, 7.6);
+    if (ct > 0 && ct < 1) {
+      c.strokeStyle = 'rgba(30,32,38,.86)'; c.lineCap = 'round'; c.lineJoin = 'round';
+      for (let k = 0; k < 4; k++) {
+        const u = ct - k * 0.035, x = lerp(2060, -160, u) + k * 12, y = 430 + k * 34 - 60 * E.outSine(clamp01(u)) + 9 * Math.sin(u * 22 + k), s = 0.9 + 0.12 * k;
+        const f = Math.sin(t * 5.2 + k * 1.3), w = 30 * s, lift = w * (0.1 + 0.55 * f);
+        c.lineWidth = 2.6 * s; c.beginPath(); c.moveTo(x + w, y - lift); c.quadraticCurveTo(x + w * 0.42, y - lift * 0.9 - w * 0.2, x, y); c.quadraticCurveTo(x - w * 0.42, y - lift * 0.9 - w * 0.2, x - w, y - lift); c.stroke();
+        c.lineWidth = 2.0 * s; c.beginPath(); c.moveTo(x + 2, y); c.lineTo(x - w * 0.62, y + 3 * s); c.stroke();                // neck, flying left
+        c.lineWidth = 1.2 * s; c.beginPath(); c.moveTo(x, y + 1); c.lineTo(x + w * 0.7, y + 4 * s); c.stroke();                 // trailing legs
+      }
+    }
+    // the seal
+    const sa = prog(t, 13.4, 0.5, E.outBack);
+    if (sa > 0) {
+      c.save(); c.translate(1770, 934); c.scale(lerp(1.5, 1, clamp01(sa)), lerp(1.5, 1, clamp01(sa))); c.globalAlpha = clamp01(sa) * 0.92;
+      c.fillStyle = '#c33f27'; c.beginPath(); c.roundRect(-30, -30, 60, 60, 5); c.fill();
+      c.fillStyle = PAPER; c.font = '600 36px "Noto Serif JP Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('霧', 0, 2);
+      c.restore(); c.globalAlpha = 1;
+    }
+  }
+});
+</script>
+</body>
+</html>

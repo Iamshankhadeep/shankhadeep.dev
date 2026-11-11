@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 049 — Kelp Forest</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 049 — KELP FOREST
+ * Standing on the sea floor looking up through swaying kelp at the light. The water, light shafts, caustic
+ * shimmer and three depths of kelp are one fragment shader; a school of silver fish and the drifting motes are
+ * drawn over it on canvas. Six bars at 72 bpm (3.33 s each): dim and close → the rays strengthen → the school
+ * sweeps through (bar 4, 10 s) → a slow drift upward as the light fades. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 72;
+
+const FRAG = `
+uniform float uRays, uRise, uShadow;
+// one kelp stalk: returns coverage (0..1) at p for a stalk rooted at x0
+float stalk(vec2 p, float x0, float seed, float sc, float soft){
+  float h = p.y + .62;                                        // height above the sea floor
+  float sway = (.05 + .09 * h) * sin(h * 2.6 - uTime * .9 + seed * 6.) + .03 * sin(h * 6.1 - uTime * 1.6 + seed * 11.);
+  float x = x0 + sway * sc;
+  float d = abs(p.x - x) - .008 * sc;
+  float c = smoothstep(soft, -soft, d);
+  // blades: leaf shapes alternating up the stalk, fluttering
+  float sp = .115 * sc, id = floor(h / sp), fy = fract(h / sp) - .5;
+  for (int k = -1; k <= 1; k++) {
+    float j = id + float(k), side = mod(j, 2.) < 1. ? 1. : -1., fl = .5 * sin(uTime * 1.7 + j * 1.3 + seed * 9.);
+    float hy = (j + .5) * sp, bx = x0 + ((.05 + .09 * hy) * sin(hy * 2.6 - uTime * .9 + seed * 6.) + .03 * sin(hy * 6.1 - uTime * 1.6 + seed * 11.)) * sc;
+    vec2 q = vec2(p.x - bx, h - hy);
+    q = rot(side * (.95 + .3 * fl)) * q; q.y -= .075 * sc;       // lean out from the stalk and up
+    float leaf = length(q / vec2(.017 * sc, .085 * sc)) - 1.;
+    c = max(c, smoothstep(soft * 22., -soft * 22., leaf) * step(0., hy));
+  }
+  return c;
+}
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y; p.y -= uRise * .06;
+  // water: emerald below, brightening toward the surface
+  float g = clamp(p.y + .5, 0., 1.);
+  vec3 col = mix(vec3(.010, .075, .085), vec3(.045, .30, .30), pow(g, 1.25));
+  col = mix(col, vec3(.26, .62, .52), pow(g, 3.4) * .8);
+  // the bright window of the surface, wobbling
+  vec2 s = p - vec2(.18, .62);
+  float disc = exp(-dot(s, s) * 2.2);
+  col += vec3(.55, .85, .66) * disc * (.5 + .5 * uRays);
+  // shafts: streaks radiating from above the frame, broken by slow noise
+  float a = atan(s.x, -s.y), r = length(s);
+  float streak = pow(vnoise(vec2(a * 9. + 3., uTime * .16)), 2.) * .7 + pow(vnoise(vec2(a * 23. - 5., uTime * .23 + 4.)), 3.) * .6;
+  col += vec3(.50, .92, .70) * streak * smoothstep(1.5, .1, r) * smoothstep(.02, .3, r) * (.14 + .5 * uRays) * (1. - uShadow * .6);
+  // far kelp, mid kelp
+  float far = 0.; for (int i = 0; i < 9; i++) { float fi = float(i); far = max(far, stalk(p * 1.5 + vec2(0., .12), -1.25 + fi * .31 + .1 * hash11(fi + 2.), fi * .37 + 1., .7, .004)); }
+  col = mix(col, mix(col, vec3(.015, .11, .10), .55), far);
+  // caustic shimmer drifting through the water
+  float ca = pow(1. - abs(snoise(vec3(p * 3.2 + vec2(uTime * .05, 0.), uTime * .25))), 6.) + .6 * pow(1. - abs(snoise(vec3(p * 6. - vec2(0., uTime * .04), uTime * .3 + 7.))), 8.);
+  col += vec3(.35, .75, .55) * ca * .16 * g * (.5 + .8 * uRays);
+  float mid = 0.; for (int i = 0; i < 6; i++) { float fi = float(i); mid = max(mid, stalk(p * 1.05, -.98 + fi * .40 + .16 * hash11(fi + 9.), fi * .53 + 4., 1., .003)); }
+  col = mix(col, vec3(.012, .085, .075) + vec3(.03, .12, .08) * g, mid * .9);
+  // near kelp: dark, soft, out of focus
+  float near = 0.; for (int i = 0; i < 3; i++) { float fi = float(i); near = max(near, stalk(p * .62 + vec2(0., -.2), -.52 + fi * .52 + .1 * hash11(fi + 5.), fi * .71 + 8., 1.5, .012)); }
+  col = mix(col, vec3(.004, .030, .032), near * .93);
+  // a large shadow passing far above
+  col *= 1. - uShadow * .42 * smoothstep(.0, .8, g);
+  // sea floor haze
+  col = mix(col, vec3(.02, .10, .10), smoothstep(-.34, -.56, p.y) * .7);
+  vec2 v = vUv - .5; col *= 1. - .9 * dot(v, v);
+  col = 1. - exp(-col * 1.9);
+  fragColor = vec4(pow(col, vec3(.95)) + dither(gl_FragCoord.xy, float(uFrame)), 1.);
+}`;
+let sh, ctx;
+
+Stage.create({
+  no: 49, title: 'Kelp Forest', subtitle: 'shader + canvas · 72 bpm',
+  duration: 20, background: '#031a1c', grain: 0.06, poster: 11.4,
+  fade: { in: 1.6, out: 2.0 }, slate: { at: 0.9, hold: 3.0, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 49 });
+    M.master({ reverb: { decay: 5.0, size: 1.4, damp: 0.55 }, fadeIn: 0.8, fadeOut: 3.0 });
+    const pad = M.track('warmpad', { reverb: 0.65, gain: (t) => 0.45 + 0.3 * smoothstep(3, 10, t), lowpass: (t) => 600 + 1500 * smoothstep(2, 10, t) * (1 - 0.6 * smoothstep(15, 20, t)) });
+    const plk = M.track('pluck', { reverb: 0.7, gain: 1.0, delay: { time: 1.5, fb: 0.45, mix: 0.4 }, lowpass: 2400, params: { decay: 2.6, bright: 0.4 } }), sub = M.track('sub', { reverb: 0.08, gain: 0.55 });
+    const air = M.track('air', { reverb: 0.4, gain: 1.6, params: { freq: 420 } }), wh = M.track('whoosh', { reverb: 0.6, gain: 0.45, params: { f0: 200, f1: 1800 } }), gl = M.track('glass', { reverb: 0.8, gain: 0.4 });
+    air.hit(0, 0.8, M.beats);
+    const ch = [['E2', 'B2', 'G3'], ['C2', 'G2', 'E3', 'B3'], ['A1', 'E2', 'C3', 'G3'], ['D2', 'A2', 'F#3', 'E4'], ['E2', 'B2', 'G3', 'D4'], ['E2', 'B2', 'E3', 'F#3']], rt = ['E1', 'C1', 'A0', 'D1', 'E1', 'E1'];
+    ch.forEach((c, i) => { pad.chord(i * 4, c, 4, 0.55); if (i >= 1) sub.note(i * 4, rt[i], 3.7, i === 3 ? 0.85 : 0.55); });
+    plk.seq(2, 1, ['B3', null, 'E4', 'F#4', null, 'G4', null, 'D4', 'B3', null, 'A3', null, 'F#4', 'E4', null, null, 'G4', 'B4', null, 'A4', null, 'F#4', null, null], { vel: 0.55, gate: 2 });
+    wh.hit(M.b(9.4), 0.8, 3.2);                                    // the school
+    const r = S.rng(4), sc = S.scale('E5', 'dorian', 1); for (let b = 12; b < 17; b += 0.5) if (r() < 0.5) gl.note(b, sc[(r() * sc.length) | 0], 1, 0.25);
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); ctx = Stage.canvas2d({ z: 2 }); },
+
+  frame(t) {
+    const rays = smoothstep(2.5, 9.5, t) * (1 - 0.75 * smoothstep(14.5, 20, t)), rise = prog(t, 12, 8, E.inOutSine), shadow = Math.exp(-Math.pow((t - 15.6) / 1.5, 2));
+    sh.draw(t, { uRays: rays, uRise: rise, uShadow: shadow });
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // motes: slow snow in the water, brighter where the light is
+    for (let i = 0; i < 170; i++) { const d = hash(i, 1), x = Stage.mod(hash(i, 2) * W + 30 * Math.sin(t * 0.4 + i) + t * 9 * d, W), y = Stage.mod(hash(i, 3) * H - t * (6 + 16 * d) + 12 * Math.sin(t * 0.7 + i * 2), H), a = (0.1 + 0.5 * d) * (0.35 + 0.65 * rays) * (1 - y / H * 0.6); c.fillStyle = `rgba(210,255,225,${a})`; c.beginPath(); c.arc(x, y, 0.8 + 2.2 * d * d, 0, TAU); c.fill(); }
+    // the school: ninety fish following one path, each with its own offset; they turn as one
+    const u = prog(t, 9.2, 5.6);
+    if (u > 0 && u < 1) {
+      for (let i = 0; i < 90; i++) {
+        const lag = hash(i, 5) * 0.11, uu = u - lag + 0.05, e = 0.004;
+        const P = (q) => [lerp(2150, -260, q) + 130 * Math.sin(q * 9), 420 + 190 * Math.sin(q * 5.2 + 0.5) + 60 * Math.sin(q * 13)];
+        const a = P(uu), b = P(uu + e), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        const ox = (hash(i, 6) - 0.5) * 520, oy = (hash(i, 7) - 0.5) * 300, dz = hash(i, 8), sc = 1.5 + 1.7 * dz, wig = 0.25 * Math.sin(t * 14 + i);
+        const x = a[0] + ox * Math.cos(ang) - oy * Math.sin(ang) * 0.6, y = a[1] + ox * Math.sin(ang) * 0.4 + oy;
+        const flash = Math.pow(0.5 + 0.5 * Math.sin(uu * 30 + hash(i, 9) * 2), 6);          // flanks catching the light as they turn
+        c.save(); c.translate(x, y); c.rotate(ang + wig * 0.3); c.scale(sc, sc);
+        c.fillStyle = `rgba(${Math.round(120 + 135 * flash)},${Math.round(190 + 65 * flash)},${Math.round(180 + 60 * flash)},${0.6 + 0.4 * dz})`;
+        c.beginPath(); c.moveTo(13, 0); c.quadraticCurveTo(2, -5.5, -9, 0); c.quadraticCurveTo(2, 5.5, 13, 0); c.fill();
+        c.beginPath(); c.moveTo(-8, 0); c.lineTo(-15, -4.5 + 3 * wig); c.lineTo(-15, 4.5 + 3 * wig); c.closePath(); c.fill();
+        c.restore();
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>

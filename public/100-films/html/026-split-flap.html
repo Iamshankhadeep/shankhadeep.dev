@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 026 — Split-Flap</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 026 — SPLIT-FLAP
+ * A departures board shuffles through invented destinations and finally says goodbye.
+ * Each cell is a real split-flap: it can only reach a character by flipping through the whole drum in order,
+ * top half folding down over the next. One schedule drives both the flaps and the clicks you hear.
+ * Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, BAR = 2.5, COLS = 20, ROWS = 6, CW = 74, CHH = 104, PX = 82, PY = 126, X0 = (W - (COLS * PX - 8)) / 2, Y0 = 196;
+const DRUM = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:', N = DRUM.length, FLIP = 0.052;
+const row = (time, dest, gate) => (time + ' ' + dest.padEnd(10, ' ') + ' ' + gate.padStart(3, ' ')).slice(0, COLS);
+const START = [row('21:40', 'PORT ELAN', 'A4'), row('21:55', 'VESPER BAY', 'C12'), row('22:10', 'OSTRAVIK', 'B7'), row('22:25', 'SAN MIRELO', 'A9'), row('22:40', 'KESTREL', 'D2'), row('23:05', 'LOW HARBOR', 'C3')];
+// updates: [time, row, new text]
+const UPD = [[2.5, 0, row('22:55', 'NORHAVEN', 'B1')], [4.1, 1, row('23:10', 'ALDERMOOR', 'A6')], [5.7, 2, row('23:20', 'TAMSIN KEY', 'C8')], [7.3, 3, row('23:35', 'BRIAR END', 'D5')], [8.9, 4, row('23:50', 'ISLA VERRO', 'A2')], [10.5, 5, row('00:05', 'QUILLPOINT', 'B9')]];
+const BYE = ['', '', '    SEE YOU SOON    ', '', '', ''].map((s) => s.padEnd(COLS, ' '));
+for (let r = 0; r < ROWS; r++) UPD.push([12.5 + r * 0.06, r, BYE[r]]);
+// per-cell flip segments {t0, from, steps}
+const cells = [];
+for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+  const segs = []; let cur = DRUM.indexOf(START[r][c]);
+  for (const [t, rr, txt] of UPD) { if (rr !== r) continue; const to = DRUM.indexOf(txt[c]), steps = (to - cur + N) % N; if (steps) segs.push({ t0: t + c * 0.045, from: cur, steps }); cur = to; }
+  cells.push({ r, c, start: DRUM.indexOf(START[r][c]), segs });
+}
+function busy() {       // intervals in which each update is flipping, for the click track
+  return UPD.map(([t, r, txt]) => { let end = t; for (const cl of cells) if (cl.r === r) for (const s of cl.segs) if (Math.abs(s.t0 - (t + cl.c * 0.045)) < 1e-6) end = Math.max(end, s.t0 + s.steps * FLIP); return [t, end, r]; });
+}
+let ctx, atlas;
+
+Stage.create({
+  no: 26, title: 'Split-Flap', subtitle: 'departures · 96 bpm',
+  duration: 20, background: '#0c0d0f', grain: 0.06, poster: 16.5, vignette: 0.35,
+  fonts: ['700 96px "Big Shoulders Display Variable"', '500 18px "JetBrains Mono Variable"', '600 30px "Big Shoulders Display Variable"'],
+  slate: { at: 0.7, hold: 2.6, color: 'rgba(236,230,214,.8)', margin: 56 },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 26, swing: 0.12 });
+    M.master({ reverb: { decay: 2.0, size: 0.9, damp: 0.5 }, fadeOut: 2.0 });
+    const tick = M.track('tick', { reverb: 0.12, gain: 0.8, humanize: 0.3, params: { tone: 1500, decay: 0.004 } }), clack = M.track('rim', { reverb: 0.2, gain: 0.8, params: { tone: 900 } });
+    const ep = M.track('epiano', { reverb: 0.4, gain: 0.95, chorus: { rate: 0.5, depth: 2, mix: 0.3 } }), bass = M.track('sub', { reverb: 0.05, gain: 0.6 }), br = M.track('brush', { reverb: 0.2, gain: 0.9 }), ride = M.track('ride', { reverb: 0.2, gain: 0.5 });
+    const air = M.track('air', { reverb: 0.2, gain: 1.2 }), bell = M.track('vibes', { reverb: 0.5, gain: 0.6 });
+    air.hit(0, 0.8, M.beats);
+    const prog = ['Fmaj9', 'Dm9', 'Bbmaj9', 'C13', 'Fmaj9', 'Am7', 'Bbmaj9', 'Fmaj9'], roots = ['F1', 'D1', 'Bb0', 'C1', 'F1', 'A0', 'Bb0', 'F1'];
+    prog.forEach((c, i) => { const b = i * 4; ep.chord(b, c === 'C13' ? ['C3', 'E3', 'Bb3', 'D4', 'A4'] : c, 1.5, 0.55, { strum: 0.03 }); if (i < 7) ep.chord(b + 2.5, c === 'C13' ? ['C3', 'E3', 'Bb3', 'D4', 'A4'] : c, 1.0, 0.42, { strum: 0.03 }); bass.note(b, roots[i], 1.6, 0.8); if (i < 7) bass.note(b + 2.5, roots[i], 1.1, 0.55); if (i >= 1 && i < 7) { br.pattern(b, 0.5, '..x...x.', { vel: 0.5 }); ride.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.4 }); } });
+    // clicks: a flurry for as long as each update is flipping
+    for (const [t0, t1, r] of busy()) { clack.hit(M.b(t0), 0.8); const rate = t0 >= 12.4 ? 0.045 : 0.062; if (t0 >= 12.4 && r > 0) continue; for (let t = t0 + 0.03; t < (t0 >= 12.4 ? 14.6 : t1); t += rate) tick.hit(M.b(t), 0.4 + 0.5 * hash(Math.round(t * 1000), 3)); }
+    bell.note(M.b(14.75), 'A5', 3, 0.6); bell.note(M.b(14.75) + 0.5, 'C6', 3, 0.5); bell.note(M.b(14.75) + 1, 'F6', 4, 0.5);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 });
+    // atlas: every drum character on its flap, lit from above (top half a touch lighter)
+    atlas = Stage.buffer(N * CW * 2, CHH * 2); const a = atlas; a.scale(2, 2);
+    for (let i = 0; i < N; i++) {
+      const x = i * CW; a.save(); a.beginPath(); a.roundRect(x + 0.5, 0.5, CW - 1, CHH - 1, 7); a.clip();
+      const g = a.createLinearGradient(0, 0, 0, CHH); g.addColorStop(0, '#383a40'); g.addColorStop(0.495, '#2c2e33'); g.addColorStop(0.505, '#222327'); g.addColorStop(1, '#1b1c20'); a.fillStyle = g; a.fillRect(x, 0, CW, CHH);
+      a.fillStyle = '#ece6d6'; a.font = '700 96px "Big Shoulders Display Variable"'; a.textAlign = 'center'; a.textBaseline = 'alphabetic'; a.fillText(DRUM[i], x + CW / 2, CHH / 2 + 34);
+      a.restore();
+    }
+  },
+
+  frame(t) {
+    const c = ctx;
+    // the hall: dark wall, the board as a lit panel
+    const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#121316'); bg.addColorStop(1, '#08090a'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    const bx = X0 - 46, by = Y0 - 96, bw = COLS * PX - 8 + 92, bh = ROWS * PY - 22 + 96 + 44;
+    c.fillStyle = 'rgba(0,0,0,.5)'; c.beginPath(); c.roundRect(bx + 8, by + 14, bw, bh, 16); c.fill();
+    const pg = c.createLinearGradient(0, by, 0, by + bh); pg.addColorStop(0, '#1c1d20'); pg.addColorStop(1, '#131416'); c.fillStyle = pg; c.beginPath(); c.roundRect(bx, by, bw, bh, 16); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,.06)'; c.lineWidth = 1.5; c.stroke();
+    // header
+    c.textBaseline = 'alphabetic'; c.textAlign = 'left'; c.fillStyle = '#e9a23b'; c.font = '600 30px "Big Shoulders Display Variable"'; c.fillText('D E P A R T U R E S', X0, Y0 - 48);
+    c.fillStyle = 'rgba(236,230,214,.45)'; c.font = '500 18px "JetBrains Mono Variable"'; c.fillText('TIME', X0, Y0 - 16); c.fillText('DESTINATION', X0 + 6 * PX, Y0 - 16); c.fillText('GATE', X0 + 17 * PX, Y0 - 16);
+    c.textAlign = 'right'; c.fillStyle = '#e9a23b'; const mm = 38 + Math.floor(t / 5); c.fillText('LOCAL  21:' + mm + (Math.floor(t * 2) % 2 ? ' ' : '.'), X0 + COLS * PX - 8, Y0 - 48);
+    // flaps
+    for (const cl of cells) {
+      let cur = cl.start, next = cur, p = 0;
+      for (const s of cl.segs) { const el = (t - s.t0) / FLIP; if (el <= 0) break; if (el >= s.steps) { cur = (s.from + s.steps) % N; next = cur; p = 0; } else { const k = Math.floor(el); cur = (s.from + k) % N; next = (cur + 1) % N; p = el - k; } }
+      const x = X0 + cl.c * PX, y = Y0 + cl.r * PY, hh = CHH / 2, sw = CW * 2, shh = CHH;
+      if (p <= 0) c.drawImage(atlas.canvas, cur * sw, 0, sw, shh * 2, x, y, CW, CHH);
+      else {
+        c.drawImage(atlas.canvas, next * sw, 0, sw, shh, x, y, CW, hh);                 // new top, waiting behind
+        c.drawImage(atlas.canvas, cur * sw, shh, sw, shh, x, y + hh, CW, hh);          // old bottom, still in place
+        if (p < 0.5) { const k = Math.cos(p * Math.PI); c.drawImage(atlas.canvas, cur * sw, 0, sw, shh, x, y + hh - hh * k, CW, hh * k); c.fillStyle = `rgba(0,0,0,${0.5 * (1 - k)})`; c.fillRect(x, y + hh - hh * k, CW, hh * k); }
+        else { const k = -Math.cos(p * Math.PI); c.drawImage(atlas.canvas, next * sw, shh, sw, shh, x, y + hh, CW, hh * k); c.fillStyle = `rgba(0,0,0,${0.45 * (1 - k)})`; c.fillRect(x, y + hh, CW, hh * k); }
+      }
+      c.fillStyle = '#060607'; c.fillRect(x, y + hh - 1, CW, 2);                         // the split
+      c.fillStyle = '#0a0a0b'; c.fillRect(x - 3, y + hh - 9, 3, 18); c.fillRect(x + CW, y + hh - 9, 3, 18);   // axle pins
+    }
+    // amber status lamps: lit while a row is turning
+    for (let r = 0; r < ROWS; r++) {
+      let on = 0; for (const cl of cells) if (cl.r === r) for (const s of cl.segs) if (t > s.t0 && t < s.t0 + s.steps * FLIP) on = 1;
+      const lx = X0 + COLS * PX + 12, ly = Y0 + r * PY + CHH / 2, glow = on ? 0.75 + 0.25 * Math.sin(t * 30) : 0.12;
+      c.fillStyle = `rgba(233,162,59,${0.25 * glow})`; c.beginPath(); c.arc(lx, ly, 15, 0, 6.2832); c.fill(); c.fillStyle = `rgba(233,162,59,${glow})`; c.beginPath(); c.arc(lx, ly, 6, 0, 6.2832); c.fill();
+    }
+    // overhead light falling off across the board
+    const lg = c.createRadialGradient(W / 2, by - 200, 100, W / 2, by + 200, 1300); lg.addColorStop(0, 'rgba(255,240,210,.07)'); lg.addColorStop(1, 'rgba(0,0,0,.28)'); c.fillStyle = lg; c.fillRect(0, 0, W, H);
+  }
+});
+</script>
+</body>
+</html>

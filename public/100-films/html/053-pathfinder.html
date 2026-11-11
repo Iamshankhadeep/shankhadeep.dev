@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 053 — Pathfinder</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 053 — PATHFINDER
+ * A maze is carved, searched, and solved. The maze (recursive backtracker, with a few extra openings so there is
+ * more than one way through), the A* search and the shortest path are all computed once, in order; the film
+ * replays them. Nine bars at 108 bpm (2.22 s each): carve (1–3) → search wavefront (4–7) → the path is found on a
+ * downbeat and drawn in gold (8) → a dot runs it (9). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 108, GW = 44, GH = 24, CS = 40, X0 = (W - GW * CS) / 2, Y0 = (H - GH * CS) / 2;
+const T_CARVE = [0.5, BAR * 3 - 0.3], T_SEARCH = [BAR * 3, BAR * 7], T_PATH = BAR * 7, T_RUN = BAR * 8;
+const MZ = solve();
+const teal = Stage.color.ramp(['#0f3550', '#136a78', '#1fa39a', '#7fe0c8']);
+let ctx, base;
+
+function solve() {
+  const r = Stage.rng(53), idx = (x, y) => y * GW + x, E_ = new Uint8Array(GW * GH), S_ = new Uint8Array(GW * GH), seen = new Uint8Array(GW * GH), order = [];
+  // carve: depth-first from the start cell
+  const stack = [[1, 1]]; seen[idx(1, 1)] = 1; order.push(idx(1, 1));
+  while (stack.length) { const [x, y] = stack[stack.length - 1], nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => x + dx >= 0 && y + dy >= 0 && x + dx < GW && y + dy < GH && !seen[idx(x + dx, y + dy)]); if (!nb.length) { stack.pop(); continue; } const [dx, dy] = nb[(r() * nb.length) | 0]; if (dx === 1) E_[idx(x, y)] = 1; else if (dx === -1) E_[idx(x - 1, y)] = 1; else if (dy === 1) S_[idx(x, y)] = 1; else S_[idx(x, y - 1)] = 1; seen[idx(x + dx, y + dy)] = 1; order.push(idx(x + dx, y + dy)); stack.push([x + dx, y + dy]); }
+  for (let k = 0; k < 70; k++) { const x = (r() * (GW - 1)) | 0, y = (r() * (GH - 1)) | 0; if (r() < 0.5) E_[idx(x, y)] = 1; else S_[idx(x, y)] = 1; }   // braid it a little
+  const carveRank = new Int32Array(GW * GH); order.forEach((c, k) => { carveRank[c] = k; });
+  // A*: Manhattan heuristic
+  const start = idx(1, 1), goal = idx(GW - 2, GH - 2), g = new Float32Array(GW * GH).fill(1e9), from = new Int32Array(GW * GH).fill(-1), closed = new Uint8Array(GW * GH), visit = [], open = [start]; g[start] = 0;
+  const h = (c) => Math.abs((c % GW) - (GW - 2)) + Math.abs(((c / GW) | 0) - (GH - 2));
+  while (open.length) { let bi = 0; for (let i = 1; i < open.length; i++) if (g[open[i]] + h(open[i]) * 1.001 < g[open[bi]] + h(open[bi]) * 1.001) bi = i; const cur = open.splice(bi, 1)[0]; if (closed[cur]) continue; closed[cur] = 1; visit.push(cur); if (cur === goal) break; const x = cur % GW, y = (cur / GW) | 0, nb = []; if (x < GW - 1 && E_[cur]) nb.push(cur + 1); if (x > 0 && E_[cur - 1]) nb.push(cur - 1); if (y < GH - 1 && S_[cur]) nb.push(cur + GW); if (y > 0 && S_[cur - GW]) nb.push(cur - GW); for (const n of nb) if (!closed[n] && g[cur] + 1 < g[n]) { g[n] = g[cur] + 1; from[n] = cur; open.push(n); } }
+  const path = []; for (let c = goal; c >= 0; c = from[c]) path.unshift(c);
+  const visitRank = new Int32Array(GW * GH).fill(-1); visit.forEach((c, k) => { visitRank[c] = k; });
+  return { E: E_, S: S_, order, carveRank, visit, visitRank, g, path, start, goal, maxG: g[goal] };
+}
+const cx = (c) => X0 + (c % GW) * CS + CS / 2, cy = (c) => Y0 + ((c / GW) | 0) * CS + CS / 2;
+
+Stage.create({
+  no: 53, title: 'Pathfinder', subtitle: 'maze · a* search · 108 bpm',
+  duration: 20, background: '#081527', grain: 0.045, poster: 17.2,
+  fonts: ['500 18px "JetBrains Mono Variable"'],
+  slate: { at: 0.6, hold: 2.6, pos: 'bl', margin: 16 },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 53 });
+    M.master({ reverb: { decay: 1.8, size: 0.9, damp: 0.45 }, fadeOut: 1.8 });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 1.7, delay: { time: 0.75, fb: 0.3, mix: 0.2 }, params: { decay: 0.9, bright: 0.6 } }), tk = M.track('tick', { reverb: 0.15, gain: 0.6, params: { tone: 1700 } });
+    const kick = M.track('kick', { reverb: 0.03, gain: 0.5, params: { decay: 0.22 } }), rim = M.track('rim', { reverb: 0.2, gain: 0.5 }), sub = M.track('sub', { reverb: 0.05, gain: 0.32 }), pad = M.track('pad', { reverb: 0.6, gain: 0.65 }), bell = M.track('bell', { reverb: 0.75, gain: 0.8 }), arp = M.track('arp', { reverb: 0.3, gain: 0.45 });
+    const sc = S.scale('D3', 'dorian', 3);
+    // carving: a dry clicking; searching: eighth notes whose pitch is how far the wavefront has reached
+    for (let b = 1; b < 11.5; b += 0.25) if (hash(b * 4, 2) < 0.7) tk.hit(b, 0.4 + 0.4 * hash(b * 4, 3));
+    for (let k = 0; k < 32; k++) { const b = 12 + k * 0.5, t = b * 60 / 108, u = clamp01((t - T_SEARCH[0]) / (T_SEARCH[1] - T_SEARCH[0])), v = MZ.visit[Math.min(MZ.visit.length - 1, Math.floor(u * MZ.visit.length))]; plk.note(b, sc[Math.round(MZ.g[v] / MZ.maxG * (sc.length - 1))], 0.45, 0.5 + 0.25 * (k % 4 === 0)); }
+    const prog = ['Dm9', 'Bbmaj7', 'Gm9', 'A7sus4'], rt = ['D1', 'Bb0', 'G1', 'A1'];
+    for (let bar = 0; bar < 9; bar++) { const b = bar * 4; pad.chord(b, prog[bar % 4], 4, 0.5, { octave: 3 }); if (bar >= 1) sub.note(b, rt[bar % 4], 3.5, bar >= 3 ? 0.8 : 0.5); if (bar >= 3 && bar < 7) { kick.pattern(b, 1, 'x.x.', { vel: 0.85 }); rim.pattern(b, 0.5, '..x...xx', { vel: 0.5 }); } if (bar >= 7) arp.arp(b, 'Dm9', 0.25, 4, { octave: 4, octaves: 2, mode: 'up', vel: 0.5 }); }
+    bell.note(28, 'D5', 4, 0.9); bell.note(28, 'A5', 4, 0.6); bell.note(28.5, 'F6', 4, 0.5); kick.hit(28, 1);
+    plk.chord(32, ['D3', 'A3', 'F4', 'C5', 'E5'], 4, 0.7, { strum: 0.06 });
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 2, dpr: 2 }); base = Stage.canvas2d({ z: 1 }); const c = base, g = c.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 1200); g.addColorStop(0, '#0e2440'); g.addColorStop(1, '#060e1c'); c.fillStyle = g; c.fillRect(0, 0, W, H); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const carve = prog(t, T_CARVE[0], T_CARVE[1] - T_CARVE[0], E.inOutSine) * MZ.order.length, search = prog(t, T_SEARCH[0], T_SEARCH[1] - T_SEARCH[0], Stage.ease.bezier(0.3, 0.1, 0.6, 1)) * MZ.visit.length;
+    // floors: uncarved cells are solid; searched cells take a teal by distance; the frontier glows
+    for (let i = 0; i < GW * GH; i++) {
+      const x = X0 + (i % GW) * CS, y = Y0 + ((i / GW) | 0) * CS, cr = MZ.carveRank[i];
+      if (cr > carve) { c.fillStyle = 'rgba(160,190,230,.085)'; c.fillRect(x + 1, y + 1, CS - 2, CS - 2); continue; }
+      const fresh = carve - cr; if (fresh < 26 && t < T_CARVE[1] + 0.4) { c.fillStyle = `rgba(210,235,255,${0.5 * (1 - fresh / 26)})`; c.fillRect(x + 3, y + 3, CS - 6, CS - 6); }
+      const vr = MZ.visitRank[i]; if (vr >= 0 && vr < search) { const age = search - vr, a = Math.min(1, age / 6); c.globalAlpha = 0.88 * a; c.fillStyle = teal(MZ.g[i] / MZ.maxG); c.fillRect(x + 2.5, y + 2.5, CS - 5, CS - 5); if (age < 34 && t < T_PATH) { c.globalAlpha = 0.75 * (1 - age / 34); c.fillStyle = '#d8fff2'; c.fillRect(x + 2.5, y + 2.5, CS - 5, CS - 5); } c.globalAlpha = 1; }
+    }
+    // walls of every carved cell
+    c.strokeStyle = 'rgba(214,230,250,.82)'; c.lineWidth = 2; c.lineCap = 'square'; c.beginPath();
+    for (let i = 0; i < GW * GH; i++) { if (MZ.carveRank[i] > carve) continue; const gx = i % GW, gy = (i / GW) | 0, x = X0 + gx * CS, y = Y0 + gy * CS; if (!MZ.E[i]) { c.moveTo(x + CS, y); c.lineTo(x + CS, y + CS); } if (!MZ.S[i]) { c.moveTo(x, y + CS); c.lineTo(x + CS, y + CS); } if (gx === 0) { c.moveTo(x, y); c.lineTo(x, y + CS); } if (gy === 0) { c.moveTo(x, y); c.lineTo(x + CS, y); } }
+    c.stroke();
+    // the carver's head
+    if (carve < MZ.order.length) { const h = MZ.order[Math.floor(carve)]; c.fillStyle = '#ffffff'; c.fillRect(cx(h) - 9, cy(h) - 9, 18, 18); }
+    // start and goal
+    const mk = (cell, col, a) => { c.fillStyle = Stage.color.alpha(col, 0.25 * a); c.beginPath(); c.arc(cx(cell), cy(cell), 22 + 4 * Math.sin(t * 3), 0, TAU); c.fill(); c.fillStyle = Stage.color.alpha(col, a); c.beginPath(); c.arc(cx(cell), cy(cell), 10, 0, TAU); c.fill(); };
+    const ma = prog(t, T_CARVE[1] - 0.6, 0.6, E.outBack); if (ma > 0) { mk(MZ.start, '#7fe0c8', clamp01(ma)); mk(MZ.goal, '#f4c04e', clamp01(ma)); }
+    // the shortest path, in gold
+    const pa = prog(t, T_PATH, BAR * 0.9, E.inOutCubic);
+    if (pa > 0) { const n = pa * (MZ.path.length - 1), draw = (lw, col) => { c.strokeStyle = col; c.lineWidth = lw; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); for (let k = 0; k <= Math.floor(n); k++) k ? c.lineTo(cx(MZ.path[k]), cy(MZ.path[k])) : c.moveTo(cx(MZ.path[k]), cy(MZ.path[k])); if (n < MZ.path.length - 1) { const a = MZ.path[Math.floor(n)], b = MZ.path[Math.floor(n) + 1], f = n - Math.floor(n); c.lineTo(lerp(cx(a), cx(b), f), lerp(cy(a), cy(b), f)); } c.stroke(); };
+      draw(22, 'rgba(244,192,78,.22)'); draw(10, '#f4c04e'); draw(3, '#fff3cf'); }
+    // the runner
+    const ru = prog(t, T_RUN, 1.9, E.inOutSine); if (ru > 0 && ru < 1) { const n = ru * (MZ.path.length - 1), a = MZ.path[Math.floor(n)], b = MZ.path[Math.min(MZ.path.length - 1, Math.floor(n) + 1)], f = n - Math.floor(n), x = lerp(cx(a), cx(b), f), y = lerp(cy(a), cy(b), f); c.fillStyle = 'rgba(255,255,255,.3)'; c.beginPath(); c.arc(x, y, 26, 0, TAU); c.fill(); c.fillStyle = '#ffffff'; c.beginPath(); c.arc(x, y, 12, 0, TAU); c.fill(); }
+    // status line
+    const on = prog(t, 0.6, 0.6) * (1 - prog(t, 19.1, 0.7)); c.font = '500 18px "JetBrains Mono Variable"'; c.textBaseline = 'alphabetic'; c.textAlign = 'right'; c.fillStyle = `rgba(214,230,250,${0.75 * on})`;
+    const msg = t < T_CARVE[1] ? 'C A R V I N G   ' + String(Math.floor(carve)).padStart(4, '0') + ' / ' + MZ.order.length : t < T_PATH ? 'S E A R C H I N G   ' + String(Math.floor(search)).padStart(4, '0') + '  C E L L S' : 'S H O R T E S T   P A T H   ' + (MZ.path.length - 1) + '  S T E P S';
+    c.fillText(msg, X0 + GW * CS, Y0 + GH * CS + 36);
+  }
+});
+</script>
+</body>
+</html>

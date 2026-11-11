@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 089 — Visible Music</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 089 — VISIBLE MUSIC
+ * A score you can read without training: every instrument is a shape, and every movement on screen is a note.
+ * Nine bars at 108 bpm (bar = 2.222 s). Bars 1–4 introduce kick ● · hat ❘❘❘ · snare ▲ · bass ∿ · chords ▭ · melody ╱•
+ * one at a time, each with its name. On the downbeat of bar 5 the names leave and the shapes step into one
+ * rising composition (bars 5–8, loudest in 7–8); the last chord (bar 9) files them into a legend row.
+ * Every shape therefore has three poses — introduced / composed / filed — blended by pose().
+ * Nothing is keyframed by hand except layout: all timing is read back from Stage.events(). */
+const { ease: E, prog, win, clamp, clamp01, lerp, hash, TAU } = Stage;
+const INK = '#1b1915', RED = '#d53c28', YEL = '#f2b417', BLU = '#2251b5', CREAM = '#f1e9d6';
+const U = 108, GX = 96, GY = 90, CY = GY + 4 * U;            // 16 × 8 modules; one column = one sixteenth note
+const BAR = 240 / 108;
+const ROWX = [0, 1, 2, 3, 4, 5].map((i) => 285 + 270 * i);    // the legend row
+const LABEL_FONT = '700 30px "Archivo Variable"';
+
+let ctx, paper, ev = {}, chords = [], T = {}, labelW = {};
+const rowP = (t, i) => prog(t, T.row + 0.02 + i * 0.045, 0.82, E.swift);
+const ensP = (t, i) => prog(t, T.ens - 0.4 + i * 0.04, 0.85, E.swift);           // straddles the bar-5 downbeat
+const pose = (intro, comp, row, e, r) => lerp(lerp(intro, comp, e), row, r);
+const power = (vel) => clamp01((vel - 0.7) / 0.3);                               // how hard a note was played → how big it draws
+const DEG = { 0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6 };
+const degree = (m) => Math.floor(m / 12) * 7 + DEG[m % 12] - 40;      // A4 → 0 … D6 → 10 (diatonic steps)
+
+// ── kick: a black circle that expands and snaps back
+function kickPose(t) {
+  const a = prog(t, T.hat0 - 0.12, 0.9, E.swift), e = ensP(t, 0), r = rowP(t, 0);
+  return { x: pose(lerp(960, 366, a), 450, ROWX[0], e, r), y: pose(lerp(CY - 6, CY, a), 600, CY, e, r), R: pose(lerp(232, 150, a), 186, 96, e, r) };
+}
+function kickEnv(t) {
+  let s = 0; const n = Stage.count('kick', t);
+  for (let k = n - 1; k >= 0 && k > n - 3; k--) {
+    const e = ev.kick[k], d = t - e.t;
+    s += e.vel * (d < 0.05 ? E.outCubic(d / 0.05) : Math.exp(-(d - 0.05) * 9) * Math.cos((d - 0.05) * 19));
+  }
+  return s;
+}
+function drawKick(t) {
+  const c = ctx, p = kickPose(t), n = Stage.count('kick', t);
+  c.fillStyle = INK; c.beginPath(); c.arc(p.x, p.y, p.R * (1 + 0.19 * kickEnv(t)), 0, TAU); c.fill();
+  for (let k = n - 1; k >= 0 && k > n - 3; k--) {              // the pressure ring it throws off
+    const e = ev.kick[k], d = (t - e.t) / 0.55; if (d >= 1) continue; const pw = power(e.vel);
+    c.globalAlpha = Math.pow(1 - d, 1.6) * (0.55 + 0.35 * pw); c.strokeStyle = INK; c.lineWidth = 1.5 + (2.5 + 2.5 * pw) * (1 - d);
+    c.beginPath(); c.arc(p.x, p.y, p.R * (1.08 + (0.14 + 0.1 * pw) * E.outCubic(d)), 0, TAU); c.stroke();
+  }
+  c.globalAlpha = 1;
+}
+
+// ── snare: a red triangle that turns over and bursts
+function tri(c, x, y, R, rot) {
+  c.beginPath();
+  for (let k = 0; k < 3; k++) { const a = rot - Math.PI / 2 + k * TAU / 3; c[k ? 'lineTo' : 'moveTo'](x + Math.cos(a) * R, y + Math.sin(a) * R); }
+  c.closePath();
+}
+function drawSnare(t) {
+  const c = ctx, a = prog(t, T.snare0 - 0.32, 0.32, E.outBack); if (a <= 0) return;
+  const en = ensP(t, 1), r = rowP(t, 1), x = pose(1608, 1566, ROWX[1], en, r), y = pose(CY + 18, 400, CY + 26, en, r), R = pose(118, 140, 112, en, r), reach = lerp(1, 0.5, r);
+  const n = Stage.count('snare', t), N = ev.snare.length;
+  let turn = 0, punch = 0;
+  if (n > 0) { const e = ev.snare[n - 1], d = t - e.t; turn = n - 1 + E.outBack(prog(t, e.t, 0.13)); punch = e.vel * Math.exp(-d / 0.11); }
+  const rot = (turn - N) * Math.PI / 3;                          // ends pointing up
+  c.fillStyle = RED;
+  for (let k = n - 1; k >= 0 && k > n - 4; k--) {               // shards
+    const e = ev.snare[k], d = (t - e.t) / 0.6; if (d >= 1) continue;
+    for (let j = 0; j < 9; j++) {
+      const ang = j / 9 * TAU + hash(k * 16 + j, 3) * 0.6 + k, far = R * (0.95 + (0.75 + 0.95 * hash(k * 16 + j, 5)) * reach * E.outCubic(d));
+      const s = R * (0.1 + 0.1 * hash(k * 16 + j, 7)) * e.vel * Math.pow(1 - d, 0.8);
+      tri(c, x + Math.cos(ang) * far, y + Math.sin(ang) * far, s, ang + d * 4 * (hash(j, 9) - 0.5) + Math.PI / 2); c.fill();
+    }
+  }
+  tri(c, x, y, R * a * (1 + 0.26 * punch), rot); c.fill();
+}
+
+// ── hats: yellow ticks stepping along a line, one slot per sixteenth
+function drawHat(t) {
+  const c = ctx, a = prog(t, T.hat0 - 0.45, 0.65, E.inOutCubic); if (a <= 0) return;
+  const r = rowP(t, 2), x0 = lerp(GX, ROWX[2] - 104, r), L = lerp(16 * U, 208, r), y = lerp(GY + U, CY + 40, r), tw = lerp(24, 7, r), th = lerp(86, 80, r);
+  const ph = Math.min(t, T.hatEnd), curBar = Math.floor(ph / BAR + 1e-6), phSlot = (ph / BAR - curBar) * 16;
+  const n = Stage.count('hat', t), seen = new Array(16).fill(false);
+  c.fillStyle = YEL;
+  for (let k = n - 1; k >= 0; k--) {
+    const e = ev.hat[k]; if (t - e.t > 2 * BAR) break;
+    const abs = Math.round(e.t / BAR * 16), slot = abs % 16, bar = Math.floor(abs / 16);
+    if (seen[slot]) continue; seen[slot] = true;
+    let keep = 1;
+    if (bar < curBar - 1) continue;
+    if (bar === curBar - 1) keep = 1 - prog(phSlot, slot + 0.2, 1.4, E.inOutCubic);     // the sweep passed and nothing was played
+    const age = t - e.t, pop = E.outBack(prog(age, 0, 0.1)), sag = lerp(1, 0.42, prog(age, 0.1, BAR * 0.95, E.outCubic));
+    const h = th * pop * sag * (0.5 + 0.55 * e.vel) * keep; if (h < 0.5) continue;
+    c.fillRect(x0 + (slot + 0.5) / 16 * L - tw / 2, y - h, tw, h);
+  }
+  c.strokeStyle = INK; c.lineWidth = 3; c.lineCap = 'butt'; c.beginPath(); c.moveTo(x0, y); c.lineTo(x0 + L * a, y); c.stroke();
+  if (n > 0) {                                                   // the reading point
+    const px = x0 + (phSlot + 0.5) / 16 * L, s = lerp(9, 5, r), k = prog(t, T.hat0, 0.25, E.outBack);
+    c.fillStyle = INK; c.beginPath(); c.moveTo(px, y + 5); c.lineTo(px - s * k, y + 5 + s * 1.7 * k); c.lineTo(px + s * k, y + 5 + s * 1.7 * k); c.closePath(); c.fill();
+  }
+}
+
+// ── bass: a thick blue wave; its height is the pitch
+const A_MIN = 3, BASSY = GY + 7.36 * U, ampOf = (m) => lerp(9, 54, clamp01((m - 31) / 17));
+function bassAmp(t, depth) {
+  const i = Stage.count('bass', t) - 1; if (i < 0) return A_MIN;
+  const e = ev.bass[i], target = ampOf(e.midi) * (0.75 + 0.3 * e.vel);
+  if (t < e.t + e.dur) { const base = (depth || 0) < 3 ? bassAmp(e.t - 1e-4, (depth || 0) + 1) : A_MIN; return lerp(base, target, E.outBack(prog(t, e.t, 0.11))); }
+  return A_MIN + (target - A_MIN) * Math.exp(-(t - e.t - e.dur) / 0.2);
+}
+function drawBass(t) {
+  const c = ctx, a = prog(t, T.bass0 - 0.55, 0.55, E.inOutCubic); if (a <= 0) return;
+  const r = rowP(t, 3), x0 = lerp(GX, ROWX[3] - 104, r), L = lerp(16 * U, 208, r), y = lerp(BASSY, CY, r);
+  const A = bassAmp(t) * lerp(1, 1.05, r), cyc = lerp(6, 1.5, r), ph = -Math.PI * t * 108 / 60 * 0.5;
+  c.strokeStyle = BLU; c.lineWidth = lerp(27, 15, r); c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath();
+  const N = 220;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N * a, w = Math.sin(Math.PI * u), env = Math.pow(w, 0.55) * (0.72 + 0.28 * Math.sin(u * 9.4 + ph * 0.5));
+    c[i ? 'lineTo' : 'moveTo'](x0 + u * L, y + A * env * Math.sin(u * cyc * TAU + ph));
+  }
+  c.stroke();
+}
+
+// ── chords: translucent planes that slide in for exactly as long as the chord sounds
+const PLANE = [RED, YEL, BLU];
+function drawChords(t) {
+  const c = ctx, en = ensP(t, 4), r = rowP(t, 4), cx = pose(960, 1016, ROWX[4], en, r), cy = pose(CY, 560, CY, en, r), sc = pose(0.92, 1.16, 0.34, en, r);
+  c.globalCompositeOperation = 'multiply';
+  chords.forEach((g, gi) => {
+    if (t < g.t - 0.02 || t > g.end + 0.4) return;
+    const n = g.tones.length;
+    g.tones.forEach((e, k) => {
+      const pin = prog(t, e.t, 0.34, E.outExpo), pout = prog(t, e.t + e.dur - 0.06, 0.3, E.inCubic), al = Math.min(1, pin * 1.6) * (1 - pout);
+      if (al <= 0.002) return;
+      const beats = e.dur * 108 / 60, big = 0.88 + 0.24 * clamp01((e.vel - 0.48) / 0.2), w = U * (1.55 + 0.3 * beats) * big, h = U * 1.72 * big;
+      const xx = (k - (n - 1) / 2) * 0.8 * U + (pin - 1) * (230 + 40 * k) + pout * 240, yy = -(e.midi - 66) * 10.5;
+      c.globalAlpha = 0.8 * al; c.fillStyle = PLANE[(k + gi) % 3];
+      c.fillRect(cx + (xx - w / 2) * sc, cy + (yy - h / 2) * sc, w * sc, h * sc);
+    });
+  });
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+}
+
+// ── melody: a black dot hopping along a diagonal staff; distance up the line is the pitch
+function drawMelody(t) {
+  const c = ctx, a = prog(t, T.mel0 - 0.7, 0.55, E.inOutCubic); if (a <= 0) return;
+  const en = ensP(t, 5), r = rowP(t, 5), k = pose(1, 1.12, 0.3, en, r);
+  const ax = pose(640, 668, ROWX[5] - 96, en, r), ay = pose(CY + 220, 792, CY + 64, en, r), bx = pose(1300, 1392, ROWX[5] + 96, en, r), by = pose(CY - 220, 309, CY - 64, en, r);
+  const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len, nx = uy, ny = -ux;   // n points up-left
+  const at = (m) => { const u = (degree(m) + 0.5) / 11; return [ax + dx * u, ay + dy * u]; };
+  c.strokeStyle = INK; c.lineCap = 'butt'; c.lineWidth = 3; c.beginPath(); c.moveTo(ax, ay); c.lineTo(ax + dx * a, ay + dy * a); c.stroke();
+  c.lineWidth = lerp(2, 1.5, r); c.beginPath();
+  for (let d = 0; d < 11; d++) {
+    const u = (d + 0.5) / 11, q = prog(a, u - 0.06, 0.12, E.outCubic); if (q <= 0) continue;
+    const tl = (d === 2 || d === 9 ? 17 : 9) * lerp(1, 0.55, r) * q, x = ax + dx * u, y = ay + dy * u;
+    c.moveTo(x - nx * tl, y - ny * tl); c.lineTo(x + nx * tl, y + ny * tl);
+  }
+  c.stroke();
+  const n = Stage.count('pluck', t), cur = n > 0 ? ev.pluck[n - 1] : null, nxt = ev.pluck[n];
+  for (let j = n - 1; j >= 0 && j > n - 6; j--) {                // landing rings
+    const e = ev.pluck[j], d = (t - e.t) / 1.0; if (d >= 1) continue; const p = at(e.midi);
+    c.globalAlpha = 0.6 * Math.pow(1 - d, 2); c.lineWidth = 2.5; c.beginPath(); c.arc(p[0], p[1], (22 + 34 * E.outCubic(d)) * lerp(1, 0.5, r), 0, TAU); c.stroke();
+  }
+  c.globalAlpha = 1;
+  const R = pose(21, 24, 12, en, r);
+  let x, y, sq = 0, al = 1;
+  if (cur) { [x, y] = at(cur.midi); sq = 0.24 * Math.exp(-(t - cur.t) / 0.07); }
+  if (nxt) {
+    const hd = cur ? Math.min(0.19, (nxt.t - cur.t) * 0.62) : 0.34, p = (t - (nxt.t - hd)) / hd;
+    if (p > 0) {
+      const q = at(nxt.midi), e = E.inOutSine(p), arc = 4 * p * (1 - p);
+      if (cur) { const dist = Math.hypot(q[0] - x, q[1] - y), hgt = (30 * k + 0.3 * dist); x = lerp(x, q[0], e) + nx * hgt * arc; y = lerp(y, q[1], e) + ny * hgt * arc; sq = -0.16 * arc; }
+      else { const f = 1 - E.inQuad(p); x = q[0] + nx * 260 * f; y = q[1] + ny * 260 * f; al = clamp01(p * 3); }
+    } else if (!cur) return;
+  }
+  c.save(); c.translate(x, y); c.rotate(Math.atan2(uy, ux)); c.scale(1 + sq, 1 - sq); c.globalAlpha = al;
+  c.fillStyle = INK; c.beginPath(); c.arc(0, 0, R, 0, TAU); c.fill();
+  c.strokeStyle = CREAM; c.lineWidth = lerp(5, 2.5, r); c.beginPath(); c.arc(0, 0, R + 2.5, 0, TAU); c.stroke();   // keeps the dot legible over the dark overprint
+  c.restore(); c.globalAlpha = 1;
+}
+
+// ── the visible grid
+function drawGrid(t) {
+  const c = ctx; c.strokeStyle = INK; c.lineCap = 'butt';
+  for (let i = 0; i <= 16; i++) {
+    const p = prog(t, 0.02 + Math.abs(i - 8) * 0.035, 0.75, E.outQuart), x = GX + i * U, beat = i % 4 === 0;
+    c.globalAlpha = beat ? 0.22 : 0.1; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, CY - 4 * U * p); c.lineTo(x, CY + 4 * U * p); c.stroke();
+  }
+  for (let j = 0; j <= 8; j++) {
+    const p = prog(t, 0.05 + Math.abs(j - 4) * 0.06, 0.85, E.outQuart), y = GY + j * U, edge = j === 0 || j === 8;
+    c.globalAlpha = edge ? 0.22 : 0.1; c.lineWidth = 1.5; c.beginPath(); c.moveTo(960 - 8 * U * p, y); c.lineTo(960 + 8 * U * p, y); c.stroke();
+  }
+  c.globalAlpha = 1;
+}
+
+// ── names: once while each shape is introduced, once more under the finished row
+function drawLabels(t) {
+  const c = ctx, kp = kickPose(t);
+  c.font = LABEL_FONT; c.letterSpacing = '6px'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = INK;
+  const L = [
+    ['KICK', 0.3, kp.x, kp.y + kp.R + lerp(90, 102, prog(t, T.hat0 - 0.12, 0.9, E.swift))], ['SNARE', T.snare0 + 0.08, 1608, CY + 252],
+    ['HAT', T.hat0 + 0.15, GX + labelW.HAT / 2, GY + U + 50], ['BASS', T.bass0 + 0.1, GX + labelW.BASS / 2, BASSY - 64],
+    ['CHORDS', T.ch0 + 0.12, 960, CY + 252], ['MELODY', T.mel0 + 0.05, 1330 + labelW.MELODY / 2, CY - 206]
+  ];
+  L.forEach(([s, t0, x, y], i) => {
+    const t1 = T.ens - 0.4 + i * 0.03;                             // gone just as the shapes start to move
+    let al = win(t, t0, t1, 0.4, 0.4, E.outCubic), oy = (1 - prog(t, t0, 0.45, E.outCubic)) * 14 + prog(t, t1 - 0.4, 0.4, E.inCubic) * 10;
+    if (t > T.row) { const q = prog(t, T.row + 0.12 + i * 0.05, 0.45, E.outCubic); al = q; x = ROWX[i]; y = CY + 184; oy = (1 - q) * 14; }
+    if (al <= 0.003) return;
+    c.globalAlpha = al; c.fillText(s, x + 3, y + oy);
+  });
+  c.globalAlpha = 1; c.letterSpacing = '0px';
+}
+
+Stage.create({
+  no: 89, title: 'Visible Music', subtitle: 'canvas 2d · note events · 108 bpm',
+  duration: 20, background: CREAM, grain: 0.055, vignette: 0.1, poster: 12.4,
+  fonts: [LABEL_FONT],
+  fade: { in: 0.5, out: 0.75, color: CREAM },
+  slate: { at: 0.5, hold: 2.5, pos: 'bl', color: 'rgba(27,25,21,0.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 89 });
+    M.master({ reverb: { decay: 1.4, size: 0.8, damp: 0.5 }, fadeOut: 0.9 });
+    // the band leans in twice: at the bar-5 downbeat (8.89 s) and again at bar 7 (13.33 s)
+    const lift = (g) => (t) => g * (0.78 + 0.11 * Stage.smoothstep(8.7, 9.0, t) + 0.11 * Stage.smoothstep(13.15, 13.45, t));
+    const kick = M.track('kick', { gain: 0.9 });
+    const snare = M.track('snare', { gain: 0.62, reverb: 0.2 });
+    const hat = M.track('hat', { gain: 0.42 });
+    const bass = M.track('bass', { gain: lift(0.84), reverb: 0.02 });
+    const ep = M.track('epiano', { gain: lift(0.8), reverb: 0.32, chorus: { rate: 0.5, depth: 2.5, mix: 0.35 } });
+    const pl = M.track('pluck', { gain: lift(0.98), reverb: 0.3, delay: { time: 0.75, fb: 0.22, mix: 0.14 } });
+    const KP = 'x.....x.x.......', KP2 = 'x.....x.x.....x.', KP3 = 'x.....x.x..x....';
+    // C△ → Am7 | F△ → Gadd9, close-voiced; the two loudest bars add a fifth voice on top
+    const Cc = ['C4', 'E4', 'G4', 'B4'], Am = ['C4', 'E4', 'G4', 'A4'], Fc = ['C4', 'E4', 'F4', 'A4'], Gc = ['B3', 'D4', 'G4', 'A4'];
+    const TOP = { C: 'D5', A: 'E5', F: 'C5', G: 'D5' };
+    const BC = ['C2', '-', '-', null, 'C3', null, 'A1', '-', 'A1', null, 'A2', null, 'G2', null, 'E2', null];
+    const BF = ['F2', '-', '-', null, 'F2', null, 'G2', '-', 'G2', null, 'D2', null, 'G2', null, 'B1', null];
+    const MEL = {
+      3: ['A4', null, 'C5', null, 'D5', null, 'C5', null, 'D5', null, null, 'E5', null, 'G5', null, null],
+      4: ['E5', null, 'G5', null, 'A5', null, 'G5', null, 'E5', null, null, 'D5', null, 'C5', null, null],
+      5: ['A4', null, 'C5', null, 'D5', null, 'C5', null, 'D5', null, null, 'E5', null, 'G5', null, 'A5'],
+      6: ['C6', null, 'A5', null, 'G5', null, 'A5', null, 'C6', null, null, 'D6', null, 'C6', null, 'A5'],
+      7: ['G5', null, 'A5', null, 'C6', null, 'A5', null, 'B5', null, null, 'G5', null, 'A5', null, 'B5']
+    };
+    // bars 1–2: the rhythm section assembles
+    kick.pattern(0, 0.25, KP, { vel: 0.8 }); hat.pattern(2, 0.25, 'x.x.X.xo', { vel: 0.56 });
+    kick.pattern(4, 0.25, KP, { vel: 0.8 }); hat.pattern(4, 0.25, 'X.x.X.x.X.x.X.xo', { vel: 0.56 });
+    snare.pattern(4, 0.25, '....x.......x...', { vel: 0.62 });
+    bass.seq(6, 0.5, ['G1', 'G1', 'A1', 'B1'], { gate: 0.8, vel: 0.74 });
+    // bars 3–8: harmony, then melody, then everyone, then everyone harder
+    for (let bar = 2; bar < 8; bar++) {
+      const b = bar * 4, odd = bar % 2 === 1, peak = bar >= 6, v = peak ? 1 : bar >= 4 ? 0.87 : 0.76;
+      kick.pattern(b, 0.25, bar === 3 || bar === 7 ? KP2 : peak ? KP3 : KP, { vel: 0.72 + 0.28 * v });
+      snare.pattern(b, 0.25, bar === 3 || bar === 5 ? '....x.......x.ox' : bar === 7 ? '....x..o....x.xX' : peak ? '....x..o....x...' : '....x.......x...', { vel: 0.8 * v });
+      hat.pattern(b, 0.25, peak ? 'X.xoX.x.X.xoX.xo' : 'X.x.X.x.X.x.X.xo', { vel: 0.62 * v });
+      bass.seq(b, 0.25, odd ? BF : BC, { gate: 0.85, vel: 0.8 * v });
+      const c1 = odd ? Fc : Cc, c2 = odd ? Gc : Am;
+      ep.chord(b, peak ? c1.concat(TOP[odd ? 'F' : 'C']) : c1, 1.4, 0.64 * v, { strum: 0.03 });
+      ep.chord(b + 1.5, peak ? c2.concat(TOP[odd ? 'G' : 'A']) : c2, 2.35, 0.68 * v, { strum: 0.03 });
+      if (MEL[bar]) pl.seq(b, 0.25, MEL[bar], { gate: 1.6, vel: 0.74 * v });
+    }
+    // bar 9: the last chord, and one full stop together
+    ep.chord(32, ['C4', 'E4', 'G4', 'A4', 'D5'], 4, 0.7, { strum: 0.05 });
+    kick.hit(32, 1); kick.hit(34, 0.95); snare.hit(33, 0.6); snare.hit(34, 0.8);
+    hat.pattern(32, 0.5, 'XxXxX', { vel: 0.56 });
+    bass.note(32, 'C2', 1.9, 0.82); bass.note(34, 'C2', 2, 0.82);
+    pl.seq(32, 0.5, ['C6', 'G5', 'E5', 'G5', 'C6'], { gate: 1.8, vel: 0.72 });
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    for (const n of ['kick', 'snare', 'hat', 'bass', 'epiano', 'pluck']) ev[n] = Stage.events(n);
+    for (const e of ev.epiano) { const g = chords[chords.length - 1]; if (g && e.t - g.t < 0.16) g.tones.push(e); else chords.push({ t: e.t, tones: [e] }); }
+    chords.forEach((g) => { g.tones.sort((a, b) => a.midi - b.midi); g.end = Math.max(...g.tones.map((e) => e.t + e.dur)); });
+    T = { hat0: ev.hat[0].t, snare0: ev.snare[0].t, bass0: ev.bass[0].t, ch0: chords[0].t, mel0: ev.pluck[0].t, row: chords[chords.length - 1].t, hatEnd: ev.hat[ev.hat.length - 1].t + 0.02, ens: 4 * BAR };
+    paper = ctx.createRadialGradient(960, 520, 200, 960, 540, 1150); paper.addColorStop(0, '#f4edda'); paper.addColorStop(1, '#ece3cd');
+    ctx.font = LABEL_FONT; ctx.letterSpacing = '6px';
+    for (const s of ['HAT', 'BASS', 'MELODY']) labelW[s] = ctx.measureText(s).width - 6;
+    ctx.letterSpacing = '0px';
+  },
+
+  frame(t) {
+    const c = ctx; c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+    c.fillStyle = paper; c.fillRect(0, 0, 1920, 1080);
+    drawGrid(t); drawChords(t); drawBass(t); drawHat(t); drawKick(t); drawSnare(t); drawMelody(t); drawLabels(t);
+  }
+});
+</script>
+</body>
+</html>

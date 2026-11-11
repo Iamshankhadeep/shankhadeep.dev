@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 044 — Tree Rings</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 044 — TREE RINGS
+ * A tree's life written ring by ring: a trunk cross-section grows outward from the pith, sixty-four invented
+ * years (1921–1984) with a drought, a fire and a wet year marked; bark closes it, and a drying crack opens.
+ * Nine bars at 108 bpm (2.22 s each); a soft click for every ring, a woodblock for every decade. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 108, CX = 850, CY = 540, YEARS = 64, Y0 = 1921, T0 = 1.0, T1 = 15.4;
+const N = Stage.makeNoise(44), NA = 200;
+// yearly growth widths: a drought (narrow), a fire year, a wet year (wide)
+const widths = [], R = [0];
+for (let k = 1; k <= YEARS; k++) { let w = 6.2 + 2.6 * N.noise2(k * 0.35, 3.3) - k * 0.022; if (k >= 17 && k <= 21) w *= 0.34; if (k === 44) w *= 2.5; if (k === 45) w *= 1.6; widths.push(Math.max(1.6, w)); R.push(R[k - 1] + widths[k - 1]); }
+const EVENTS = [{ year: 19, label: 'DROUGHT', note: '1937–41 · five thin rings', ang: 2.55 }, { year: 31, label: 'FIRE', note: '1951 · scar, then healing', ang: 3.6 }, { year: 44, label: 'WET YEAR', note: '1964 · the widest ring', ang: 4.35 }];
+const yearAt = (t) => YEARS * prog(t, T0, T1 - T0, Stage.ease.bezier(0.3, 0.1, 0.4, 1));
+// ring radius at angle a for (fractional) ring index y: wobble, an off-centre pith, and the rings bending round a knot
+function rad(y, a) {
+  const i = Math.min(YEARS, Math.floor(y)), f = y - i, base = (R[i] + f * (i < YEARS ? widths[i] : 0)) * 1.14 + 6;
+  const wob = 1 + 0.045 * N.noise2(Math.cos(a) * 1.3 + 7, Math.sin(a) * 1.3 + y * 0.012) + 0.012 * N.noise2(Math.cos(a) * 5, Math.sin(a) * 5 + y * 0.05) + 0.06 * Math.cos(a - 0.6);
+  const da = Math.atan2(Math.sin(a - 0.95), Math.cos(a - 0.95)), knot = 0.13 * Math.exp(-da * da / 0.022) * Math.exp(-Math.pow((base - 290) / 95, 2));
+  return base * (wob + knot);
+}
+let ctx;
+
+Stage.create({
+  no: 44, title: 'Tree Rings', subtitle: 'sixty-four years · 108 bpm',
+  duration: 20, background: '#1a1f24', grain: 0.06, poster: 17.2, vignette: 0.35,
+  fonts: ['300 150px "Fraunces Variable"', '500 18px "JetBrains Mono Variable"', 'italic 400 28px "Fraunces Variable"'],
+  slate: { at: 0.7, hold: 2.8, pos: 'br' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 44 });
+    M.master({ reverb: { decay: 2.4, size: 1.0, damp: 0.45 }, fadeOut: 2.0 });
+    const gtr = M.track('guitar', { reverb: 0.35, gain: 1.0, humanize: 0.3 }), plk = M.track('pluck', { reverb: 0.3, gain: 0.9, pan: 0.2 }), wb = M.track('woodblock', { reverb: 0.25, gain: 0.7 }), tk = M.track('tick', { reverb: 0.15, gain: 0.22, params: { tone: 1300 } });
+    const str = M.track('strings', { reverb: 0.6, gain: (t) => 0.3 + 0.45 * smoothstep(4, 15, t), params: { cutoff: 2600, A: 0.8, R: 1.4 } }), bass = M.track('bass', { reverb: 0.05, gain: 0.6, params: { cutoff: 420, envAmt: 1.3 } }), boom = M.track('tom', { reverb: 0.5, gain: 0.7, params: { tone: 70, decay: 0.7 } });
+    const prog = ['G', 'F', 'C', 'G', 'Em7', 'F', 'C', 'Dm7', 'G'], rt = ['G1', 'F1', 'C2', 'G1', 'E1', 'F1', 'C2', 'D2', 'G1'];
+    prog.forEach((c, i) => { const b = i * 4, n = S.chord(c, 3); if (i < 8) { gtr.seq(b, 0.5, [n[0], n[2], n[1] + 12, n[2], n[0] + 12, n[2], n[1] + 12, n[2]], { vel: 0.55, gate: 1.5 }); if (i >= 2) plk.seq(b + 0.25, 1, [n[2] + 12, n[1] + 24, n[0] + 24, n[1] + 12], { vel: 0.45 }); } else gtr.chord(b, ['G2', 'D3', 'G3', 'B3', 'D4'], 4, 0.7, { strum: 0.08 }); if (i >= 1) { bass.note(b, rt[i], 1.7, 0.8); if (i < 8) bass.note(b + 2.5, rt[i], 1.1, 0.5); } str.chord(b, c, 4, 0.5, { octave: 3 }); });
+    // clicks from the growth curve: find when each ring completes
+    for (let k = 1, t = 0; k <= YEARS; k++) { while (yearAt(t) < k && t < 20) t += 0.005; if ((Y0 + k) % 10 === 0) wb.hit(M.b(t), 0.85); else tk.hit(M.b(t), 0.6); }
+    boom.hit(M.b(BAR * 7.5), 0.9);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const y = yearAt(t), full = Math.floor(y), bark = prog(t, T1 + 0.1, 1.5, E.outCubic), crack = prog(t, BAR * 7.5, 1.6, E.outExpo), turn = -0.3 + 0.012 * t;
+    const zoom = lerp(2.3, 1.0, prog(t, 0.2, T1 - 2, E.inOutSine));        // start close on the pith, pull back as it grows
+    c.save(); c.translate(CX, CY); c.scale(zoom, zoom); c.rotate(turn);
+    const shape = (yy, extra) => { c.beginPath(); for (let q = 0; q <= NA; q++) { const a = q / NA * TAU, r = rad(yy, a) + (extra ? extra(a) : 0); q ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r); } c.closePath(); };
+    // soft shadow under the slab
+    c.save(); c.filter = 'blur(26px)'; c.fillStyle = 'rgba(0,0,0,.5)'; shape(y + bark * 3, null); c.translate(14, 20); c.fill(); c.restore();
+    if (bark > 0) { c.fillStyle = '#3b2a1d'; shape(YEARS, (a) => bark * (22 + 7 * N.noise2(Math.cos(a) * 9, Math.sin(a) * 9) + 3 * N.noise2(Math.cos(a) * 30, Math.sin(a) * 30))); c.fill(); c.fillStyle = '#6b4a2e'; shape(YEARS, () => bark * 5); c.fill(); }
+    // rings, outermost first: pale earlywood, a dark latewood line at each year's end
+    for (let k = Math.min(YEARS, full + 1); k >= 1; k--) {
+      const yy = Math.min(y, k), tone = 0.5 + 0.5 * N.noise2(k * 0.7, 9.1), dry = k >= 17 && k <= 21;
+      c.fillStyle = Stage.color.mix(dry ? '#c79a64' : '#dcb983', '#cfa46c', tone * 0.7); shape(yy, null); c.fill();
+      c.strokeStyle = `rgba(122,74,36,${k === 31 ? 0.95 : 0.62})`; c.lineWidth = (k === 31 ? 2.4 : 1.15) / Math.sqrt(zoom); c.stroke();
+    }
+    // radial rays
+    c.strokeStyle = 'rgba(255,236,200,.10)'; c.lineWidth = 1; c.beginPath(); for (let q = 0; q < 90; q++) { const a = q / 90 * TAU + 0.3 * hash(q, 1), r1 = rad(y, a) * (0.25 + 0.6 * hash(q, 2)); c.moveTo(Math.cos(a) * 8, Math.sin(a) * 8); c.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); } c.stroke();
+    // pith, knot, fire scar
+    c.fillStyle = '#6b4424'; c.beginPath(); c.arc(0, 0, 5, 0, TAU); c.fill();
+    if (y > 26) { const ka = 0.95, kr = rad(27, ka) + 16, a = clamp01((y - 26) / 6); c.save(); c.translate(Math.cos(ka) * kr, Math.sin(ka) * kr); c.rotate(ka); c.globalAlpha = a; const kg = c.createRadialGradient(0, 0, 2, 0, 0, 30); kg.addColorStop(0, '#3d2412'); kg.addColorStop(0.6, '#7a4a26'); kg.addColorStop(1, 'rgba(122,74,38,0)'); c.fillStyle = kg; c.beginPath(); c.ellipse(0, 0, 34, 22, 0, 0, TAU); c.fill(); c.restore(); }
+    if (y > 31) { const a = clamp01((y - 31) / 2); c.strokeStyle = `rgba(28,18,12,${0.9 * a})`; c.lineWidth = 6; c.lineCap = 'round'; c.beginPath(); for (let q = 0; q <= 20; q++) { const an = 3.25 + q / 20 * 0.7, r1 = rad(31, an) + 2 * Math.sin(q); q ? c.lineTo(Math.cos(an) * r1, Math.sin(an) * r1) : c.moveTo(Math.cos(an) * r1, Math.sin(an) * r1); } c.stroke(); }
+    // the drying crack: a wedge from pith to bark
+    if (crack > 0) { const ca = -0.75, r1 = rad(YEARS, ca) + 30, wv = 0.035 * crack; c.fillStyle = '#14100c'; c.beginPath(); c.moveTo(Math.cos(ca) * 6, Math.sin(ca) * 6); for (let q = 0; q <= 10; q++) { const rr = lerp(6, r1, q / 10), an = ca - wv * (q / 10) + 0.01 * Math.sin(q * 2.1); c.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } for (let q = 10; q >= 0; q--) { const rr = lerp(6, r1, q / 10), an = ca + wv * (q / 10) + 0.012 * Math.sin(q * 1.7); c.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); } c.closePath(); c.fill(); }
+    // light across the cut face
+    const lg = c.createLinearGradient(-400, -400, 400, 400); lg.addColorStop(0, 'rgba(255,240,210,.14)'); lg.addColorStop(1, 'rgba(40,20,0,.16)'); c.fillStyle = lg; shape(y + bark * 4, null); c.fill();
+    c.restore();
+    // ── annotations with leader lines (in screen space)
+    EVENTS.forEach((e, i) => {
+      const a = prog(y, e.year + 1.5, 3, E.outCubic) * (1 - prog(t, 18.8, 0.8)); if (a <= 0) return;
+      const an = e.ang + turn, r1 = rad(e.year + 0.5, e.ang) * zoom, px = CX + Math.cos(an) * r1, py = CY + Math.sin(an) * r1, lx = 150, ly = 250 + i * 250;
+      c.strokeStyle = `rgba(236,214,176,${0.8 * a})`; c.lineWidth = 1.3; c.beginPath(); c.moveTo(lx + 210, ly - 6); c.lineTo(lerp(lx + 210, px, a), lerp(ly - 6, py, a)); c.stroke();
+      c.fillStyle = `rgba(236,214,176,${a})`; c.beginPath(); c.arc(px, py, 4.5 * a, 0, TAU); c.fill();
+      c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.font = '500 18px "JetBrains Mono Variable"'; c.fillText(e.label.split('').join(' '), lx, ly); c.fillStyle = `rgba(236,214,176,${0.6 * a})`; c.font = 'italic 400 28px "Fraunces Variable"'; c.fillText(e.note, lx, ly + 38);
+    });
+    // ── the year counter
+    const on = prog(t, 0.5, 0.8, E.outCubic) * (1 - prog(t, 18.9, 0.8)), yr = Y0 + Math.min(YEARS - 1, Math.floor(y)) + (y >= YEARS ? 0 : 0), rx = 1790;
+    c.textAlign = 'right'; c.fillStyle = `rgba(236,214,176,${0.5 * on})`; c.font = '500 18px "JetBrains Mono Variable"'; c.fillText('Y E A R', rx, 430);
+    c.fillStyle = `rgba(244,228,198,${on})`; c.font = '300 150px "Fraunces Variable"'; c.fillText(String(y >= YEARS ? Y0 + YEARS - 1 : yr), rx + 6, 574);
+    c.strokeStyle = `rgba(236,214,176,${0.35 * on})`; c.lineWidth = 1; c.beginPath(); c.moveTo(rx - 330, 606); c.lineTo(rx, 606); c.stroke();
+    c.fillStyle = `rgba(236,214,176,${0.7 * on})`; c.font = '500 18px "JetBrains Mono Variable"'; c.fillText(String(Math.min(YEARS, Math.floor(y))).padStart(2, '0') + ' RINGS  ·  ' + (2 * rad(y, 0) / 10).toFixed(1) + ' cm', rx, 644);
+  }
+});
+</script>
+</body>
+</html>

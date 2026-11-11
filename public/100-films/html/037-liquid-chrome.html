@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 037 — Liquid Chrome</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 037 — LIQUID CHROME
+ * Mercury blobs merging and splitting to a deep-house pulse: a raymarched signed-distance field of smoothly
+ * blended spheres, mirror-shaded against a procedural studio (white soft boxes, a cool rim, a magenta kicker)
+ * over a dark glossy floor. Ten bars at 120 bpm (2 s each): one sphere → three in orbit → on the drop (bar 5)
+ * droplets burst outward and are pulled back → one calm sphere. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const NB = 9, DROP = 8;
+
+const FRAG = `
+uniform vec4 uB[${NB}]; uniform float uK, uKick, uCamA, uCamH;
+float map(vec3 p){
+  float d = 1e3;
+  for (int i = 0; i < ${NB}; i++) { if (uB[i].w <= 0.) continue; d = smin(d, length(p - uB[i].xyz) - uB[i].w, uK); }
+  return d;
+}
+vec3 nrm(vec3 p){ vec2 e = vec2(.0015, 0.); return normalize(vec3(map(p + e.xyy) - map(p - e.xyy), map(p + e.yxy) - map(p - e.yxy), map(p + e.yyx) - map(p - e.yyx))); }
+// the studio: what a mirror sees
+vec3 studio(vec3 d){
+  vec3 c = mix(vec3(.030, .032, .045), vec3(.10, .11, .14), smoothstep(-.2, .9, d.y));
+  // big overhead soft box
+  vec2 t = d.xz / max(d.y, .001); float top = smoothstep(1.25, .95, max(abs(t.x * .8 - .1), abs(t.y * 1.2 + .15))) * step(0., d.y);
+  c += vec3(1.25, 1.2, 1.12) * top;
+  // warm strip light, left
+  float a = atan(d.z, d.x), sl = smoothstep(.14, .06, abs(a - 2.7)) * smoothstep(-.25, .0, d.y) * smoothstep(.75, .45, d.y);
+  c += vec3(1.3, 1.0, .72) * sl * 1.4;
+  // cool rim, right-back
+  float rr = smoothstep(.3, .1, abs(a + .55)) * smoothstep(-.15, .1, d.y) * smoothstep(.9, .5, d.y);
+  c += vec3(.35, .62, 1.3) * rr * 1.2;
+  // magenta kicker, low and behind
+  float mk = smoothstep(.5, .15, abs(a + 2.1)) * smoothstep(.34, .06, abs(d.y - .08));
+  c += vec3(1.25, .22, .70) * mk * (1.1 + .9 * uKick);
+  // horizon line of the cyclorama
+  c += vec3(.16, .17, .20) * exp(-abs(d.y) * 26.);
+  return c;
+}
+// what the camera sees directly: the same room, but only as a soft glow on a dark cyclorama
+vec3 backdrop(vec3 d){
+  vec3 c = mix(vec3(.020, .022, .032), vec3(.060, .064, .088), smoothstep(-.1, .8, d.y));
+  float a = atan(d.z, d.x) + 2.1; a = atan(sin(a), cos(a));
+  c += vec3(.62, .10, .34) * exp(-a * a / .55) * exp(-pow((d.y - .03) / .11, 2.)) * (.42 + .3 * uKick);
+  c += vec3(.10, .11, .14) * exp(-abs(d.y) * 30.);
+  return c;
+}
+float march(vec3 ro, vec3 rd, float tmax, int steps, out vec3 p){
+  float t = 0.;
+  for (int i = 0; i < 96; i++) { if (i >= steps) break; p = ro + rd * t; float d = map(p); if (d < .0012) return t; t += d * .9; if (t > tmax) break; }
+  return -1.;
+}
+vec3 shade(vec3 ro, vec3 rd){
+  vec3 p; float t = march(ro, rd, 30., 96, p);
+  float tf = (rd.y < 0.) ? (-1.25 - ro.y) / rd.y : -1.;                    // the floor plane y = -1.25
+  if (t > 0. && (tf < 0. || t < tf)) {
+    vec3 n = nrm(p), r = reflect(rd, n);
+    vec3 c = studio(r);
+    // what the chrome sees of the floor and of itself
+    if (r.y < 0.) { float tr = (-1.25 - p.y) / r.y; vec3 fp = p + r * tr; c = mix(c, vec3(.018, .019, .026) + .22 * studio(reflect(r, vec3(0, 1, 0))), smoothstep(14., 2., length(fp.xz))); }
+    vec3 q; float ts = march(p + n * .01, r, 8., 40, q); if (ts > 0.) c = mix(c, studio(reflect(r, nrm(q))) * .9, .85);
+    float fr = pow(1. - max(dot(-rd, n), 0.), 4.);
+    return c * (.86 + .14 * fr) * vec3(.97, .98, 1.);
+  }
+  if (tf > 0.) {
+    vec3 fp = ro + rd * tf, r = reflect(rd, vec3(0, 1, 0));
+    // slight ripple in the lacquer so reflections are alive
+    r.xz += .012 * exp(-tf * .16) * vec2(sin(fp.x * 9. + fp.z * 4.), cos(fp.z * 8. - fp.x * 3.));
+    vec3 base = vec3(.012, .013, .019);
+    vec3 q; float tr = march(fp + vec3(0, .002, 0), normalize(r), 12., 64, q);
+    vec3 refl = tr > 0. ? studio(reflect(normalize(r), nrm(q))) : backdrop(normalize(r)) * 1.6;
+    float fr = .08 + .92 * pow(1. - max(-rd.y, 0.), 4.);
+    // contact shadow: darker where the field is close above
+    float ao = clamp(map(fp + vec3(0, .25, 0)) / .9, 0., 1.);
+    vec3 c = base * (.4 + .6 * ao) + refl * fr * (.55 + .45 * ao);
+    return mix(c, backdrop(rd), smoothstep(9., 26., tf));
+  }
+  return backdrop(rd);
+}
+void main(){
+  vec3 acc = vec3(0.);
+  for (int s = 0; s < 2; s++) {
+    vec2 o = s == 0 ? vec2(.25, .25) : vec2(-.25, -.25);
+    vec2 p = (gl_FragCoord.xy + o - .5 * uRes) / uRes.y;
+    vec3 ro = vec3(sin(uCamA) * 7.2, uCamH, cos(uCamA) * 7.2), ta = vec3(0., -.15, 0.);
+    vec3 f = normalize(ta - ro), r = normalize(cross(f, vec3(0, 1, 0))), u = cross(r, f);
+    acc += shade(ro, normalize(f * 2.1 + r * p.x + u * p.y));
+  }
+  vec3 c = acc * .5;
+  vec2 v = vUv - .5; c *= 1. - .7 * dot(v, v);
+  c = aces(c * 1.05); c = pow(c, vec3(1. / 2.2));
+  fragColor = vec4(c + dither(gl_FragCoord.xy, float(uFrame)), 1.);
+}`;
+let sh;
+
+Stage.create({
+  no: 37, title: 'Liquid Chrome', subtitle: 'raymarched metaballs · 120 bpm',
+  duration: 20, background: '#07080b', grain: 0.045, poster: 9.3,
+  fade: { in: 1.0, out: 1.4 }, slate: { at: 0.8, hold: 3.0 },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 37 });
+    M.master({ reverb: { decay: 2.4, size: 1.0, damp: 0.5 }, fadeOut: 2.2 });
+    const kick = M.track('kick', { inst: 'softkick', reverb: 0.04, gain: 0.95 }), hat = M.track('ohat', { reverb: 0.1, gain: 0.3, params: { decay: 0.14 } }), clap = M.track('clap', { reverb: 0.3, gain: 0.45 });
+    const bass = M.track('reese', { reverb: 0.04, gain: 0.5, duck: { by: 'kick', depth: 0.6 }, lowpass: (t) => 300 + 500 * smoothstep(4, 8, t) }), stab = M.track('stab', { reverb: 0.45, gain: 1.3, params: { cutoff: 1100, fD: 0.3, R: 0.4 }, delay: { time: 0.75, fb: 0.42, mix: 0.3 }, duck: { by: 'kick', depth: 0.35 } });
+    const pad = M.track('pad', { reverb: 0.6, gain: 0.45, duck: { by: 'kick', depth: 0.4 } }), rise = M.track('riser', { reverb: 0.4, gain: 0.5 }), boom = M.track('impact', { reverb: 0.5, gain: 0.6 }), sh2 = M.track('shaker', { reverb: 0.1, gain: 0.4 });
+    const prog = ['Gm9', 'Ebmaj9', 'Cm9', 'D7sus4'], roots = ['G1', 'Eb1', 'C1', 'D1'];
+    for (let bar = 0; bar < 10; bar++) {
+      const b = bar * 4, k = bar % 4;
+      pad.chord(b, prog[k], 4, bar < 4 ? 0.45 : 0.6, { octave: 3 });
+      if (bar >= 1 && bar < 9) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); bass.seq(b, 0.25, [null, null, roots[k], roots[k], null, null, roots[k], null, null, null, roots[k], roots[k], null, roots[k], null, S.midi(roots[k]) + 12], { vel: 0.85, gate: 0.9 }); }
+      if (bar >= 2 && bar < 9) hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.6 });
+      if (bar >= 4 && bar < 9) { clap.pattern(b, 1, '.x.x', { vel: 0.6 }); sh2.pattern(b, 0.25, 'x.xxx.xxx.xxx.xx', { vel: 0.4 }); }
+      if (bar >= 2 && bar < 9) { stab.chord(b + 0.75, prog[k], 0.3, 0.7, { octave: 3 }); stab.chord(b + 2.5, prog[k], 0.3, 0.6, { octave: 3 }); if (bar >= 4) stab.chord(b + 3.5, prog[k], 0.25, 0.55, { octave: 4 }); }
+    }
+    rise.hit(12, 0.8, 4); boom.hit(16, 0.9, 4); pad.chord(36, ['G2', 'D3', 'A3', 'Bb3', 'D4'], 4, 0.6);
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const kick = Stage.hit('kick', t, 0.16), B = new Float32Array(NB * 4);
+    const split = smoothstep(3.6, 6.0, t) * (1 - smoothstep(15.2, 17.6, t)), burst = t < DROP ? 0 : Math.exp(-(t - DROP) * 0.55) * (1 - Math.exp(-(t - DROP) * 9)), back = smoothstep(15.0, 17.8, t);
+    for (let i = 0; i < NB; i++) {
+      let x = 0, y = 0, z = 0, r = 0;
+      if (i < 3) {            // the three main bodies: one sphere that divides, orbits, and reunites
+        const a = t * 0.9 + i * 2.094, R = 1.25 * split * (1 + 0.5 * burst);
+        x = Math.cos(a) * R; z = Math.sin(a) * R; y = 0.05 + 0.32 * Math.sin(t * 1.3 + i * 2) * split;
+        r = lerp(1.0, 0.74, split) * (1 + 0.06 * kick) + 0.16 * back;
+      } else {                // droplets thrown out by the drop, falling back in
+        const h1 = hash(i, 1), h2 = hash(i, 2), h3 = hash(i, 3), a = h1 * 6.283 + t * (0.5 + h2), R = (1.2 + 2.6 * h2) * burst + 0.9 * split * (1 - burst) * 0.6;
+        x = Math.cos(a) * R; z = Math.sin(a) * R; y = -0.2 + (0.6 + 1.8 * h3) * burst * (0.6 + 0.4 * Math.sin(t * 2.2 + i)) ;
+        r = (0.2 + 0.26 * h3) * smoothstep(DROP - 0.05, DROP + 0.25, t) * (1 - back) * (1 + 0.1 * kick);
+      }
+      B[i * 4] = x; B[i * 4 + 1] = y; B[i * 4 + 2] = z; B[i * 4 + 3] = r;
+    }
+    sh.draw(t, { 'uB[0]': { v4: B }, uK: 0.55 - 0.2 * burst, uKick: kick, uCamA: 0.5 + 0.9 * prog(t, 0, 20, E.inOutSine), uCamH: lerp(1.5, 0.75, prog(t, 0, 20, E.inOutSine)) });
+  }
+});
+</script>
+</body>
+</html>

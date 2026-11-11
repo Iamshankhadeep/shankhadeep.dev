@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 086 — Marbling</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 086 — MARBLING
+ * Paper marbling by its mathematics. Nothing is advected or blurred: every pixel asks where its pigment came
+ * from by undoing the operations in reverse — first the comb, then the rake (each tine drags the bath along
+ * its line by z·λ/(d+λ), which is exactly invertible), then the drops, last to first (a drop of radius r at
+ * C pushed everything outward by √(1 + r²/|P−C|²); the inverse is √(1 − r²/|P'−C|²)). Whichever drop the
+ * point lands inside gives the colour. So the veins stay razor-sharp however far they are pulled.
+ * Twenty-five drops in indigo, cream and rust with hairlines of gold, a rake down, a comb across.
+ * Six bars at 72 bpm (3.33 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 4 * 60 / 72, ND = 25;
+// drops: five wells, five colours each, landing in a wandering order
+const WELL = [[-0.52, 0.18], [0.5, 0.22], [0.02, -0.2], [-0.3, -0.3], [0.38, -0.24]];
+const SEQ = [0, 3, 1, 2, 3], COLS = [[0.11, 0.15, 0.36], [0.94, 0.90, 0.80], [0.71, 0.31, 0.16], [0.84, 0.66, 0.26], [0.16, 0.22, 0.48]];     // indigo, cream, rust, gold, blue
+const DROPS = []; for (let i = 0; i < ND; i++) { const w = [0, 1, 2, 3, 4, 2, 0, 1, 4, 3, 2, 0, 3, 1, 4, 2, 1, 0, 4, 3, 2, 3, 0, 1, 4][i], n = DROPS.filter((d) => d.w === w).length, ci = SEQ[n % 5]; DROPS.push({ w, c: [WELL[w][0] + (hash(i, 1) - 0.5) * 0.05, WELL[w][1] + (hash(i, 2) - 0.5) * 0.05], r: ci === 3 ? 0.07 : 0.2 - 0.02 * n, col: COLS[ci], t: 0.9 + i * 0.36 }); }
+let sh;
+
+const FRAG = `
+uniform vec4 uD[${ND}];        // centre.xy, radius (animated), unused
+uniform vec3 uC[${ND}];
+uniform float uRake, uComb, uZoom;
+uniform vec2 uPan;
+vec3 sheet(vec2 p) {
+  // undo the comb (horizontal pulls, tines every 0.085, alternate directions give the feather)
+  for (int k = -14; k <= 14; k++) { float y0 = float(k) * 0.085, d = abs(p.y - y0); p.x -= uComb * (mod(float(k), 2.0) < 0.5 ? 1.0 : -1.0) * 0.012 / (d + 0.012); }
+  // undo the rake (vertical pulls, tines every 0.3)
+  for (int k = -4; k <= 4; k++) { float x0 = float(k) * 0.3 + 0.07, d = abs(p.x - x0); p.y -= uRake * 0.03 / (d + 0.03); }
+  // undo the drops, newest first
+  for (int i = ${ND - 1}; i >= 0; i--) { float r = uD[i].z; if (r <= 0.0) continue; vec2 v = p - uD[i].xy; float l2 = dot(v, v); if (l2 < r * r) return uC[i]; p = uD[i].xy + v * sqrt(1.0 - r * r / l2); }
+  return vec3(0.955, 0.925, 0.845);                 // the sized bath, seen as bare paper
+}
+void main() {
+  vec2 p = ((vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0)) / uZoom + uPan;
+  // 3×3 supersampling keeps every vein crisp
+  vec3 col = vec3(0.0); vec2 px = vec2(1.0) / uRes.y / uZoom;
+  for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) col += sheet(p + (vec2(float(i), float(j)) - 1.0) * px * 0.34);
+  col /= 9.0;
+  // pigment granulation and the tooth of the paper
+  float g = fbm(p * 60.0), fib = vnoise(vec2(p.x * 30.0, p.y * 420.0));
+  col *= 0.96 + 0.055 * g; col = mix(col, col * vec3(1.02, 1.0, 0.95), 0.5 * fib);
+  col *= 1.0 - 0.3 * dot(vUv - 0.5, vUv - 0.5);
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+Stage.create({
+  no: 86, title: 'Marbling', subtitle: 'drops, a rake, a comb · 72 bpm',
+  duration: 20, background: '#f1eada', grain: 0.045, poster: 17.2,
+  fade: { in: 0.8, out: 1.4, color: '#f1eada' },
+  slate: { at: 0.5, hold: 2.6, pos: 'bl', color: 'rgba(28,34,70,.86)' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 86 });
+    M.master({ reverb: { decay: 2.6, size: 1.0, damp: 0.45 }, fadeOut: 2.0 });
+    const ep = M.track('epiano', { reverb: 0.4, gain: 0.6, chorus: 0.4 }), br = M.track('brush', { reverb: 0.25, gain: 0.34 }), bass = M.track('fmbass', { reverb: 0.1, gain: 0.44 }), wh = M.track('whoosh', { reverb: 0.3, gain: 0.3 }), kal = M.track('kalimba', { reverb: 0.5, gain: 0.7, humanize: 0 }), ride = M.track('ride', { reverb: 0.3, gain: 0.12 });
+    const ch = [['G1', ['G3', 'Bb3', 'D4', 'F4', 'A4']], ['Eb2', ['G3', 'Bb3', 'D4', 'F4']], ['C2', ['G3', 'Bb3', 'Eb4', 'G4']], ['D2', ['F#3', 'A3', 'C4', 'Eb4']], ['G1', ['G3', 'Bb3', 'D4', 'A4']], ['G1', ['G3', 'D4', 'F4', 'A4']]];
+    ch.forEach(([r, c], i) => { const b = i * 4; ep.chord(b, c, 2.6, 0.45); if (i < 5) ep.chord(b + 2.5, c.slice(1), 1.2, 0.36); bass.note(b, r, 1.6, 0.7); if (i < 5) { bass.note(b + 2.5, S.midi(r) + 7, 0.8, 0.5); bass.note(b + 3.5, S.midi(r) + 10, 0.4, 0.45); br.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.45 }); ride.pattern(b, 1, 'xxxx', { vel: 0.5 }); } });
+    // a kalimba note for every drop, by colour
+    const sc = S.scale('G4', 'minorPent', 2); DROPS.forEach((d, i) => kal.note(M.b(d.t), sc[(d.w * 2 + DROPS.slice(0, i).filter((q) => q.w === d.w).length) % sc.length], 0.8, d.r < 0.1 ? 0.3 : 0.5, { pan: d.c[0] * 1.2 }));
+    wh.hit(M.b(3 * BAR + 0.1), 0.7, 2.6); wh.hit(M.b(4 * BAR + 0.1), 0.8, 2.6);
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const D = new Float32Array(ND * 4), C = new Float32Array(ND * 3);
+    DROPS.forEach((d, i) => { const a = E.outCubic(clamp01((t - d.t) / 0.7)); D.set([d.c[0], d.c[1], d.r * a, 0], i * 4); C.set(d.col, i * 3); });
+    sh.draw(t, { uD: { v4: D }, uC: { v3: C }, uRake: 0.52 * E.inOutSine(prog(t, 3 * BAR + 0.1, BAR - 0.5)), uComb: 0.22 * E.inOutSine(prog(t, 4 * BAR + 0.1, BAR - 0.5)), uZoom: lerp(0.96, 1.16, E.inOutSine(clamp01(t / 20))), uPan: [0.02 * Math.sin(t * 0.2), 0.012 * Math.cos(t * 0.17) + 0.02 * smoothstep(16, 20, t)] });
+  }
+});
+</script>
+</body>
+</html>

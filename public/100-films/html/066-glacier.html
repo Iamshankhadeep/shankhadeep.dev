@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 066 — Glacier</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/066-glacier.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 066 — GLACIER
+ * A slow aerial drift over braided meltwater on black sand, from one generated photograph. The shader turns
+ * the still into terrain: luminance becomes height (parallax and a moving raking light), turquoise becomes a
+ * water mask, the local gradient gives each channel its direction, and noise is advected along it so the
+ * rivers visibly run. Cloud shadows cross; one large one near the end leaves the land cooler. A few flurries
+ * pass the lens; a tiny flight readout sits in the corner. Five bars at 60 bpm (4 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+let sh, img, hud, flake;
+
+const FRAG = `
+uniform sampler2D uImg;
+uniform float uZoom, uRot, uCool, uBand, uLight;
+uniform vec2 uCen, uTilt;
+vec3 tex(vec2 p) { return texture(uImg, clamp(p, vec2(0.002), vec2(0.998))).rgb; }
+float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+void main() {
+  vec2 asp = vec2(uRes.x / uRes.y, 1.0);
+  vec2 q = rot(uRot) * ((vUv - 0.5) * asp) / uZoom; vec2 p = q / asp + uCen;
+  // relief: bright water lies low, dark ridges stand up — shift the sample against the camera's motion
+  float h0 = lum(tex(p)); p += uTilt * (0.5 - h0) * 0.006;
+  vec3 c = tex(p); float L = lum(c);
+  vec2 e = vec2(1.0 / 1672.0, 1.0 / 941.0) * 2.0;
+  vec2 g = vec2(lum(tex(p + vec2(e.x, 0.0))) - lum(tex(p - vec2(e.x, 0.0))), lum(tex(p + vec2(0.0, e.y))) - lum(tex(p - vec2(0.0, e.y))));
+  // raking light that slowly turns
+  vec3 n = normalize(vec3(g * 7.0, 1.0)), ld = normalize(vec3(cos(uLight), sin(uLight), 0.75));
+  c *= 1.0 + 0.9 * (dot(n, ld) - ld.z);
+  // water: where it is turquoise and bright
+  float w = smoothstep(0.02, 0.12, 0.5 * (c.g + c.b) - c.r) * smoothstep(0.28, 0.5, L);
+  // each channel's direction: perpendicular to the broad gradient, pointed downstream
+  vec2 e2 = e * 5.0;
+  vec2 G = vec2(lum(tex(p + vec2(e2.x, 0.0))) - lum(tex(p - vec2(e2.x, 0.0))), lum(tex(p + vec2(0.0, e2.y))) - lum(tex(p - vec2(0.0, e2.y))));
+  vec2 down = normalize(vec2(-0.78, -0.62)), d = vec2(-G.y, G.x); if (dot(d, down) < 0.0) d = -d;
+  d = normalize(mix(down, normalize(d + 1e-5), smoothstep(0.004, 0.05, length(G))));
+  // flow: noise carried along the channel, two phases cross-faded so it never snaps back
+  float ph = fract(uTime * 0.3), ph2 = fract(uTime * 0.3 + 0.5); vec2 pn = p * vec2(1672.0, 941.0) / 11.0;
+  float fl = mix(fbm(pn - d * ph * 4.0), fbm(pn - d * ph2 * 4.0 + 7.31), abs(1.0 - 2.0 * ph));
+  float fine = mix(vnoise(pn * 4.0 - d * ph * 16.0), vnoise(pn * 4.0 - d * ph2 * 16.0 + 3.7), abs(1.0 - 2.0 * ph));
+  c += w * ((fl - 0.5) * 0.15 + (fine - 0.5) * 0.07) * vec3(0.82, 1.0, 1.0);
+  c += w * pow(fine, 7.0) * 0.35;
+  // cloud shadows: small ones always drifting, one broad one near the end
+  vec2 cp = (p - 0.5) * vec2(1.78, 1.0) * 1.5 + vec2(uTime * 0.03, uTime * 0.011);
+  float cl = smoothstep(0.5, 0.78, fbm(cp + 3.0));
+  float big = smoothstep(0.42, 0.0, abs(dot(p - 0.5, normalize(vec2(0.86, 0.5))) - uBand)) * (0.75 + 0.25 * fbm(cp * 2.0));
+  c *= 1.0 - 0.34 * cl - 0.46 * big;
+  // grade
+  c = mix(c, c * vec3(0.84, 0.97, 1.12), uCool);
+  c = pow(max(c, 0.0), vec3(1.08)) * 1.06;
+  vec2 v = vUv - 0.5; c *= 1.0 - 0.5 * dot(v, v);
+  fragColor = vec4(c + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+Stage.create({
+  no: 66, title: 'Glacier', subtitle: 'meltwater braid from above · 60 bpm',
+  duration: 20, background: '#0b0f12', grain: 0.045, poster: 13.5,
+  fonts: ['500 13px "JetBrains Mono Variable"'],
+  fade: { in: 1.2, out: 1.8 },
+  slate: { at: 0.9, hold: 3.0, pos: 'bl', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 20, seed: 66 });
+    M.master({ reverb: { decay: 5.0, size: 1.4, damp: 0.38 }, fadeIn: 0.8, fadeOut: 2.4 });
+    const gp = M.track('glasspad', { reverb: 0.7, gain: 0.6 }), str = M.track('strings', { reverb: 0.6, gain: (t) => 0.12 + 0.32 * smoothstep(6, 14, t) * (1 - smoothstep(16, 20, t)) }), sub = M.track('sub', { reverb: 0.06, gain: 0.42 });
+    const wind = M.track('wind', { reverb: 0.4, gain: 0.28 }), air = M.track('air', { reverb: 0.5, gain: 0.14 }), ice = M.track('glass', { reverb: 0.75, gain: 0.34, delay: { time: 1.5, fb: 0.4, mix: 0.3 } });
+    const bars = [['D1', ['D3', 'A3', 'E4', 'F4']], ['Bb1', ['Bb2', 'F3', 'A3', 'D4']], ['F1', ['A2', 'F3', 'C4', 'E4']], ['G1', ['G2', 'D3', 'Bb3', 'F4', 'A4']], ['D1', ['D3', 'A3', 'D4', 'E4']]];
+    bars.forEach(([r, ch], i) => { const b = i * 4; gp.chord(b, ch, 4.4, 0.5); str.chord(b, ch.map((n) => S.midi(n) + 12), 4.2, 0.5); sub.note(b, r, 3.8, i === 3 ? 0.8 : 0.6); });
+    wind.hit(0, 0.6, 10); wind.hit(9, 0.7, 11); air.hit(0, 0.5, 20);
+    [[1.5, 'A5'], [3.5, 'F5'], [6, 'D6'], [8.5, 'A5'], [10.5, 'C6'], [12.5, 'F6'], [13.5, 'D6'], [15, 'A5'], [17, 'E6'], [18.5, 'D6']].forEach(([b, n], i) => ice.note(b, n, 3, 0.4 - 0.01 * i));
+    return M;
+  },
+
+  async setup() {
+    img = await Stage.image('066-glacier'); sh = Stage.shader({ frag: FRAG, z: 1 }); hud = Stage.canvas2d({ z: 2, dpr: 2 });
+    flake = Stage.buffer(64, 64); const g = flake.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(0.35, 'rgba(240,248,255,.4)'); g.addColorStop(1, 'rgba(240,248,255,0)'); flake.fillStyle = g; flake.fillRect(0, 0, 64, 64);
+  },
+
+  frame(t) {
+    const e = E.inOutSine(clamp01(t / 16.5)), zoom = lerp(1.95, 1.13, e) * (1 + 0.02 * prog(t, 16, 4, E.inOutSine)), slack = clamp01((zoom - 1.13) / 0.8);
+    sh.draw(t, {
+      uImg: img, uZoom: zoom, uRot: lerp(-0.11, 0.04, e), uLight: 2.2 + t * 0.045,
+      uCen: [lerp(0.585, 0.5, e) + 0.014 * slack * Math.sin(t * 0.21), lerp(0.46, 0.5, e) + 0.012 * slack * Math.cos(t * 0.17)],
+      uTilt: [Math.cos(0.6 + t * 0.12), Math.sin(0.6 + t * 0.12)],
+      uBand: lerp(-1.3, 1.25, prog(t, 13.5, 8.5)), uCool: smoothstep(14.5, 19, t)
+    });
+    const c = hud; c.clearRect(0, 0, W, H);
+    // flurries close to the lens
+    for (let i = 0; i < 30; i++) {
+      const z = hash(i, 1), sp = 0.5 + z, x = Stage.mod(hash(i, 2) * 2300 + t * 330 * sp + 60 * Math.sin(t * 0.8 + i), 2300) - 190, y = Stage.mod(hash(i, 3) * 1400 + t * 150 * sp + 40 * Math.sin(t * 0.6 + i * 2.1), 1400) - 160, s = lerp(8, 44, z * z);
+      c.globalAlpha = lerp(0.3, 0.1, z) * (0.6 + 0.4 * Math.sin(t * 1.3 + i * 1.9)) * smoothstep(0.5, 3, t); c.save(); c.translate(x, y); c.rotate(0.43); c.drawImage(flake.canvas, -s * 0.8, -s / 2, s * 1.6, s); c.restore();
+    }
+    c.globalAlpha = 1;
+    // flight readout
+    const on = prog(t, 1.4, 1.2) * (1 - prog(t, 18.2, 1.2)), alt = Math.round(820 / zoom), sec = (11.4 + t * 0.021).toFixed(2), sec2 = (48.2 - t * 0.034).toFixed(2);
+    c.font = '500 13px "JetBrains Mono Variable"'; c.textBaseline = 'alphabetic'; c.textAlign = 'left'; c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 8;
+    c.fillStyle = `rgba(232,244,248,${0.8 * on})`; c.fillText(('64°02′' + sec.padStart(5, '0') + '″ N   019°07′' + sec2.padStart(5, '0') + '″ W').split('').join(' '), 96, 104);
+    c.fillStyle = `rgba(232,244,248,${0.55 * on})`; c.fillText('A L T   ' + String(alt).padStart(4, '0') + ' M     H D G   ' + String(Math.round(214 + lerp(-6, 2, e))).padStart(3, '0') + '°     3 . 2   M / S', 96, 128);
+    c.shadowBlur = 0; c.strokeStyle = `rgba(232,244,248,${0.5 * on})`; c.lineWidth = 1.2;
+    for (const [x, y, sx, sy] of [[72, 72, 1, 1], [W - 72, 72, -1, 1], [72, H - 72, 1, -1], [W - 72, H - 72, -1, -1]]) { c.beginPath(); c.moveTo(x + 22 * sx, y); c.lineTo(x, y); c.lineTo(x, y + 22 * sy); c.stroke(); }
+    c.beginPath(); c.moveTo(W / 2 - 12, H / 2); c.lineTo(W / 2 + 12, H / 2); c.moveTo(W / 2, H / 2 - 12); c.lineTo(W / 2, H / 2 + 12); c.strokeStyle = `rgba(232,244,248,${0.28 * on})`; c.stroke();
+  }
+});
+</script>
+</body>
+</html>

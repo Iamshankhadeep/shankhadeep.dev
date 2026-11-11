@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 001 — First Light</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<style>
+  #line { position: absolute; left: 0; right: 0; top: 236px; text-align: center; z-index: 5;
+    font-family: "Fraunces Variable", serif; font-weight: 300; font-size: 60px; letter-spacing: 0.012em;
+    font-variation-settings: "opsz" 144, "SOFT" 60; color: #fff6e6; text-shadow: 0 2px 40px rgba(120, 50, 10, .35); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="line">the day begins quietly.</div></div>
+<script>
+/* Nº 001 — FIRST LIGHT
+ * A sunrise over still water, painted entirely in one fragment shader. Six bars at 80 bpm (3 s each):
+ * night → the glow gathers → a riser → the sun crests the ridge exactly on the downbeat of bar 4 (9.0 s)
+ * → birds cross, one line of text → the frame fills with light. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const H0 = -0.10, R = 0.055, CREST = 9.0;
+// sun height: one smooth move whose top edge meets the horizon at exactly CREST
+const sunY = (t) => H0 - R - 0.16 + 0.385 * E.inOutSine(clamp01((t - 1.5) / 16.8));
+
+const FRAG = `
+uniform float uSunY, uDawn, uDay, uPulse, uExpose;
+const float H0 = ${H0.toFixed(3)}; const float R = ${R.toFixed(3)};
+float ridge(float x, float seed, float freq, float amp){
+  float h = 0., a = 1., f = freq;
+  for (int i = 0; i < 6; i++) { h += a * (vnoise(vec2(x * f + seed, seed * 1.7)) - .5); a *= .5; f *= 2.07; }
+  return h * amp;
+}
+vec3 scene(vec2 p){
+  float y = p.y - H0, g = clamp(y / .6, 0., 1.);
+  float d = length(p - vec2(0., uSunY));
+  vec3 night = mix(vec3(.050, .062, .150), vec3(.010, .014, .050), pow(g, .55));
+  vec3 dawn = mix(vec3(1., .50, .24), vec3(.56, .24, .37), smoothstep(0., .24, g)); dawn = mix(dawn, vec3(.065, .09, .27), smoothstep(.12, .8, g));
+  vec3 day = mix(vec3(1., .80, .52), vec3(.93, .58, .44), smoothstep(0., .3, g)); day = mix(day, vec3(.21, .32, .60), smoothstep(.16, .95, g));
+  vec3 c = mix(mix(night, dawn, uDawn), day, uDay);
+  // stars
+  vec2 sg = p * 70., id = floor(sg), sf = fract(sg) - .5;
+  vec2 so = (hash22(id) - .5) * .7; float sb = hash21(id + 7.3);
+  float star = smoothstep(.06, .0, length(sf - so)) * step(.86, sb) * (.55 + .45 * sin(uTime * (1.5 + sb * 3.) + sb * 40.));
+  c += vec3(.8, .88, 1.) * star * (1. - smoothstep(.0, .55, uDawn)) * smoothstep(.02, .2, y) * .9;
+  // glow gathered on the horizon, then the sun itself
+  vec2 q = (p - vec2(0., H0)) * vec2(.5, 2.4);
+  c += vec3(1., .42, .16) * exp(-dot(q, q) * 8.) * uDawn * (1. - .6 * uDay) * .85;
+  float up = smoothstep(-.34, -.02, uSunY - H0);
+  vec3 sunCol = mix(vec3(1., .40, .14), vec3(1., .86, .62), uDay);
+  c += sunCol * (exp(-d * 6.) * .75 + exp(-d * 20.) * 1.1) * up * (.3 + .7 * uDay) * (1. + .22 * uPulse);
+  c = mix(c, vec3(1.9, 1.75, 1.45), smoothstep(R, R - .0035, d));
+  // two ridgelines with a valley where the sun comes up
+  float gap = smoothstep(.05, .55, abs(p.x));
+  float hF = .016 + (.030 + ridge(p.x, 3.1, 1.7, .085)) * (.25 + .75 * gap);
+  float hN = .004 + (.012 + ridge(p.x, 9.7, 2.9, .060)) * (.08 + .92 * smoothstep(.16, .8, abs(p.x)));
+  vec3 haze = mix(mix(vec3(.05, .062, .15), vec3(.80, .40, .30), uDawn), vec3(1., .74, .50), uDay);
+  vec3 farC = mix(vec3(.030, .040, .095), haze, .34 + .2 * uDay);
+  vec3 nearC = mix(vec3(.012, .014, .034), haze, .07 + .08 * uDay);
+  c = mix(c, farC, smoothstep(hF + .0015, hF - .0015, y));
+  c = mix(c, mix(nearC, farC, .0), smoothstep(hN + .0015, hN - .0015, y));
+  // mist pooled at the waterline
+  float mist = exp(-y * 46.) * (.5 + .5 * fbm(vec2(p.x * 3. - uTime * .02, 1.7)));
+  c = mix(c, haze * 1.05, mist * .42);
+  return c;
+}
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  vec3 c;
+  if (p.y >= H0) c = scene(p);
+  else {
+    float dp = H0 - p.y;                                   // depth below the horizon
+    float u = p.x / (dp + .06), v = 1. / (dp + .035);       // fake perspective for the ripples
+    float n1 = fbm(vec2(u * .9, v * .55 + uTime * .22)), n2 = vnoise(vec2(u * 3.2 + 4., v * 2.2 - uTime * .5));
+    vec2 rp = vec2(p.x + (n1 - .5) * .05 * (dp * 3. + .12), H0 + dp * (1. + (n2 - .5) * .5) + (n1 - .5) * .012);
+    c = scene(rp);
+    vec3 deep = mix(vec3(.008, .012, .035), vec3(.10, .09, .16), uDawn);
+    c = mix(c * .86, deep, smoothstep(0., .5, dp) * .62);
+    // glitter path under the sun
+    float path = exp(-pow(p.x / (.014 + dp * .34), 2.));
+    float sa = p.x * 64. / (.35 + dp * 5.), sb = log(dp + .018) * 15.;                 // dashes that lengthen toward the viewer
+    float sp = smoothstep(.38, .82, snoise(vec3(sa, sb, uTime * .85))) * smoothstep(-.2, .5, snoise(vec3(sa * .3 + 9., sb * .4, uTime * .4)));
+    c += vec3(1., .80, .52) * path * sp * uDay * 1.5 * smoothstep(.0, .03, dp);
+    c += vec3(1., .55, .25) * path * .16 * uDay;
+  }
+  c *= 1. - .34 * dot(p, p) * 1.6;                          // vignette
+  c *= uExpose; c = mix(c, vec3(1., .93, .80), clamp(uExpose - 1., 0., 1.) * .5);
+  c = 1. - exp(-c * 1.55);                                   // soft shoulder
+  c = pow(c, vec3(1.06, 1.03, 1.0)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(c, 1.);
+}`;
+
+let sky, birdsCtx, chars;
+const birds = Array.from({ length: 9 }, (_, i) => ({ dx: -(i % 2 ? 1 : -0.35) * 38 * Math.ceil(i / 2) - Stage.hash(i, 1) * 22, dy: 26 * Math.ceil(i / 2) * (i % 2 ? 1 : -0.55) + Stage.hash(i, 2) * 14, ph: Stage.hash(i, 3) * 6.28, rate: 7.2 + Stage.hash(i, 4) * 2.2, s: 0.8 + Stage.hash(i, 5) * 0.5 }));
+
+Stage.create({
+  no: 1, title: 'First Light', subtitle: 'fragment shader · 80 bpm',
+  duration: 18, background: '#02030a', grain: 0.07, poster: 13.2,
+  fonts: ['300 60px "Fraunces Variable"'],
+  fade: { in: 1.6, out: 1.5, inColor: '#000', outColor: '#f6e6cc' },
+  slate: { at: 0.9, hold: 3.2 },
+
+  music(S) {
+    const M = S.score({ bpm: 80, duration: 18, seed: 11 });
+    M.master({ reverb: { decay: 4.2, size: 1.25, damp: 0.5 }, fadeOut: 2.2, fadeIn: 0.6 });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.55, gain: (t) => 0.5 + 0.5 * Math.min(1, t / 9) });
+    const str = M.track('strings', { reverb: 0.6, gain: 0.8, params: { cutoff: 4200 }, lowpass: (t) => 900 + 3600 * Math.min(1, Math.max(0, (t - 7) / 4)) });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.8 });
+    const piano = M.track('piano', { inst: 'felt', reverb: 0.5, delay: { time: 1.5, fb: 0.3, mix: 0.2 } });
+    const chime = M.track('chime', { inst: 'glass', reverb: 0.75, gain: 1.0, delay: { time: 0.75, fb: 0.45, mix: 0.35 } });
+    const air = M.track('air', { inst: 'wind', reverb: 0.3, gain: 0.6 });
+    const keys = M.track('keys', { inst: 'piano', reverb: 0.5, gain: 0.9, delay: { time: 1.5, fb: 0.3, mix: 0.22 } });
+    const riser = M.track('riser', { reverb: 0.5, gain: 0.55 }), boom = M.track('impact', { reverb: 0.6, gain: 0.5 });
+    air.hit(0, 0.8, M.beats);
+    // harmony: D — Bm — G … A(sus) — D (arrival on bar 4) — G — D
+    const bars = [['Dmaj9', 'D1'], ['Bm9', 'B0'], ['Gmaj9', 'G1'], ['Dmaj9', 'D1'], ['Gmaj7', 'G1'], ['Dadd9', 'D1']];
+    bars.forEach(([c, root], i) => {
+      const b = i * 4;
+      if (i === 2) { pad.chord(b, 'Gmaj9', 2, 0.6); pad.chord(b + 2, 'A7sus4', 2, 0.66); }
+      else pad.chord(b, c, 4, i < 3 ? 0.55 : 0.72);
+      if (i >= 1) sub.note(b, root, 3.6, i < 3 ? 0.5 : 0.85);
+      if (i >= 3) str.chord(b, c, 4, 0.5, { octave: 4 });
+    });
+    sub.note(10, 'A0', 1.9, 0.6);
+    // piano: a small rising figure, answered an octave higher once the sun is up
+    piano.seq(4, 1, ['F#4', null, 'A4', 'B4', 'D5', null, null, 'C#5'], { vel: 0.5 });
+    keys.seq(12, 0.5, ['F#5', 'A5', 'D6', null, 'C#6', null, 'A5', null, 'B5', 'D6', 'F#6', null, 'E6', null, null, null, 'D6', null, 'A5', null, 'F#5', null, null, null], { vel: 0.62, gate: 1.6 });
+    // glints on the water
+    const pent = S.scale('D5', 'pentatonic', 2), r = S.rng(5);
+    for (let b = 12.5; b < 22; b += 0.25) if (r() < 0.42) chime.note(b, pent[(r() * pent.length) | 0], 0.5, 0.18 + 0.25 * r());
+    riser.hit(8, 0.7, 4); boom.hit(12, 0.75, 4);
+    return M;
+  },
+
+  setup() {
+    sky = Stage.shader({ frag: FRAG, z: 1 });
+    birdsCtx = Stage.canvas2d({ z: 3 });
+    chars = Stage.split(document.getElementById('line'), 'chars');
+  },
+
+  frame(t) {
+    const day = smoothstep(CREST - 0.6, 15.5, t);
+    sky.draw(t, {
+      uSunY: sunY(t), uDawn: smoothstep(1.6, CREST + 0.5, t), uDay: day,
+      uPulse: Stage.hit('piano', t, 0.9) + Stage.hit('keys', t, 0.9) + 1.4 * Stage.hit('impact', t, 1.6),
+      uExpose: 1 + 0.07 * Stage.hit('impact', t, 1.2) + 1.1 * prog(t, 15.4, 2.6, E.inCubic)
+    });
+
+    // birds: a loose V crossing in front of the sun
+    const c = birdsCtx; c.clearRect(0, 0, 1920, 1080);
+    const bt = prog(t, 9.7, 6.4);
+    if (bt > 0 && bt < 1) {
+      const cx = lerp(-160, 2080, bt), cy = lerp(455, 372, E.outSine(bt)) + Math.sin(bt * 7) * 8, sc = lerp(1.05, 0.72, bt);
+      c.strokeStyle = 'rgba(18,12,22,0.9)'; c.lineCap = 'round'; c.lineJoin = 'round';
+      for (const b of birds) {
+        const x = cx + b.dx * sc, y = cy + b.dy * sc + Math.sin(t * 1.3 + b.ph) * 4, w = 13 * b.s * sc;
+        const f = Math.sin(t * b.rate + b.ph), lift = w * (0.15 + 0.62 * f);
+        c.lineWidth = 2.1 * b.s * sc; c.beginPath();
+        c.moveTo(x - w, y - lift); c.quadraticCurveTo(x - w * 0.45, y - lift * 0.9 - w * 0.16, x, y);
+        c.quadraticCurveTo(x + w * 0.45, y - lift * 0.9 - w * 0.16, x + w, y - lift); c.stroke();
+      }
+    }
+
+    // the line: letters rise out of the light, one by one
+    chars.forEach((ch, i) => {
+      const a = prog(t, 10.4 + i * 0.045, 1.1, E.outQuart), out = prog(t, 15.2 + i * 0.012, 1.0, E.inCubic), v = a * (1 - out);
+      ch.style.opacity = v.toFixed(3);
+      ch.style.transform = `translateY(${((1 - a) * 22 - out * 10).toFixed(2)}px)`;
+      ch.style.filter = v > 0.995 ? 'none' : `blur(${((1 - a) * 7 + out * 5).toFixed(2)}px)`;
+    });
+  }
+});
+</script>
+</body>
+</html>

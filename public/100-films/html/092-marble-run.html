@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 092 — Marble Run</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 092 — MARBLE RUN
+ * A marble rolls through a toy track whose chimes and blocks play the tune. The track was laid out backwards
+ * from the music: every sounding part sits exactly where the marble will be on its beat. Three ramps (a
+ * landing every two beats), five turns of a funnel (one per beat), eight chime tubes spaced so a marble at
+ * constant speed strikes them in eighth-notes, a bumper, then a staircase of thirteen xylophone keys whose
+ * spacing is the melody's rhythm — a one-beat hop is 64 px long and 70 px high, a half-beat hop 36 px and
+ * a quarter as high, the same gravity — a seesaw that flips a flag, and a cup for the last chord.
+ * The marble's position is one pure function of time. Ten bars at 100 bpm (2.4 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, B = 0.6, MR = 21, G = 1555;
+const bt = (b) => b * B;
+// ── the layout, in beats ──
+const RAMPS = [{ a: [176, 150], b: [596, 232], t0: 1, t1: 2.8, col: '#ee8a74', note: null }, { a: [586, 306], b: [216, 384], t0: 3, t1: 4.8, col: '#efc552', note: 'C3' }, { a: [206, 458], b: [596, 536], t0: 5, t1: 6.8, col: '#74b2e4', note: 'G3' }];
+const FUN = { x: 800, y: 560, r: 150, r1: 26, depth: 132, t0: 7, t1: 11.5, notes: ['C4', 'E4', 'G4', 'B4', 'D5'] };
+const RAIL = { a: [812, 716], b: [1446, 742], t0: 12, t1: 17 }, CHIME = ['C5', 'D5', 'E5', 'F5', 'G5', 'A5', 'B5', 'C6'].map((n, k) => ({ n, t: 13 + 0.5 * k }));
+CHIME.forEach((c) => { const u = (c.t - RAIL.t0) / (RAIL.t1 - RAIL.t0); c.x = lerp(RAIL.a[0], RAIL.b[0], u); c.y = lerp(RAIL.a[1], RAIL.b[1], u); });
+const BUMP = { x: 1574, y: 790, t: 17.5 };
+const TUNE = [['C5', 0], ['E5', 1], ['G5', 2], ['A5', 2.5], ['G5', 3], ['F5', 4], ['A5', 5], ['G5', 6], ['F5', 6.5], ['E5', 7], ['D5', 8], ['G4', 9], ['C5', 10]];
+const KEYS = []; { let x = 1506, y = 812; TUNE.forEach(([n, o], i) => { if (i) { const d = o - TUNE[i - 1][1]; x -= d >= 1 ? 64 : 36; y += 8; } KEYS.push({ n, t: 18 + o, x, y }); }); }
+const KEYCOL = ['#ee8a74', '#f0ae5e', '#efd052', '#9fd47e', '#6cc8b4', '#74b2e4', '#9a92e6', '#d992d6'];
+const LAST = KEYS[KEYS.length - 1], SEE = { px: 520, py: 968, half: 118, land: 30, cross: 31, off: 32.5 }, CUP = { x: 352, y: 1012, t: 33 };
+// ── where the marble is ──
+function marble(t) {
+  const b = t / B; if (b < 1) return [RAMPS[0].a[0] - 2, RAMPS[0].a[1] - MR - 9];
+  for (let i = 0; i < 3; i++) { const r = RAMPS[i], nx = i < 2 ? RAMPS[i + 1].a : [FUN.x - FUN.r, FUN.y]; if (b < r.t1) { const u = (b - r.t0) / (r.t1 - r.t0), s = 0.3 * u + 0.7 * u * u; return [lerp(r.a[0], r.b[0], s), lerp(r.a[1], r.b[1], s) - MR - 9]; } if (b < r.t1 + 0.2) { const u = (b - r.t1) / 0.2, x0 = r.b[0], y0 = r.b[1] - MR - 9, x1 = nx[0] + (i === 2 ? 4 : (i ? 8 : -8)), y1 = nx[1] - MR - (i === 2 ? 0 : 9); return [lerp(x0, x1, u), lerp(y0, y1, u * u) - 10 * Math.sin(Math.PI * u) * (i === 2 ? 1 : 0.3)]; } }
+  if (b < FUN.t1) { const u = (b - FUN.t0) / (FUN.t1 - FUN.t0), th = Math.PI + TAU * (b - FUN.t0), r = lerp(FUN.r - 8, FUN.r1, Math.pow(u, 0.85)), yc = FUN.y + FUN.depth * (1 - r / FUN.r); return [FUN.x + r * Math.cos(th), yc + 0.27 * r * Math.sin(th) - MR * 0.6, Math.sin(th) < 0 ? -1 : 1]; }
+  if (b < RAIL.t0) { const u = (b - FUN.t1) / (RAIL.t0 - FUN.t1), x0 = FUN.x + FUN.r1, y0 = FUN.y + FUN.depth * (1 - FUN.r1 / FUN.r); return [lerp(x0, RAIL.a[0] + 4, u), lerp(y0, RAIL.a[1] - MR - 5, u * u)]; }
+  if (b < RAIL.t1) { const u = (b - RAIL.t0) / (RAIL.t1 - RAIL.t0); return [lerp(RAIL.a[0], RAIL.b[0], u), lerp(RAIL.a[1], RAIL.b[1], u) - MR - 5]; }
+  const hop = (u, x0, y0, x1, y1, T) => [lerp(x0, x1, u), lerp(y0, y1, u) - G * T * T / 8 * 4 * u * (1 - u)];
+  if (b < BUMP.t) return hop((b - 17) / 0.5, RAIL.b[0], RAIL.b[1] - MR - 5, BUMP.x - MR - 8, BUMP.y, 0.3 * 0.7);
+  if (b < 18) return hop((b - 17.5) / 0.5, BUMP.x - MR - 8, BUMP.y, KEYS[0].x, KEYS[0].y - MR, 0.3 * 0.8);
+  for (let i = 1; i < KEYS.length; i++) if (b < KEYS[i].t) { const a = KEYS[i - 1], c = KEYS[i], T = (c.t - a.t) * B; return hop((b - a.t) / (c.t - a.t), a.x, a.y - MR, c.x, c.y - MR, T); }
+  const sa = seesaw(t), sx = (d) => [SEE.px + d * Math.cos(sa), SEE.py + d * Math.sin(sa) - MR - 7];
+  if (b < SEE.land) { const u = (b - LAST.t) / (SEE.land - LAST.t), e = sx(SEE.half - 8); if (u < 0.2) return hop(u / 0.2, LAST.x, LAST.y - MR, LAST.x - 44, LAST.y + 12 - MR, 0.2); const v = (u - 0.2) / 0.8, s = 0.35 * v + 0.65 * v * v; return [lerp(LAST.x - 44, e[0], s), lerp(LAST.y + 12 - MR, e[1], s)]; }
+  if (b < SEE.off) { const u = (b - SEE.land) / (SEE.off - SEE.land), d = lerp(SEE.half - 8, -SEE.half, 0.45 * u + 0.55 * u * u); return sx(d); }
+  if (b < CUP.t) { const u = (b - SEE.off) / (CUP.t - SEE.off), e = sx(-SEE.half); return [lerp(e[0], CUP.x, u), lerp(e[1], CUP.y, u * u) - 18 * Math.sin(Math.PI * u)]; }
+  const dt = t - bt(CUP.t); return [CUP.x + 9 * Math.exp(-dt * 3) * Math.sin(dt * 13), CUP.y - Math.abs(Math.sin(dt * 9)) * 16 * Math.exp(-dt * 3.4)];
+}
+function seesaw(t) { const tip = E.inOutCubic(prog(t, bt(SEE.cross) - 0.05, 0.4)), b = Math.exp(-Math.max(0, t - bt(SEE.cross) - 0.35) * 5) * Math.sin(Math.max(0, t - bt(SEE.cross) - 0.35) * 16) * 0.035; return lerp(0.19, -0.19, tip) + (t > bt(SEE.cross) + 0.35 ? b : 0) + (t > bt(SEE.land) && t < bt(SEE.cross) ? 0.02 * Math.exp(-(t - bt(SEE.land)) * 6) * Math.sin((t - bt(SEE.land)) * 22) : 0); }
+let bg, ctx, DIST;
+
+Stage.create({
+  no: 92, title: 'Marble Run', subtitle: 'a track laid out from its tune · 100 bpm',
+  duration: 24, background: '#e2f0e8', grain: 0.04, poster: 12.9,
+  fonts: ['500 13px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.2, color: '#e2f0e8' },
+  slate: { at: 0.4, hold: 2.6, pos: 'tr', color: 'rgba(44,62,58,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 100, duration: 24, seed: 92 });
+    M.master({ reverb: { decay: 1.8, size: 0.85, damp: 0.45 }, fadeOut: 1.6 });
+    const vib = M.track('vibes', { reverb: 0.4, gain: 0.7, humanize: 0, pan: 0.2 }), mar = M.track('marimba', { reverb: 0.3, gain: 0.95, humanize: 0, pan: -0.15 }), pad = M.track('warmpad', { reverb: 0.5, gain: 0.34 }), bass = M.track('pluck', { reverb: 0.15, gain: 1.0, params: { decay: 0.8, bright: 0.3 } }), sh = M.track('shaker', { reverb: 0.12, gain: 0.2 }), wb = M.track('woodblock', { reverb: 0.2, gain: 0.5, humanize: 0 }), ch = M.track('chime', { reverb: 0.5, gain: 0.5, humanize: 0 }), cel = M.track('celesta', { reverb: 0.5, gain: 0.5 });
+    wb.hit(1, 0.7, 0.08, { pitch: 64 });
+    RAMPS.forEach((r) => { if (r.note) { mar.note(r.t0, r.note, 0.6, 0.7); wb.hit(r.t0, 0.5, 0.08, { pitch: 52 }); } });
+    FUN.notes.forEach((n, i) => vib.note(FUN.t0 + i, n, 0.8, 0.5 + 0.04 * i)); for (let k = 0; k < 18; k++) sh.hit(FUN.t0 + k * 0.25, 0.3 + 0.02 * k, 0.05);
+    mar.note(RAIL.t0, 'C4', 0.5, 0.7); CHIME.forEach((c) => { ch.note(c.t, c.n, 1.6, 0.55); vib.note(c.t, S.midi(c.n) - 12, 0.4, 0.3); });
+    wb.hit(BUMP.t, 0.9, 0.1, { pitch: 45 }); KEYS.forEach((k) => mar.note(k.t, k.n, 0.5, 0.75));
+    wb.hit(SEE.land, 0.7, 0.1, { pitch: 48 }); wb.hit(SEE.cross + 0.6, 0.6, 0.1, { pitch: 55 }); cel.note(SEE.cross + 0.6, 'G6', 1, 0.6); cel.note(SEE.cross + 0.85, 'C7', 1.5, 0.5);
+    vib.chord(CUP.t, ['C4', 'E4', 'G4', 'C5', 'E5'], 5, 0.6); mar.chord(CUP.t, ['C3', 'G3', 'C4'], 2, 0.7); for (let k = 0; k < 5; k++) wb.hit(CUP.t + 0.35 * (1 - Math.pow(0.7, k)) * 3.2, 0.5 * Math.pow(0.65, k), 0.05, { pitch: 70 });
+    // bass and a light shaker under the middle of the run
+    const roots = ['C2', 'C2', 'F2', 'G2', 'C2', 'A1', 'F2', 'G2', 'C2']; roots.forEach((r, i) => { const b = i * 4 + 1; if (b < CUP.t) { bass.note(b, r, 1.5, 0.6); bass.note(b + 2, S.midi(r) + 7, 1, 0.45); if (i >= 3 && i < 8) sh.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.4 }); } }); bass.note(CUP.t, 'C2', 4, 0.8); [['C3', 'G3', 'E4'], ['C3', 'G3', 'E4'], ['F3', 'C4', 'A4'], ['G3', 'D4', 'B4'], ['C3', 'G3', 'E4'], ['A2', 'E3', 'C4'], ['F3', 'C4', 'A4'], ['G3', 'D4', 'B4'], ['C3', 'G3', 'E4'], ['C3', 'G3', 'E4']].forEach((cd, i) => pad.chord(i * 4, cd, 4.1, 0.4)); for (let k = 0; k < 8; k++) sh.hit(28 + k * 0.25, 0.3, 0.05);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1, dpr: 2 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    // distance rolled, for the marble's spin
+    DIST = new Float32Array(24 * 240 + 1); let p = marble(0); for (let i = 1; i < DIST.length; i++) { const q = marble(i / 240); DIST[i] = DIST[i - 1] + Math.hypot(q[0] - p[0], q[1] - p[1]); p = q; }
+    const c = bg, g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#e8f4ec'); g.addColorStop(1, '#d6eadf'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const r = Stage.rng(92); for (let i = 0; i < 5000; i++) { c.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '90,130,110'},${0.03 + 0.05 * r()})`; c.fillRect(r() * W, r() * H, 1 + 3 * r(), 1); }
+    const sh = (fn) => { c.save(); c.translate(7, 10); c.globalAlpha = 0.2; fn('#28463c', true); c.restore(); c.globalAlpha = 1; fn(null, false); };
+    const bar = (a, b2, w, col) => (s) => { c.strokeStyle = s || col; c.lineWidth = w; c.lineCap = 'round'; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b2[0], b2[1]); c.stroke(); };
+    // wall pegs and ramps
+    RAMPS.forEach((rp, i) => { sh(bar(rp.a, rp.b, 24, rp.col)); c.strokeStyle = 'rgba(255,255,255,.45)'; c.lineWidth = 3; c.beginPath(); c.moveTo(rp.a[0], rp.a[1] - 5); c.lineTo(rp.b[0], rp.b[1] - 5); c.stroke(); for (const u of [0.12, 0.88]) { c.fillStyle = '#8a6a4a'; c.beginPath(); c.arc(lerp(rp.a[0], rp.b[0], u), lerp(rp.a[1], rp.b[1], u), 4, 0, TAU); c.fill(); } const lip = i % 2 ? [rp.b[0] - 2, rp.b[1]] : [rp.b[0] + 2, rp.b[1]]; });
+    sh(bar([RAMPS[0].a[0] - 26, RAMPS[0].a[1] - 44], [RAMPS[0].a[0] - 26, RAMPS[0].a[1] + 4], 12, '#b98654'));
+    // chime beam, rail, bumper
+    sh(bar([860, 430], [1440, 430], 16, '#b98654')); sh(bar(RAIL.a, RAIL.b, 10, '#b98654')); sh(bar([RAIL.a[0] - 4, RAIL.a[1]], [RAIL.a[0] - 4, RAIL.a[1] - 30], 8, '#b98654'));
+    sh((s) => { c.fillStyle = s || '#b98654'; c.beginPath(); c.roundRect(BUMP.x + 12, BUMP.y - 70, 16, 150, 6); c.fill(); });
+    // xylophone rails
+    sh(bar([KEYS[0].x + 46, KEYS[0].y + 26], [LAST.x - 40, LAST.y + 26], 8, '#b98654'));
+    // seesaw stand, cup
+    sh((s) => { c.fillStyle = s || '#b98654'; c.beginPath(); c.moveTo(SEE.px, SEE.py + 2); c.lineTo(SEE.px + 30, SEE.py + 62); c.lineTo(SEE.px - 30, SEE.py + 62); c.closePath(); c.fill(); });
+    sh((s) => { c.fillStyle = s || '#8fcfc0'; c.beginPath(); c.moveTo(CUP.x - 46, CUP.y - 40); c.lineTo(CUP.x + 46, CUP.y - 40); c.lineTo(CUP.x + 34, CUP.y + 34); c.quadraticCurveTo(CUP.x, CUP.y + 44, CUP.x - 34, CUP.y + 34); c.closePath(); c.fill(); });
+    c.fillStyle = '#6fb5a5'; c.beginPath(); c.ellipse(CUP.x, CUP.y - 40, 46, 9, 0, 0, TAU); c.fill();
+    sh(bar([640, SEE.py + 62], [640, SEE.py - 66], 8, '#b98654'));
+    // floor line
+    c.strokeStyle = 'rgba(60,100,84,.25)'; c.lineWidth = 3; c.beginPath(); c.moveTo(120, 1054); c.lineTo(W - 120, 1054); c.stroke();
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H); const b = t / B, m = marble(t);
+    const shadow = (fn) => { c.save(); c.translate(7, 10); c.globalAlpha = 0.2; fn('#28463c'); c.restore(); c.globalAlpha = 1; fn(null); };
+    const ring = (tb, k = 6) => (b >= tb ? Math.exp(-(b - tb) * B * k) : 0);
+    // gate
+    { const up = E.outBack(prog(t, bt(1) - 0.1, 0.25)), x = RAMPS[0].a[0] + 22, y = RAMPS[0].a[1] - 8; shadow((s) => { c.fillStyle = s || '#e88a78'; c.beginPath(); c.roundRect(x - 5, y - 50 - 34 * up, 10, 46, 4); c.fill(); }); }
+    // funnel: back half, marble (when behind), front half
+    const fx = FUN.x, fy = FUN.y, back = m[2] === -1, drawMarble = () => { const rot = DIST[Math.min(DIST.length - 1, Math.round(t * 240))] / MR, x = m[0], y = m[1]; c.fillStyle = 'rgba(40,70,60,.16)'; c.beginPath(); c.ellipse(x + 6, y + 9, MR, MR * 0.9, 0, 0, TAU); c.fill();
+      const g = c.createRadialGradient(x - 5, y - 6, 2, x, y, MR); g.addColorStop(0, '#dff6ff'); g.addColorStop(0.45, '#58b6d8'); g.addColorStop(1, '#1f6d92'); c.fillStyle = g; c.beginPath(); c.arc(x, y, MR, 0, TAU); c.fill();
+      c.save(); c.beginPath(); c.arc(x, y, MR - 1, 0, TAU); c.clip(); c.translate(x, y); c.rotate(rot); c.strokeStyle = 'rgba(255,240,170,.9)'; c.lineWidth = 4; c.beginPath(); c.moveTo(-MR, -3); c.bezierCurveTo(-6, -12, 6, 10, MR, 2); c.stroke(); c.strokeStyle = 'rgba(240,120,110,.85)'; c.lineWidth = 3; c.beginPath(); c.moveTo(-MR, 6); c.bezierCurveTo(-4, -2, 4, 14, MR, 9); c.stroke(); c.restore();
+      c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.ellipse(x - 6, y - 7, 5, 3.4, -0.6, 0, TAU); c.fill(); };
+    c.strokeStyle = '#a79fe8'; c.lineWidth = 9; c.lineCap = 'round'; c.beginPath(); c.ellipse(fx, fy, FUN.r, FUN.r * 0.27, 0, Math.PI, TAU); c.stroke();
+    if (back) drawMarble();
+    shadow((s) => { c.fillStyle = s || 'rgba(167,159,232,.62)'; c.beginPath(); c.moveTo(fx - FUN.r, fy); c.bezierCurveTo(fx - FUN.r * 0.6, fy + FUN.depth * 0.6, fx - FUN.r1 - 8, fy + FUN.depth * 0.7, fx - FUN.r1 - 6, fy + FUN.depth + 26); c.lineTo(fx + FUN.r1 + 6, fy + FUN.depth + 26); c.bezierCurveTo(fx + FUN.r1 + 8, fy + FUN.depth * 0.7, fx + FUN.r * 0.6, fy + FUN.depth * 0.6, fx + FUN.r, fy); c.ellipse(fx, fy, FUN.r, FUN.r * 0.27, 0, 0, Math.PI); c.closePath(); c.fill(); });
+    c.strokeStyle = '#8f86de'; c.lineWidth = 9; c.beginPath(); c.ellipse(fx, fy, FUN.r, FUN.r * 0.27, 0, 0, Math.PI); c.stroke();
+    // chimes: tubes on strings that swing and ring when brushed
+    CHIME.forEach((ch, k) => { const dt = (b - ch.t) * B, sw = dt > 0 ? 0.28 * Math.exp(-dt * 2.2) * Math.sin(dt * 13) : 0, rg = ring(ch.t, 3), len = 232 - k * 15, top = 438, bot = ch.y - MR * 2 - 9; c.save(); c.translate(ch.x + 6, top); c.rotate(sw); c.strokeStyle = 'rgba(60,90,80,.6)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, bot - top - len); c.stroke();
+      const g = c.createLinearGradient(-9, 0, 9, 0); g.addColorStop(0, '#9aa8b0'); g.addColorStop(0.4, '#f4f8fa'); g.addColorStop(1, '#7c8a92'); c.fillStyle = 'rgba(40,70,60,.14)'; c.beginPath(); c.roundRect(-2, bot - top - len + 10, 18, len, 9); c.fill(); c.fillStyle = g; c.beginPath(); c.roundRect(-9, bot - top - len, 18, len, 9); c.fill(); if (rg > 0.02) { c.fillStyle = `rgba(255,236,170,${0.75 * rg})`; c.beginPath(); c.roundRect(-9, bot - top - len, 18, len, 9); c.fill(); } c.restore(); });
+    // bumper pad
+    { const sq = ring(BUMP.t, 7); shadow((s) => { c.fillStyle = s || '#f2a694'; c.beginPath(); c.roundRect(BUMP.x - 6 + 8 * sq, BUMP.y - 46, 20 - 8 * sq, 92, 10); c.fill(); }); }
+    // xylophone keys
+    KEYS.forEach((k, i) => { const rg = ring(k.t, 5), dip = 5 * rg, kw = Math.min(i ? KEYS[i - 1].x - k.x : 64, i < KEYS.length - 1 ? k.x - KEYS[i + 1].x : 64) - 7; shadow((s) => { c.fillStyle = s || KEYCOL[i % KEYCOL.length]; c.beginPath(); c.roundRect(k.x - kw / 2, k.y + dip, kw, 18, 6); c.fill(); }); if (rg > 0.02) { c.fillStyle = `rgba(255,255,255,${0.6 * rg})`; c.beginPath(); c.roundRect(k.x - kw / 2, k.y + dip, kw, 18, 6); c.fill(); c.strokeStyle = `rgba(60,100,84,${0.5 * rg})`; c.lineWidth = 2; c.beginPath(); c.arc(k.x, k.y, 20 + 30 * (1 - rg), Math.PI * 1.15, Math.PI * 1.85); c.stroke(); } });
+    // seesaw and flag
+    { const a = seesaw(t); shadow((s) => { c.save(); c.translate(SEE.px, SEE.py); c.rotate(a); c.fillStyle = s || '#f3d98b'; c.beginPath(); c.roundRect(-SEE.half - 10, -7, SEE.half * 2 + 20, 14, 7); c.fill(); if (!s) { c.fillStyle = '#e2c26a'; c.fillRect(-SEE.half - 2, -7, 6, 14); c.fillRect(SEE.half - 4, -7, 6, 14); } c.restore(); });
+      const fl = E.outBack(prog(t, bt(SEE.cross) + 0.3, 0.35)), wave = fl >= 1 ? 0.12 * Math.sin(t * 6) : 0; c.save(); c.translate(640, SEE.py - 60); c.rotate(lerp(Math.PI / 2, 0, Math.min(1.1, fl)) + wave); c.strokeStyle = '#8a6a4a'; c.lineWidth = 4; c.lineCap = 'round'; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, -64); c.stroke(); c.fillStyle = '#e8604c'; c.beginPath(); c.moveTo(0, -64); c.lineTo(40, -52 + 4 * Math.sin(t * 9)); c.lineTo(0, -38); c.closePath(); c.fill(); c.restore(); }
+    // ramp landings: a little ring
+    RAMPS.forEach((r) => { const rg = ring(r.t0, 6); if (rg > 0.02 && r.note) { c.strokeStyle = `rgba(60,100,84,${0.5 * rg})`; c.lineWidth = 2; c.beginPath(); c.arc(r.a[0], r.a[1] - 12, 18 + 30 * (1 - rg), Math.PI, TAU); c.stroke(); } });
+    if (!back) { const inCup = b >= CUP.t; if (inCup) { c.save(); c.beginPath(); c.rect(CUP.x - 60, CUP.y - 200, 120, 163); c.clip(); drawMarble(); c.restore(); } else drawMarble(); }
+    // cup front wall over the marble, and its wobble
+    if (b >= CUP.t - 0.2) { const wob = ring(CUP.t, 3) * Math.sin((t - bt(CUP.t)) * 20) * 3; c.fillStyle = '#8fcfc0'; c.beginPath(); c.moveTo(CUP.x - 46 + wob, CUP.y - 37); c.lineTo(CUP.x + 46 + wob, CUP.y - 37); c.lineTo(CUP.x + 34, CUP.y + 34); c.quadraticCurveTo(CUP.x, CUP.y + 44, CUP.x - 34, CUP.y + 34); c.closePath(); c.fill(); c.strokeStyle = '#6fb5a5'; c.lineWidth = 4; c.beginPath(); c.ellipse(CUP.x + wob, CUP.y - 40, 46, 9, 0, 0, Math.PI); c.stroke(); }
+    // beat counter
+    const on = prog(t, 0.6, 0.6) * (1 - prog(t, 22.6, 1)); c.font = '500 13px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = `rgba(44,62,58,${0.5 * on})`; c.fillText('B E A T   ' + String(Math.min(40, Math.floor(b) + 1)).padStart(2, '0') + '  /  4 0', 1500, 1040);
+  }
+});
+</script>
+</body>
+</html>

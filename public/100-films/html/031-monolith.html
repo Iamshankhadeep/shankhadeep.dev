@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 031 — Monolith</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 031 — MONOLITH
+ * Brutalist forms in fog; the only event is light moving across concrete (three.js, soft shadows, exponential fog).
+ * Six bars at 60 bpm (4 s each): silhouettes → the sun breaks through and rakes the façades → on the downbeat
+ * of bar 5 (16 s) a shaft passes through the opening in the tall slab and lands on the wet ground → fog closes. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+let T3, sun, fill, FOG = '#8b9096';
+
+function concrete(seed, tint) {
+  const S = 1024, b = Stage.buffer(S, S), n = Stage.makeNoise(seed), r = Stage.rng(seed);
+  const id = b.createImageData(S, S), d = id.data;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let v = 150 + 22 * n.fbm2(x * 0.004, y * 0.004, 4) + 10 * n.noise2(x * 0.05, y * 0.05) + (r() - 0.5) * 16;
+    const board = y % 128; if (board < 2) v -= 16; else v += 4 * Math.sin(((y / 128) | 0) * 12.9898) * 3;      // board-form lines, each board a slightly different tone
+    v -= 26 * smoothstep(0.25, 0.7, n.fbm2(x * 0.012 + 7, y * 0.0016, 3));                                    // vertical water stains
+    const i = (y * S + x) * 4; d[i] = v * tint[0]; d[i + 1] = v * tint[1]; d[i + 2] = v * tint[2]; d[i + 3] = 255;
+  }
+  b.putImageData(id, 0, 0);
+  b.fillStyle = 'rgba(30,30,32,.55)'; for (let k = 0; k < 420; k++) { b.beginPath(); b.arc(r() * S, r() * S, 0.8 + r() * 2.4, 0, 6.283); b.fill(); }       // pitting
+  b.fillStyle = 'rgba(20,20,22,.5)'; for (let y = 43; y < S; y += 172) for (let x = 60; x < S; x += 256) { b.beginPath(); b.arc(x, y, 5, 0, 6.283); b.fill(); }   // tie holes
+  const t = new THREE.CanvasTexture(b.canvas); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+}
+
+Stage.create({
+  no: 31, title: 'Monolith', subtitle: 'three.js · light and concrete · 60 bpm',
+  duration: 24, background: FOG, grain: 0.07, poster: 17.2, vignette: 0.42,
+  fade: { in: 1.6, out: 2.0, color: '#6f7479' },
+  slate: { at: 1.0, hold: 3.2, color: 'rgba(20,22,24,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 24, seed: 31 });
+    M.master({ reverb: { decay: 5.5, size: 1.4, damp: 0.5 }, fadeIn: 1.0, fadeOut: 3.0 });
+    const dr = M.track('drone', { inst: 'strings', reverb: 0.6, gain: (t) => 0.5 + 0.35 * smoothstep(6, 16, t), params: { A: 2.5, R: 3.5, cutoff: 900 }, lowpass: (t) => 500 + 1500 * smoothstep(6, 16.5, t) });
+    const low = M.track('reese', { reverb: 0.3, gain: 0.34, params: { A: 2, R: 3, cutoff: 260 } }), pno = M.track('piano', { reverb: 0.75, gain: 0.8, delay: { time: 1.5, fb: 0.35, mix: 0.25 } });
+    const boom = M.track('impact', { reverb: 0.8, gain: 0.5 }), air = M.track('wind', { reverb: 0.4, gain: 0.6 }), hi = M.track('glasspad', { reverb: 0.8, gain: 0.3, params: { A: 3, R: 4 } });
+    air.hit(0, 0.8, M.beats);
+    dr.chord(0, ['D2', 'A2', 'D3'], 8, 0.6); dr.chord(8, ['Bb1', 'F2', 'D3', 'A3'], 8, 0.62); dr.chord(16, ['D2', 'A2', 'F3', 'E4'], 8, 0.7);
+    low.note(0, 'D1', 8, 0.7); low.note(8, 'Bb0', 8, 0.7); low.note(16, 'D1', 8, 0.8);
+    [[3, 'A4'], [5.5, 'F4'], [9, 'D5'], [10.5, 'A4'], [13, 'Bb4'], [14.5, 'G4'], [16, 'A5'], [17, 'F5'], [18.5, 'E5'], [20.5, 'D5'], [22, 'A4']].forEach(([b, p]) => pno.note(b, p, 2.5, b === 16 ? 0.7 : 0.5));
+    boom.hit(16, 0.8, 5); hi.chord(15, ['A5', 'E6'], 7, 0.5);
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ fov: 30, bloom: { strength: 0.2, radius: 0.9, threshold: 0.93 }, exposure: 0.95, z: 1 });
+    const { scene, renderer, camera } = T3;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    scene.background = new T.Color(FOG); scene.fog = new T.FogExp2(FOG, 0.03);
+    camera.near = 0.5; camera.far = 220; camera.updateProjectionMatrix();
+    const tex = [concrete(3, [1, 1, 1.01]), concrete(8, [0.97, 0.97, 0.99]), concrete(13, [1.02, 1.0, 0.98])];
+    const box = (w, h, d, x, y, z, k, ry) => { const t = tex[k % 3].clone(); t.repeat.set(Math.max(w, d) / 5, h / 5); t.needsUpdate = true; const m = new T.Mesh(new T.BoxGeometry(w, h, d), new T.MeshStandardMaterial({ map: t, bumpMap: t, bumpScale: 0.6, roughness: 0.92, metalness: 0 })); m.position.set(x, y + h / 2, z); m.rotation.y = ry || 0; m.castShadow = m.receiveShadow = true; scene.add(m); return m; };
+    // wet ground
+    const gt = concrete(21, [0.9, 0.91, 0.94]); gt.repeat.set(14, 14);
+    const ground = new T.Mesh(new T.PlaneGeometry(320, 320), new T.MeshStandardMaterial({ map: gt, roughness: 0.66, metalness: 0.0, color: '#b9bcc1' })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+    // ── the forms
+    box(3.2, 17, 9, -13, 0, -8, 0, 0.08);                       // tall slab, left
+    // the pierced slab: two piers and a lintel leave an opening
+    box(5.2, 21, 1.8, -3.6, 0, -19, 1); box(5.2, 21, 1.8, 5.6, 0, -19, 1); box(4, 8, 1.8, 1.0, 13, -19, 1);
+    // stair: a stack of receding steps with a rail
+    for (let i = 0; i < 9; i++) box(7, 0.62, 1.15, 12.5, i * 0.62, -4 - i * 1.15, 2);
+    box(7, 5.6, 5, 12.5, 0, -17, 0);
+    const rail = new T.Mesh(new T.BoxGeometry(0.05, 0.05, 11.6), new T.MeshStandardMaterial({ color: '#16181a', roughness: 0.5 })); rail.position.set(9.2, 3.9, -9.2); rail.rotation.x = Math.atan2(5.6, 10.35); rail.castShadow = true; scene.add(rail);
+    for (let i = 0; i < 9; i += 2) { const p = new T.Mesh(new T.BoxGeometry(0.05, 1.0, 0.05), rail.material); p.position.set(9.2, i * 0.62 + 1.1, -4 - i * 1.15); p.castShadow = true; scene.add(p); }
+    // a doorway at human scale in the left slab
+    const door = new T.Mesh(new T.BoxGeometry(0.1, 2.1, 0.95), new T.MeshStandardMaterial({ color: '#0b0c0d', roughness: 0.8 })); door.position.set(-11.36, 1.05, -5.2); door.rotation.y = 0.08; scene.add(door);
+    // cantilever and cylinder further back
+    box(2.2, 11, 2.2, -4, 0, -40, 2); box(16, 2.2, 3.4, 1.5, 11, -40, 0);
+    const cyl = new T.Mesh(new T.CylinderGeometry(5.5, 5.5, 26, 48), new T.MeshStandardMaterial({ map: tex[1], bumpMap: tex[1], bumpScale: 0.6, roughness: 0.95 })); cyl.position.set(24, 13, -46); cyl.castShadow = cyl.receiveShadow = true; scene.add(cyl);
+    box(30, 30, 3, -34, 0, -60, 1, 0.3);
+    // ── light
+    sun = new T.DirectionalLight('#ffd9b0', 0); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04; sun.shadow.radius = 5;
+    const sc = sun.shadow.camera; sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 10; sc.far = 260; scene.add(sun); scene.add(sun.target); sun.target.position.set(0, 0, -8);
+    fill = new T.HemisphereLight('#cfd8e4', '#7d8288', 1.5); scene.add(fill);
+  },
+
+  frame(t) {
+    const { camera, scene } = T3;
+    // slow dolly forward, drifting right and rising a little
+    const d = prog(t, 0, 24, E.inOutSine);
+    camera.position.set(-5.5 + 5.0 * d, 2.6 + 0.9 * d, 34 - 10 * d); camera.lookAt(0.6 + 0.6 * d, 5.0 - 1.2 * d, -19);
+    // the sun: hidden, then breaking through, sweeping in azimuth so the shadows travel; the shaft lines up at 16 s
+    const brk = smoothstep(4.5, 12, t) * (1 - 0.95 * smoothstep(18.5, 23, t)), az = lerp(2.42, 3.32, prog(t, 3, 19)), el = lerp(0.22, 0.30, prog(t, 3, 19));
+    const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));     // from scene toward the sun
+    sun.position.copy(sun.target.position).addScaledVector(dir, 110); sun.intensity = 4.3 * brk * (1 + 0.25 * Stage.hit('impact', t, 2.5));
+    fill.intensity = 1.6 - 0.5 * brk;
+    scene.fog.density = 0.030 - 0.013 * brk;
+    T3.render();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 091 — Crane</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 091 — CRANE
+ * A square of paper folds itself into a crane and flies. The paper is one small mesh — fourteen points,
+ * eighteen triangles — and the fold is seven hand-built poses of those same points: the flat sheet; folded
+ * corner to corner; the two ends brought down (a true square base — each step is a mirror reflection in a
+ * crease); narrowed to a bird base; neck and tail raised; the head bent; the wings opened. Between poses a
+ * moving point is carried over an arc, the way paper turns about a crease. White on one face, vermilion on
+ * the other. Then the wings beat and it leaves. Eight bars at 80 bpm (3 s each), on the A yo scale. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const V = ['N', 'h', 'n1', 'O', 's1', 'S', 'E', 'e1', 'W', 'w1', 'NE', 'SE', 'SW', 'NW'];
+const TRI = [['N', 'NE', 'h'], ['h', 'NE', 'n1'], ['n1', 'NE', 'O'], ['O', 'NE', 'e1'], ['e1', 'NE', 'E'], ['N', 'NW', 'h'], ['h', 'NW', 'n1'], ['n1', 'NW', 'O'], ['O', 'NW', 'w1'], ['w1', 'NW', 'W'], ['S', 'SE', 's1'], ['s1', 'SE', 'O'], ['O', 'SE', 'e1'], ['e1', 'SE', 'E'], ['S', 'SW', 's1'], ['s1', 'SW', 'O'], ['O', 'SW', 'w1'], ['w1', 'SW', 'W']];
+const L1 = 0.014, L2 = 0.028, L3 = 0.042;
+const P0 = { N: [0, 0, -1], h: [0, 0, -0.8], n1: [0, 0, -0.45], O: [0, 0, 0], s1: [0, 0, 0.45], S: [0, 0, 1], E: [1, 0, 0], e1: [0.45, 0, 0], W: [-1, 0, 0], w1: [-0.45, 0, 0], NE: [0.5, 0, -0.5], SE: [0.5, 0, 0.5], SW: [-0.5, 0, 0.5], NW: [-0.5, 0, -0.5] };
+const P1 = { ...P0, N: [0, L1, 1], h: [0, L1, 0.8], n1: [0, L1, 0.45], NE: [0.5, L1, 0.5], NW: [-0.5, L1, 0.5] };                                 // north corner folded onto south
+const P2 = { ...P1, E: [0, L2, 1], e1: [0, L2, 0.45], W: [0, L3, 1], w1: [0, L3, 0.45] };                                                   // east and west corners folded down: square base
+const sh3 = (o, dz) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, [v[0], v[1], v[2] + dz]]));
+const P3 = sh3({ ...P2, SE: [0.17, 0, 0.5], SW: [-0.17, 0, 0.5], NE: [0.17, L1, 0.5], NW: [-0.17, L1, 0.5], S: [0, 0, 1.2], N: [0, L1, 1.2], E: [0, L2, 1.2], W: [0, L3, 1.2], s1: [0, 0, 0.52], n1: [0, L1, 0.52], h: [0, L1, 0.96], e1: [0.03, L2, 0.52], w1: [-0.03, L3, 0.52] }, -0.56);   // bird base
+const P4 = { O: [0, 0.31, 0], NE: [0.075, 0.02, -0.17], NW: [-0.075, 0.02, -0.17], SE: [0.075, 0.02, 0.17], SW: [-0.075, 0.02, 0.17], n1: [0, 0.25, -0.2], h: [0, 0.68, -0.5], N: [0, 0.95, -0.67], s1: [0, 0.25, 0.2], S: [0, 0.78, 0.64], e1: [0.1, 0.25, 0.03], E: [0.15, 0.04, 0.52], w1: [-0.1, 0.25, 0.03], W: [-0.15, 0.04, 0.52] };   // neck and tail raised
+const P5 = { ...P4, N: [0, 0.57, -0.78] };                                                                                                         // the head bent
+const P6 = { ...P5, e1: [0.18, 0.28, 0], E: [1.0, 0.42, 0.07], w1: [-0.18, 0.28, 0], W: [-1.0, 0.42, 0.07] };                                // wings open
+const POSES = [P0, P1, P2, P3, P4, P5, P6];
+// fold k carries pose k to pose k+1 during [start, end]
+const FOLDS = [[3.0, 4.3], [4.6, 5.9], [6.2, 7.6], [9.2, 10.8], [12.2, 13.2], [15.2, 16.6]];
+const SC = 1.6;
+let T3, mesh, back, lines, blob, hud, pos, lpos, EDGES;
+
+function pointsAt(t) {
+  let k = 0, u = 0; for (let i = 0; i < FOLDS.length; i++) { if (t >= FOLDS[i][1]) { k = i + 1; u = 0; } else if (t >= FOLDS[i][0]) { k = i; u = E.inOutCubic((t - FOLDS[i][0]) / (FOLDS[i][1] - FOLDS[i][0])); break; } }
+  const a = POSES[k], b = POSES[Math.min(6, k + 1)], out = {}, arc = k < 3 ? 0.5 : 0.12;
+  for (const n of V) { const p = a[n], q = b[n], d = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]); out[n] = [lerp(p[0], q[0], u), lerp(p[1], q[1], u) + Math.sin(Math.PI * u) * d * arc, lerp(p[2], q[2], u)]; }
+  // flight: the wings beat from the shoulder
+  const fl = smoothstep(17.0, 18.0, t); if (fl > 0) { const ph = (t - 17) * 5.4, s = Math.sin(ph) * fl; for (const [tip, root, sg] of [['E', 'e1', 1], ['W', 'w1', -1]]) { out[tip] = [sg * (1.0 - 0.16 * (1 - Math.cos(ph)) * fl * 0.5 - 0.1 * Math.abs(s)), 0.42 + 0.5 * s, 0.07 + 0.06 * Math.cos(ph) * fl]; out[root] = [sg * 0.18, 0.28 + 0.03 * s, 0]; } const nod = 0.03 * Math.sin(ph + 1) * fl; out.N = [0, out.N[1] + nod, out.N[2]]; out.h = [0, out.h[1] + nod * 0.6, out.h[2]]; }
+  return out;
+}
+
+Stage.create({
+  no: 91, title: 'Crane', subtitle: 'one square of paper · 80 bpm',
+  duration: 24, background: '#141a3c', grain: 0.045, poster: 16.9,
+  fonts: ['600 44px "Noto Serif JP Variable"'],
+  fade: { in: 0.8, out: 1.4 },
+  slate: { at: 0.5, hold: 2.4, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 80, duration: 24, seed: 91 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.4 }, fadeOut: 2.0 });
+    const koto = M.track('koto', { reverb: 0.4, gain: 0.85, pan: -0.15, humanize: 0.008 }), fl = M.track('flute', { reverb: 0.55, gain: 0.34, pan: 0.25 }), tom = M.track('tom', { reverb: 0.3, gain: 0.4, humanize: 0 }), wb = M.track('woodblock', { reverb: 0.3, gain: 0.5, humanize: 0 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.3 }), air = M.track('air', { reverb: 0.4, gain: 0.1 });
+    const yo = S.scale('A3', 'yo', 3);            // A B D E F#
+    // a phrase for each fold, ending where the crease is pressed
+    const phr = [[0, 2, 4, 3], [2, 4, 5, 7], [4, 5, 7, 6, 5], [5, 7, 9, 8, 7], [7, 9, 10], [9, 10, 12, 11, 10, 12]];
+    FOLDS.forEach(([a, b], i) => { const n = phr[i], b0 = M.b(a), step = (M.b(b) - b0) / n.length; n.forEach((d, k) => koto.note(b0 + k * step, yo[d], 1.2, 0.5 + 0.03 * k)); koto.note(M.b(b), yo[n[n.length - 1] - 5 < 0 ? 0 : n[n.length - 1] - 5], 2, 0.6); wb.hit(M.b(b), 0.8, 0.1, { pitch: 60 + i * 2 }); tom.hit(M.b(b), 0.6, 0.3, { pitch: 44 }); fl.note(M.b(b) + 0.5, yo[n[n.length - 1] + 2], 1.6, 0.4); });
+    koto.note(M.b(1.6), yo[0], 2, 0.5); koto.note(M.b(1.75), yo[4], 2, 0.4); tom.hit(M.b(1.6), 0.4, 0.3, { pitch: 40 });
+    pad.chord(0, ['A2', 'E3', 'B3'], 12, 0.4); pad.chord(12, ['D3', 'A3', 'E4'], 8, 0.45); pad.chord(20, ['A2', 'E3', 'A3', 'E4'], 12, 0.55);
+    // flight
+    [[23, 7, 1], [24, 9, 1], [25, 10, 2], [27, 12, 1], [28, 14, 3], [31, 12, 1]].forEach(([b, d, len]) => fl.note(b, yo[d], len + 0.4, 0.55)); for (let k = 0; k < 16; k++) koto.note(23 + k * 0.5, yo[[0, 2, 4, 5, 7, 5, 4, 2][k % 8] + (k >= 8 ? 5 : 0)], 0.8, 0.36); air.hit(22, 0.6, 9);
+    return M;
+  },
+
+  setup() {
+    const T = THREE; T3 = Stage.three({ fov: 30, exposure: 1.05, z: 1 }); const sc = T3.scene; sc.background = new T.Color('#0e1230'); sc.fog = new T.Fog('#0e1230', 7, 15);
+    // orient every triangle upward in the flat pose, so "front" is the top of the sheet
+    const tris = TRI.map(([a, b, c]) => { const A = P0[a], B = P0[b], C = P0[c], ny = (B[2] - A[2]) * (C[0] - A[0]) - (B[0] - A[0]) * (C[2] - A[2]); return ny > 0 ? [a, b, c] : [a, c, b]; });
+    TRI.length = 0; tris.forEach((q) => TRI.push(q));
+    const geo = new T.BufferGeometry(); pos = new Float32Array(TRI.length * 9); geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+    mesh = new T.Mesh(geo, new T.MeshStandardMaterial({ color: '#f7f2e8', roughness: 0.85, metalness: 0, side: T.FrontSide, flatShading: true })); back = new T.Mesh(geo, new T.MeshStandardMaterial({ color: '#e2452b', roughness: 0.8, metalness: 0, side: T.BackSide, flatShading: true }));
+    mesh.frustumCulled = back.frustumCulled = false; const grp = new T.Group(); grp.add(mesh); grp.add(back);
+    const es = new Set(); TRI.forEach(([a, b, c]) => [[a, b], [b, c], [c, a]].forEach(([p, q]) => es.add([p, q].sort().join('|')))); EDGES = [...es].map((e) => e.split('|'));
+    lpos = new Float32Array(EDGES.length * 6); const lg = new T.BufferGeometry(); lg.setAttribute('position', new T.BufferAttribute(lpos, 3)); lines = new T.LineSegments(lg, new T.LineBasicMaterial({ color: '#5a4636', transparent: true, opacity: 0.35 })); lines.frustumCulled = false; grp.add(lines); grp.scale.setScalar(SC); sc.add(grp); T3.grp = grp;
+    // table: indigo, with a soft pool of light; and a contact shadow that follows the paper
+    const tex = (draw, s = 512) => { const b = Stage.buffer(s, s); draw(b); const t = new T.CanvasTexture(b.canvas); t.colorSpace = T.SRGBColorSpace; return t; };
+    const floor = new T.Mesh(new T.PlaneGeometry(60, 60), new T.MeshBasicMaterial({ map: tex((b) => { const g = b.createRadialGradient(256, 256, 10, 256, 256, 256); g.addColorStop(0, '#3a4690'); g.addColorStop(0.1, '#2a3474'); g.addColorStop(0.28, '#181f4a'); g.addColorStop(0.6, '#0e1230'); g.addColorStop(1, '#0e1230'); b.fillStyle = g; b.fillRect(0, 0, 512, 512); }) })); floor.rotation.x = -Math.PI / 2; floor.position.y = -0.003; sc.add(floor);
+    blob = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ transparent: true, depthWrite: false, map: tex((b) => { const g = b.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(4,6,20,.85)'); g.addColorStop(0.55, 'rgba(4,6,20,.5)'); g.addColorStop(1, 'rgba(4,6,20,0)'); b.fillStyle = g; b.fillRect(0, 0, 256, 256); }, 256) })); blob.material.fog = false; blob.rotation.x = -Math.PI / 2; blob.position.y = -0.001; sc.add(blob);
+    sc.add(new T.HemisphereLight('#eef1ff', '#5a5f96', 1.7)); const key = new T.DirectionalLight('#fff4e2', 2.2); key.position.set(-2.5, 5, 3); sc.add(key); const rim = new T.DirectionalLight('#9fb4ff', 0.7); rim.position.set(3, 2, -4); sc.add(rim);
+    hud = Stage.canvas2d({ z: 2, dpr: 2 });
+  },
+
+  frame(t) {
+    const P = pointsAt(t), g = T3.grp;
+    TRI.forEach((tr, i) => tr.forEach((n, k) => { const p = P[n]; pos[i * 9 + k * 3] = p[0]; pos[i * 9 + k * 3 + 1] = p[1]; pos[i * 9 + k * 3 + 2] = p[2]; }));
+    EDGES.forEach(([a, b], i) => { lpos.set(P[a], i * 6); lpos.set(P[b], i * 6 + 3); });
+    mesh.geometry.attributes.position.needsUpdate = true; mesh.geometry.computeVertexNormals(); lines.geometry.attributes.position.needsUpdate = true;
+    // the sheet drifts down and settles; later the crane rises and leaves
+    const drop = 1 - E.outCubic(prog(t, 0, 1.6)), rise = Math.max(0, t - 18.3), up = 0.16 * rise * rise + 0.05 * Math.sin((t - 17) * 5.4 + 2.2) * smoothstep(17, 18, t);
+    g.position.set(0.25 * drop * Math.sin(t * 2.2), 0.002 + 1.4 * drop + up, -0.12 * rise * rise); g.rotation.set(0.5 * drop * Math.sin(t * 2.6), 0.5 * drop + 0.18 * smoothstep(8.5, 14, t) - 0.25 * smoothstep(18.5, 23, t), 0.35 * drop * Math.cos(t * 2.1) + 0.08 * Math.sin(rise * 1.3) * smoothstep(0, 1, rise));
+    // contact shadow: as wide as the paper, tighter and fainter with height
+    let x0 = 9, x1 = -9, z0 = 9, z1 = -9; for (const n of V) { x0 = Math.min(x0, P[n][0]); x1 = Math.max(x1, P[n][0]); z0 = Math.min(z0, P[n][2]); z1 = Math.max(z1, P[n][2]); }
+    const hgt = g.position.y, sh = 1 / (1 + hgt * 0.5); blob.scale.set((x1 - x0 + 0.5) * 1.25 * sh * SC, (z1 - z0 + 0.5) * 1.25 * sh * SC, 1); blob.position.set(g.position.x + (x0 + x1) / 2 * SC + hgt * 0.2, -0.001, g.position.z + (z0 + z1) / 2 * SC - hgt * 0.2); blob.material.opacity = 0.9 / (1 + hgt * 1.3);
+    // camera: above the table while folding, lower for the bird, then letting it go
+    const low = E.inOutSine(prog(t, 8.6, 6.4)), a = lerp(0.0, 0.62, low) + 0.05 * Math.sin(t * 0.3), d = lerp(5.6, 5.4, low), cam = T3.camera; cam.position.set(Math.sin(a) * d, lerp(5.2, 2.0, low) + 0.3 * up, Math.cos(a) * d); cam.lookAt(0, lerp(0, 0.62, low) + 0.5 * up, lerp(0.1, 0, low));
+    T3.render();
+    // seal
+    const c = hud; c.clearRect(0, 0, 1920, 1080); const s = prog(t, 16.6, 0.25, E.outBack); if (s > 0) { c.save(); c.translate(1770, 930); c.rotate(-0.06); c.scale(lerp(1.6, 1, Math.min(1, s)), lerp(1.6, 1, Math.min(1, s))); c.globalAlpha = Math.min(1, s) * 0.94; c.fillStyle = '#d6402a'; c.beginPath(); c.roundRect(-36, -36, 72, 72, 8); c.fill(); c.fillStyle = '#f6efe2'; c.font = '600 44px "Noto Serif JP Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('鶴', 0, 2); c.restore(); }
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 077 — Pictograms</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 077 — PICTOGRAMS
+ * One shape becomes twelve things. Every pictogram is drawn with exactly twelve round-capped strokes of the
+ * same weight (cubic Béziers; a dot is a stroke of no length), so a morph is simply stroke k of one icon
+ * travelling to stroke k of the next — with a springy overshoot. Sun → umbrella → bicycle → teacup → lamp →
+ * key → fish → leaf → rocket → house → heart → smile, the ground flipping through six flat colours, a
+ * woodblock pop on every change; the middle runs at double speed; the smile blinks once.
+ * Nine bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, SW = 30, K = 12, SCALE = 1.86;
+const INK_L = '#f3ecdd', INK_D = '#17181c';
+const GROUND = [['#2b4bd8', INK_L], ['#f1eadb', INK_D], ['#e4533b', INK_L], ['#17181c', INK_L], ['#1f6f5c', INK_L], ['#ecb63a', INK_D]];
+// stroke builders → [x1,y1, c1x,c1y, c2x,c2y, x2,y2]
+const L = (x1, y1, x2, y2) => [x1, y1, lerp(x1, x2, 1 / 3), lerp(y1, y2, 1 / 3), lerp(x1, x2, 2 / 3), lerp(y1, y2, 2 / 3), x2, y2];
+const Q = (x1, y1, cx, cy, x2, y2) => [x1, y1, x1 + (cx - x1) * 2 / 3, y1 + (cy - y1) * 2 / 3, x2 + (cx - x2) * 2 / 3, y2 + (cy - y2) * 2 / 3, x2, y2];
+const C = (...a) => a, D = (x, y) => [x, y, x, y, x, y, x, y];
+const A = (cx, cy, r, a0, a1) => { const k = 4 / 3 * Math.tan((a1 - a0) / 4), c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1); return [cx + r * c0, cy + r * s0, cx + r * (c0 - k * s0), cy + r * (s0 + k * c0), cx + r * (c1 + k * s1), cy + r * (s1 - k * c1), cx + r * c1, cy + r * s1]; };
+const ring = (cx, cy, r, n) => Array.from({ length: n }, (_, i) => A(cx, cy, r, i * TAU / n - TAU / 4, (i + 1) * TAU / n - TAU / 4));
+const pad = (s) => { const out = s.slice(); for (let i = 0; out.length < K; i++) out.push(s[i % s.length]); return out; };
+const ray = (i) => { const a = i * TAU / 8; return L(Math.cos(a) * 118, Math.sin(a) * 118, Math.cos(a) * 168, Math.sin(a) * 168); };
+const ICONS = [
+  ['sun', [...ring(0, 0, 70, 4), ...[0, 1, 2, 3, 4, 5, 6, 7].map(ray)]],
+  ['umbrella', pad([A(0, -10, 165, Math.PI, Math.PI * 1.5), A(0, -10, 165, Math.PI * 1.5, TAU), Q(-165, -10, -110, -62, -55, -10), Q(-55, -10, 0, -62, 55, -10), Q(55, -10, 110, -62, 165, -10), L(0, -12, 0, 135), A(-36, 135, 36, 0, Math.PI / 2), A(-36, 135, 36, Math.PI / 2, Math.PI), L(0, -175, 0, -196)])],
+  ['bicycle', pad([A(-112, 62, 72, 0, Math.PI), A(-112, 62, 72, Math.PI, TAU), A(112, 62, 72, 0, Math.PI), A(112, 62, 72, Math.PI, TAU), L(-112, 62, -34, -56), L(-34, -56, 72, -56), L(72, -56, 112, 62), L(-34, -56, 6, 62), L(6, 62, 72, -56), L(-112, 62, 6, 62), L(72, -56, 60, -98), L(-60, -72, -8, -72)])],
+  ['teacup', pad([L(-116, -40, 124, -40), L(-116, -40, -96, 56), Q(-96, 56, -84, 112, -24, 112), L(-24, 112, 32, 112), Q(32, 112, 92, 112, 104, 56), L(104, 56, 124, -40), Q(120, -14, 196, -22, 190, 30), Q(190, 30, 184, 78, 108, 64), L(-156, 156, 164, 156), C(-34, -84, -64, -108, -4, -140, -34, -166), C(38, -84, 8, -108, 68, -140, 38, -166)])],
+  ['lamp', pad([L(-62, -156, 62, -156), L(62, -156, 122, -22), L(122, -22, -122, -22), L(-122, -22, -62, -156), L(0, -22, 0, 128), L(-86, 142, 86, 142), L(-72, 22, -98, 70), L(72, 22, 98, 70), L(0, 30, 0, 78), D(34, 96)])],
+  ['key', pad([A(-98, 0, 64, 0, Math.PI), A(-98, 0, 64, Math.PI, TAU), L(-34, 0, 176, 0), L(116, 0, 116, 54), L(156, 0, 156, 42), L(76, 0, 76, 30), D(-98, 0)])],
+  ['fish', pad([Q(-156, 0, -24, -118, 92, 0), Q(-156, 0, -24, 118, 92, 0), L(92, 0, 164, -64), L(164, -64, 164, 64), L(164, 64, 92, 0), Q(-44, -36, -66, 0, -44, 36), L(-12, -62, 28, -98), D(-92, -12), D(-196, -54), D(-214, -100)])],
+  ['leaf', pad([Q(-122, 122, -156, -116, 124, -134), Q(-122, 122, 116, 156, 124, -134), L(-122, 122, 74, -86), L(-172, 172, -122, 122), L(-70, 70, -88, 6), L(-70, 70, -6, 88), L(-10, 10, -30, -58), L(-10, 10, 58, 30)])],
+  ['rocket', pad([Q(0, -196, -86, -104, -62, 62), Q(0, -196, 86, -104, 62, 62), L(-62, 62, 62, 62), A(0, -62, 28, 0, Math.PI), A(0, -62, 28, Math.PI, TAU), L(-62, 8, -118, 92), L(-118, 92, -62, 62), L(62, 8, 118, 92), L(118, 92, 62, 62), Q(-30, 96, 0, 178, 30, 96), L(0, 100, 0, 128)])],
+  ['house', pad([L(-166, -22, 0, -166), L(0, -166, 166, -22), L(-122, -34, -122, 144), L(122, -34, 122, 144), L(-122, 144, 122, 144), L(-32, 144, -32, 52), L(-32, 52, 32, 52), L(32, 52, 32, 144), L(84, -138, 84, -94), D(78, 22)])],
+  ['heart', pad([C(0, 152, -72, 92, -184, 22, -184, -62), C(-184, -62, -184, -164, -42, -174, 0, -82), C(0, -82, 42, -174, 184, -164, 184, -62), C(184, -62, 184, 22, 72, 92, 0, 152)])],
+  ['smile', pad([...ring(0, 0, 164, 4), Q(-82, 42, 0, 124, 82, 42), D(-58, -46), D(58, -46)])]
+];
+// change times in beats: three-beat steps, the middle at double speed
+const AT = [0.5, 3, 6, 9, 12, 13.5, 15, 16.5, 18, 21, 24, 27].map((b) => b * 0.5);
+const spring = (p) => p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-6.5 * p) * Math.cos(11 * p);
+let ctx;
+
+Stage.create({
+  no: 77, title: 'Pictograms', subtitle: 'twelve strokes, twelve things · 120 bpm',
+  duration: 18, background: GROUND[0][0], grain: 0.035, poster: 7.2,
+  fonts: ['600 22px "JetBrains Mono Variable"'],
+  fade: { in: 0.4, out: 0.9 },
+  slate: { at: 0.4, hold: 2.2, pos: 'bl', color: 'rgba(243,236,221,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 18, seed: 77 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 0.9 });
+    const plk = M.track('pluck', { reverb: 0.25, gain: 1.15, humanize: 0, params: { decay: 0.5, bright: 0.6 }, delay: { time: 0.75, fb: 0.25, mix: 0.16 } }), bass = M.track('bass', { reverb: 0.05, gain: 0.42, lowpass: 900 }), kick = M.track('kick', { reverb: 0.04, gain: 0.5 }), clap = M.track('clap', { reverb: 0.25, gain: 0.42 }), wb = M.track('woodblock', { reverb: 0.25, gain: 0.8, humanize: 0 }), hat = M.track('hat', { reverb: 0.08, gain: 0.18 }), kal = M.track('kalimba', { reverb: 0.4, gain: 0.7 });
+    const sc = S.scale('D4', 'major', 2), bars = [['D2', [0, 2, 4, 7]], ['B1', [5, 7, 9, 12]], ['G1', [3, 5, 7, 10]], ['A1', [4, 6, 8, 11]]];
+    for (let bar = 0; bar < 9; bar++) {
+      const b = bar * 4, [r, deg] = bars[bar % 4], fast = bar >= 3 && bar < 5, last = bar >= 7;
+      if (!last) { bass.note(b, r, 0.8, 0.8); bass.note(b + 1.5, r, 0.4, 0.6); bass.note(b + 2.5, S.midi(r) + 12, 0.4, 0.6); bass.note(b + 3, S.midi(r) + 7, 0.8, 0.7); if (bar >= 1) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); clap.pattern(b, 1, '.x.x', { vel: 0.7 }); hat.pattern(b, 0.5, fast ? 'xxxxxxxx' : '.x.x.x.x', { vel: 0.45 }); }
+        const pat = fast ? [0, 1, 2, 3, 2, 1, 2, 3] : [0, null, 2, 1, null, 3, 2, null]; pat.forEach((k, i) => { if (k != null) plk.note(b + i * 0.5, sc[deg[k]], 0.4, 0.55); }); }
+    }
+    AT.forEach((t, i) => wb.hit(M.b(t), i ? 0.9 : 0.6, 0.1, { pitch: 62 + (i * 5) % 12 }));
+    // the smile lands on a chord; the blink is a single plink
+    plk.chord(27, [sc[0], sc[2], sc[4], sc[7], sc[9]], 2, 0.6); bass.note(27, 'D2', 3, 0.8); kick.hit(27, 1); clap.hit(27, 0.8); kal.note(31, 'A6', 0.6, 0.5); kal.note(31.25, 'D7', 1.2, 0.45);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; let i = 0; while (i < AT.length - 1 && t >= AT[i + 1]) i++;
+    const since = t - AT[i], prev = Math.max(0, i - 1), p = i === 0 ? 1 : spring(since / 0.62), [gcol, ink] = GROUND[i % 6], [pcol] = GROUND[prev % 6];
+    // ground: the new colour opens from the centre
+    c.fillStyle = i === 0 ? gcol : pcol; c.fillRect(0, 0, W, H); if (i > 0) { const r = 1250 * E.outCubic(clamp01(since / 0.32)); c.fillStyle = gcol; c.beginPath(); c.arc(W / 2, H / 2, r, 0, TAU); c.fill(); }
+    if (t < AT[0]) return;
+    // strokes: each travels from its old place to its new one
+    const a = ICONS[prev][1], b = ICONS[i][1], pop = i === 0 ? E.outBack(clamp01(since / 0.45)) : 1 + 0.07 * Math.exp(-since * 9) * Math.sin(since * 26);
+    const blink = i === 11 ? Math.exp(-Math.pow((t - 15.5) / 0.07, 2)) : 0;
+    c.save(); c.translate(W / 2, H / 2 + 6); c.scale(SCALE * pop, SCALE * pop); c.strokeStyle = ink; c.lineWidth = SW; c.lineCap = 'round'; c.lineJoin = 'round';
+    for (let k = 0; k < K; k++) {
+      const s = a[k], e = b[k], q = clamp01(p + (i === 0 ? 0 : 0)), v = s.map((x, j) => lerp(x, e[j], i === 0 ? 1 : spring(clamp01(since / 0.62 - k * 0.012))));
+      const isEye = i === 11 && k >= 5 && v[0] === v[6] && v[1] === v[7] && Math.abs(v[1] + 46) < 1;
+      c.beginPath(); if (isEye && blink > 0.02) { c.moveTo(v[0] - 16 * blink, v[1]); c.lineTo(v[0] + 16 * blink, v[1]); c.lineWidth = SW * (1 - 0.55 * blink); } else { c.moveTo(v[0], v[1]); c.bezierCurveTo(v[2], v[3], v[4], v[5], v[6] + 0.01, v[7]); c.lineWidth = SW; }
+      c.stroke();
+    }
+    c.restore();
+    // index and name
+    const tk = clamp01(since / 0.2); c.fillStyle = ink; c.font = '600 22px "JetBrains Mono Variable"'; c.textBaseline = 'alphabetic'; c.textAlign = 'right'; c.globalAlpha = 0.9;
+    c.fillText(String(i + 1).padStart(2, '0') + ' / 12', W - 96, H - 92 - 10 * (1 - E.outCubic(tk))); c.globalAlpha = 0.55 * tk; c.fillText(ICONS[i][0].toUpperCase().split('').join(' '), W - 96, H - 124); c.globalAlpha = 1;
+    // twelve pips along the bottom
+    for (let k = 0; k < 12; k++) { c.fillStyle = ink; c.globalAlpha = k === i ? 0.95 : k < i ? 0.45 : 0.18; c.beginPath(); c.roundRect(W / 2 - 12 * 15 + k * 30 + (k === i ? -4 : 0), H - 70, k === i ? 22 : 14, 6, 3); c.fill(); } c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

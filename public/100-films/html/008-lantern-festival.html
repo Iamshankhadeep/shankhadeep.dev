@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 008 — Lantern Festival</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 008 — LANTERN FESTIVAL
+ * Hundreds of paper lanterns released over a river at night (three.js, instanced, bloom).
+ * Seven bars at 70 bpm (≈3.43 s each): one lantern alone → a dozen → the sky fills as the camera tilts up
+ * with them (bar 5, 13.7 s) → they recede into a field of warm stars. Every lantern is a pure function of time:
+ * a release moment, a drift path and a sway, so the film can be sampled at any frame. */
+const { ease: E, prog, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 240 / 70, N = 520;
+let T3, lanterns, glows, reflect, stars, dummy, col, lan = [];
+
+function release(i) {            // when lantern i leaves the water's edge
+  if (i === 0) return 0.6;
+  if (i < 13) return BAR * 1.0 + (i - 1) * 0.34 + hash(i, 1) * 0.4;
+  return BAR * 2.0 + Math.pow(hash(i, 2), 0.8) * BAR * 3.3;
+}
+
+Stage.create({
+  no: 8, title: 'Lantern Festival', subtitle: 'three.js instancing · 70 bpm',
+  duration: 24, background: '#03050c', grain: 0.06, poster: 15.5,
+  fade: { in: 1.6, out: 2.0 }, slate: { at: 0.9, hold: 3.2, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 70, duration: 24, seed: 8 });
+    M.master({ reverb: { decay: 4.0, size: 1.2, damp: 0.5 }, fadeIn: 0.5, fadeOut: 2.6 });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.6, gain: (t) => 0.5 + 0.45 * Math.min(1, t / 13) });
+    const harp = M.track('harp', { reverb: 0.55, gain: 0.9 }), koto = M.track('koto', { reverb: 0.5, gain: 0.7, delay: { time: 1.5, fb: 0.3, mix: 0.22 } });
+    const tom = M.track('tom', { reverb: 0.5, gain: 0.5, params: { tone: 70, decay: 0.5 } });
+    const chime = M.track('chime', { reverb: 0.8, gain: 0.5, delay: { time: 0.75, fb: 0.4, mix: 0.3 } });
+    const str = M.track('strings', { reverb: 0.65, gain: 0.7, params: { cutoff: 3000, A: 0.8, R: 1.6 } }), sub = M.track('sub', { reverb: 0.04, gain: 0.55 });
+    // G major pentatonic: G A B D E. Harmony: G — Em — C(add9) — D(sus) | G — Em — Cmaj9
+    const prog = [['G5', 'G1'], ['Em7', 'E1'], ['Cadd9', 'C1'], ['Dsus4', 'D1'], ['Gadd9', 'G1'], ['Em9', 'E1'], ['Cmaj9', 'C1']];
+    prog.forEach(([c, root], i) => {
+      const b = i * 4;
+      pad.chord(b, c === 'G5' ? ['G2', 'D3', 'G3', 'B3'] : c, 4, i < 4 ? 0.55 : 0.72);
+      if (i >= 2) sub.note(b, root, 3.7, i < 4 ? 0.5 : 0.8);
+      if (i >= 4) str.chord(b, c, 4, 0.5, { octave: 4 });
+      if (i >= 1 && i < 6) { tom.hit(b, 0.7); tom.hit(b + 2.5, 0.4); }
+      if (i >= 4 && i < 6) harp.arp(b, S.scale('G3', 'pentatonic', 2), 0.5, 4, { mode: 'updown', vel: 0.34 });
+    });
+    harp.seq(1, 1, ['D5', null, 'B4', 'A4', 'G4', null, null, 'A4', 'B4', null, 'D5', 'E5', null, 'D5', null, null], { vel: 0.5, gate: 2 });
+    koto.seq(8, 0.5, ['G4', 'A4', 'B4', null, 'D5', null, 'E5', null, 'D5', null, 'B4', null, 'A4', null, null, null, 'B4', 'D5', 'E5', null, 'G5', null, 'A5', null, 'G5', null, 'E5', null, 'D5', null, null, null], { vel: 0.5, gate: 1.6 });
+    koto.seq(16, 0.5, ['B5', null, 'A5', 'G5', null, 'E5', null, 'D5', 'E5', null, 'G5', null, 'A5', null, 'B5', null, 'D6', null, null, 'B5', null, 'A5', null, 'G5', null, null, 'E5', null, 'D5', null, null, null], { vel: 0.55, gate: 1.6 });
+    // a chime for each of the first lanterns, at its release
+    const pent = S.scale('G5', 'pentatonic', 1);
+    for (let i = 0; i < 13; i++) chime.note(M.b(release(i)), pent[(i * 3) % pent.length], 1, i === 0 ? 0.5 : 0.28);
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ fov: 42, bloom: { strength: 0.55, radius: 0.75, threshold: 0.62 }, exposure: 1.0, z: 1 });
+    const { scene } = T3;
+    scene.background = new T.Color('#03050c'); scene.fog = new T.FogExp2('#050818', 0.011);
+    // sky dome gradient + stars
+    const sky = new T.Mesh(new T.SphereGeometry(150, 32, 16), new T.ShaderMaterial({ side: T.BackSide, depthWrite: false, fog: false,
+      vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+      fragmentShader: 'varying vec3 vP; void main(){ float h = normalize(vP).y; vec3 c = mix(vec3(.050,.060,.125), vec3(.006,.010,.030), smoothstep(-.05,.55,h)); float q = (h-.01)/.07; c += vec3(.10,.045,.02)*exp(-q*q); gl_FragColor = vec4(c,1.); }' }));
+    scene.add(sky);
+    const sp = new Float32Array(1400 * 3);
+    for (let i = 0; i < 1400; i++) { const a = hash(i, 31) * 6.283, h = 0.04 + 0.96 * Math.pow(hash(i, 32), 1.3), r = 140; sp[i * 3] = Math.cos(a) * Math.sqrt(1 - h * h) * r; sp[i * 3 + 1] = h * r; sp[i * 3 + 2] = Math.sin(a) * Math.sqrt(1 - h * h) * r; }
+    const sg = new T.BufferGeometry(); sg.setAttribute('position', new T.BufferAttribute(sp, 3));
+    stars = new T.Points(sg, new T.PointsMaterial({ color: '#aebde6', size: 1.5, sizeAttenuation: false, transparent: true, opacity: 0.7, fog: false, depthWrite: false }));
+    scene.add(stars);
+    // far treeline: a jagged dark band standing on the far bank
+    const shape = new T.Shape(); shape.moveTo(-160, 0);
+    for (let x = -160; x <= 160; x += 0.9) shape.lineTo(x, 2.2 + 2.6 * Stage.fbm2(x * 0.05, 3.1, 3) + 1.5 * Math.abs(Stage.noise2(x * 0.9, 7.7)) + 3.5 * smoothstep(40, 150, Math.abs(x)));
+    shape.lineTo(160, 0);
+    const trees = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshBasicMaterial({ color: '#02040a', fog: false })); trees.position.set(0, 0, -78); scene.add(trees);
+    // water: dark mirror. Reflections are drawn as stretched glow sprites under each lantern.
+    const water = new T.Mesh(new T.PlaneGeometry(400, 220), new T.MeshBasicMaterial({ color: '#04070f' })); water.rotation.x = -Math.PI / 2; water.position.z = -30; scene.add(water);
+    // lantern body: a tapered paper cylinder, lit from inside (gradient via vertex colours)
+    const g = new T.CylinderGeometry(0.42, 0.30, 0.92, 20, 6, true); const pos = g.attributes.position, vc = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) { const y = Math.min(1, Math.max(0, pos.getY(i) / 0.92 + 0.5)), k = 0.35 + 0.65 * Math.pow(1 - y, 1.4); vc[i * 3] = k; vc[i * 3 + 1] = k; vc[i * 3 + 2] = k; }
+    g.setAttribute('color', new T.BufferAttribute(vc, 3));
+    const cap = new T.CircleGeometry(0.42, 20); cap.rotateX(-Math.PI / 2); cap.translate(0, 0.46, 0);
+    const cc = new Float32Array(cap.attributes.position.count * 3).fill(0.42); cap.setAttribute('color', new T.BufferAttribute(cc, 3));
+    const body = T.mergeGeometries([g, cap]);
+    lanterns = new T.InstancedMesh(body, new T.MeshBasicMaterial({ vertexColors: true, side: T.DoubleSide, fog: true }), N);
+    lanterns.instanceColor = new T.InstancedBufferAttribute(new Float32Array(N * 3), 3); scene.add(lanterns);
+    // soft glow sprite (shared texture) — halo around each lantern and its smeared reflection
+    const gc = document.createElement('canvas'); gc.width = gc.height = 128; const gx = gc.getContext('2d'), gr = gx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,.45)'); gr.addColorStop(0.6, 'rgba(255,255,255,.1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    gx.fillStyle = gr; gx.fillRect(0, 0, 128, 128);
+    const tex = new T.CanvasTexture(gc);
+    const mk = () => { const m = new T.InstancedMesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, blending: T.AdditiveBlending, fog: true }), N); m.instanceColor = new T.InstancedBufferAttribute(new Float32Array(N * 3), 3); scene.add(m); return m; };
+    glows = mk(); reflect = mk(); reflect.material.fog = false;
+    for (const m of [lanterns, glows, reflect]) m.frustumCulled = false;
+    dummy = new T.Object3D(); col = new T.Color();
+    for (let i = 0; i < N; i++) {
+      const hero = i < 13;
+      lan.push({ t0: release(i), x0: hero ? (i === 0 ? 0.4 : (hash(i, 3) - 0.5) * 16) : (hash(i, 3) - 0.5) * 120, z0: hero ? -9 - hash(i, 4) * 9 : -14 - Math.pow(hash(i, 4), 0.7) * 58,
+        rise: 1.05 + hash(i, 5) * 0.55, sway: 0.5 + hash(i, 6), ph: hash(i, 7) * 6.283, s: (hero ? 1.25 : 0.85) + hash(i, 8) * 0.5, warm: hash(i, 9), fl: 1.5 + 2.5 * hash(i, 10) });
+    }
+  },
+
+  frame(t) {
+    const { camera } = T3;
+    // camera: low over the water, then tilting up and drifting back as the sky fills
+    const tilt = prog(t, BAR * 2.6, BAR * 3.2, E.inOutSine), back = prog(t, 0, 24, E.inOutSine);
+    camera.position.set(-1.2 + 2.4 * back, 1.5 + 2.2 * tilt, 13 + 5 * back);
+    camera.lookAt(0.6 * back, 5.4 + 13 * tilt + 5 * prog(t, 16, 8, E.inOutSine), -18);
+    camera.updateMatrixWorld();
+    const wind = 0.5 + 0.5 * Math.sin(t * 0.21);
+    for (let i = 0; i < N; i++) {
+      const L = lan[i], a = t - L.t0;
+      if (a < 0) { dummy.scale.setScalar(0); dummy.position.set(0, -50, 0); dummy.updateMatrix(); lanterns.setMatrixAt(i, dummy.matrix); glows.setMatrixAt(i, dummy.matrix); reflect.setMatrixAt(i, dummy.matrix); continue; }
+      // lift-off eases in, then a steady climb that slows with height; lateral drift grows with altitude
+      const lift = prog(a, 0, 2.2, E.inOutSine);
+      const y = 0.55 + L.rise * (a * lift - 1.1 * lift * (1 - Math.exp(-Math.max(0, a - 2.2) * 0.02))) * (1 - 0.012 * Math.min(a, 30));
+      const x = L.x0 + (0.10 + 0.07 * wind) * y * (0.6 + L.sway * 0.5) + 0.35 * L.sway * Math.sin(a * 0.45 + L.ph) * Math.min(1, a * 0.3);
+      const z = L.z0 - 0.35 * y + 0.3 * Math.sin(a * 0.31 + L.ph * 1.7);
+      const fl = 0.86 + 0.09 * Math.sin(t * L.fl + L.ph) + 0.05 * Math.sin(t * L.fl * 2.7 + L.ph * 3);
+      const lit = smoothstep(-0.2, 1.0, a) * fl;
+      dummy.position.set(x, y, z); dummy.rotation.set(0.06 * Math.sin(a * 0.5 + L.ph), a * 0.12 + L.ph, 0.07 * Math.sin(a * 0.43 + L.ph * 2)); dummy.scale.setScalar(L.s); dummy.updateMatrix();
+      lanterns.setMatrixAt(i, dummy.matrix);
+      col.setRGB(1.0, lerp(0.46, 0.70, L.warm), lerp(0.13, 0.32, L.warm)).multiplyScalar(1.12 * lit); lanterns.setColorAt(i, col);
+      // halo — a camera-facing quad
+      dummy.rotation.copy(camera.rotation); dummy.scale.setScalar(L.s * 3.4); dummy.updateMatrix(); glows.setMatrixAt(i, dummy.matrix);
+      col.setRGB(1.0, 0.52, 0.18).multiplyScalar(0.34 * lit); glows.setColorAt(i, col);
+      // reflection: a tall smear lying on the water toward the viewer, fading as the lantern climbs
+      const rf = Math.exp(-y * 0.09) * lit;
+      dummy.position.set(x + 0.12 * Math.sin(t * 1.3 + i), 0.02, z + 2.5 + y * 0.35); dummy.rotation.set(-Math.PI / 2, 0, 0); dummy.scale.set(L.s * (1.5 + 0.3 * Math.sin(t * 2.1 + i * 1.7)), L.s * (9 + y * 1.4), 1); dummy.updateMatrix(); reflect.setMatrixAt(i, dummy.matrix);
+      col.setRGB(1.0, 0.48, 0.15).multiplyScalar(1.15 * rf); reflect.setColorAt(i, col);
+    }
+    for (const m of [lanterns, glows, reflect]) { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; }
+    stars.material.opacity = 0.55 + 0.25 * tilt;
+    T3.bloom.strength = 0.5 + 0.12 * Stage.hit('chime', t, 0.8);
+    T3.render();
+  }
+});
+</script>
+</body>
+</html>

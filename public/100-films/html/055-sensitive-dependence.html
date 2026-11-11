@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 055 — Sensitive Dependence</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 055 — SENSITIVE DEPENDENCE
+ * Two hundred double pendulums released from angles that differ, end to end, by one ten-thousandth of a radian.
+ * They are integrated (RK4, 480 steps a second) before the film starts; every frame is a lookup. For seven
+ * seconds they are one bright line. Then the line becomes a ribbon, and the ribbon becomes everything.
+ * The score is the same story: one note, E, pulled apart into an eleven-note cluster by the measured divergence.
+ * Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, N = 200, FPS = 60, DUR = 20, FR = DUR * FPS + 1, SUB = 8, G = 9.81, TS = 0.85, T0 = 0.6;
+const CX = 960, CY = 520, R = 222;      // one arm = 222 px
+const SIM = simulate();
+const ramp = Stage.color.ramp(['#35d6ff', '#9be8ff', '#ffffff', '#ffd9a0', '#ff9a3c']);
+const COL = Array.from({ length: N }, (_, n) => ramp(n / (N - 1)));
+let ctx, buf, bg;
+
+function simulate() {
+  const acc = (a, b, w1, w2) => { const d = a - b, den = 3 - Math.cos(2 * d); return [(-G * 3 * Math.sin(a) - G * Math.sin(a - 2 * b) - 2 * Math.sin(d) * (w2 * w2 + w1 * w1 * Math.cos(d))) / den, (2 * Math.sin(d) * (w1 * w1 * 2 + G * 2 * Math.cos(a) + w2 * w2 * Math.cos(d))) / den]; };
+  const st = []; for (let n = 0; n < N; n++) st.push([2.2 + (n / (N - 1) - 0.5) * 1e-4, 2.6, 0, 0]);
+  const mx = new Float32Array(N * FR), my = new Float32Array(N * FR), tx = new Float32Array(N * FR), ty = new Float32Array(N * FR), D = new Float32Array(FR), dt = TS / (FPS * SUB);
+  for (let f = 0; f < FR; f++) {
+    let ax = 0, ay = 0;
+    for (let n = 0; n < N; n++) { const s = st[n], i = n * FR + f; mx[i] = Math.sin(s[0]); my[i] = Math.cos(s[0]); tx[i] = mx[i] + Math.sin(s[1]); ty[i] = my[i] + Math.cos(s[1]); ax += tx[i] / N; ay += ty[i] / N; }
+    let d = 0; for (let n = 0; n < N; n++) d += Math.hypot(tx[n * FR + f] - ax, ty[n * FR + f] - ay) / N; D[f] = Math.min(1, d / 1.3);
+    if (f / FPS < T0) continue;
+    for (const s of st) for (let k = 0; k < SUB; k++) {
+      const a = s[0], b = s[1], w1 = s[2], w2 = s[3], k1 = acc(a, b, w1, w2), k2 = acc(a + w1 * dt / 2, b + w2 * dt / 2, w1 + k1[0] * dt / 2, w2 + k1[1] * dt / 2);
+      const k3 = acc(a + (w1 + k1[0] * dt / 2) * dt / 2, b + (w2 + k1[1] * dt / 2) * dt / 2, w1 + k2[0] * dt / 2, w2 + k2[1] * dt / 2), k4 = acc(a + (w1 + k2[0] * dt / 2) * dt, b + (w2 + k2[1] * dt / 2) * dt, w1 + k3[0] * dt, w2 + k3[1] * dt);
+      s[0] = a + dt * (w1 + 2 * (w1 + k1[0] * dt / 2) + 2 * (w1 + k2[0] * dt / 2) + (w1 + k3[0] * dt)) / 6; s[1] = b + dt * (w2 + 2 * (w2 + k1[1] * dt / 2) + 2 * (w2 + k2[1] * dt / 2) + (w2 + k3[1] * dt)) / 6;
+      s[2] = w1 + dt * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]) / 6; s[3] = w2 + dt * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]) / 6;
+    }
+  }
+  // smooth the divergence a little so the score glides
+  const Ds = new Float32Array(FR); for (let f = 0; f < FR; f++) { let s = 0, c = 0; for (let k = -20; k <= 20; k++) { const j = f + k; if (j >= 0 && j < FR) { s += D[j]; c++; } } Ds[f] = s / c; }
+  return { mx, my, tx, ty, D: Ds };
+}
+const Dat = (sec) => SIM.D[Math.max(0, Math.min(FR - 1, Math.round(sec * FPS)))];
+// which pendulums survive as embers, and when the others go out
+const OUT = Array.from({ length: N }, (_, n) => (n % 41 === 7 ? 99 : 16.6 + 2.2 * hash(n, 5)));
+
+Stage.create({
+  no: 55, title: 'Sensitive Dependence', subtitle: 'two hundred double pendulums · 96 bpm',
+  duration: DUR, background: '#03040a', grain: 0.045, poster: 12.6,
+  fonts: ['500 15px "JetBrains Mono Variable"'],
+  fade: { in: 0.8, out: 1.4 },
+  slate: { at: 0.7, hold: 2.8, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: DUR, seed: 55 });
+    M.master({ reverb: { decay: 3.6, size: 1.2, damp: 0.42 }, fadeIn: 0.3, fadeOut: 1.6 });
+    const target = [40, 52, 59, 62, 64, 66, 67, 71, 74, 78, 81];      // E2 E3 B3 D4 [E4] F#4 G4 B4 D5 F#5 A5
+    const str = M.track('strings', { reverb: 0.5, gain: 0.34 }), sA = M.track('softlead', { reverb: 0.4, gain: 0.3, pan: -0.55 }), sB = M.track('softlead', { reverb: 0.4, gain: 0.3, pan: 0.55 });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.5 }), kick = M.track('softkick', { reverb: 0.08, gain: 0.5 }), ris = M.track('riser', { reverb: 0.4, gain: 0.3 }), em = M.track('kalimba', { reverb: 0.6, gain: 0.7, delay: { time: 0.75, fb: 0.4, mix: 0.3 } }), tk = M.track('tick', { reverb: 0.3, gain: 0.25, params: { tone: 3200 } }), imp = M.track('impact', { reverb: 0.5, gain: 0.4 });
+    for (let b = 1; b < 29; b++) {
+      const sec = b * 0.625, d = Math.pow(Dat(sec + 0.3), 0.75), out = 1 - smoothstep(16.5, 18.5, sec);
+      target.forEach((p, v) => { const pitch = 64 + (p - 64) * d + (hash(v, b) - 0.5) * 0.5 * d * (1 - d); str.note(b, pitch, 1.7, (0.2 + 0.1 * (v === 4)) * (0.35 + 0.65 * out), { pan: lerp(0, (v - 5) / 6, d) }); });
+      if (b % 2 === 1) { const de = 1.4 * Math.min(1, d * 1.6); sA.note(b, 64 - de, 2.05, 0.4 * out); sB.note(b, 64 + de, 2.05, 0.4 * out); }
+      if (sec < 17) sub.note(b, sec > 12.4 && sec < 15 ? 'C1' : 'E1', 0.7, b % 4 === 1 ? 0.8 : 0.5);
+      if (sec >= 7.4 && sec < 17) kick.hit(b, b % 2 ? 0.8 : 0.55);
+      if (sec < 17) tk.pattern(b, 0.5, 'x.', { vel: 0.3 + 0.4 * d });
+    }
+    ris.hit(8, 0.7, 4); imp.hit(12, 0.6, 3);
+    const pent = S.scale('E5', 'minorPent', 2);
+    [27.5, 28.5, 29.25, 30, 30.75, 31.25].forEach((b, i) => em.note(b, pent[[4, 2, 5, 1, 3, 0][i]], 1.5, 0.5 - 0.05 * i));
+    sub.note(28, 'E1', 4, 0.5);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 }); buf = Stage.buffer(W, H);
+    const g = bg.createRadialGradient(CX, CY, 60, CX, CY, 1150); g.addColorStop(0, '#0a1020'); g.addColorStop(0.5, '#060914'); g.addColorStop(1, '#020308'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+    bg.strokeStyle = 'rgba(150,190,255,.07)'; bg.lineWidth = 1; bg.beginPath(); bg.arc(CX, CY, 2 * R + 14, 0, TAU); bg.stroke();
+    bg.strokeStyle = 'rgba(150,190,255,.035)'; bg.beginPath(); bg.arc(CX, CY, R, 0, TAU); bg.stroke();
+    for (let k = 0; k < 72; k++) { const a = k / 72 * TAU, r0 = 2 * R + 14, r1 = r0 + (k % 6 ? 6 : 14); bg.strokeStyle = 'rgba(150,190,255,.10)'; bg.beginPath(); bg.moveTo(CX + Math.cos(a) * r0, CY + Math.sin(a) * r0); bg.lineTo(CX + Math.cos(a) * r1, CY + Math.sin(a) * r1); bg.stroke(); }
+  },
+
+  frame(t) {
+    const c = buf, f = Math.min(FR - 1, Math.round(t * FPS)), d = SIM.D[f];
+    c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, W, H); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+    const TL = 168, BANDS = 7, BL = TL / BANDS, base = lerp(0.085, 0.42, Math.pow(d, 0.8));
+    for (let n = 0; n < N; n++) {
+      const vis = 1 - smoothstep(OUT[n] - 0.9, OUT[n], t); if (vis <= 0) continue;
+      const o = n * FR, ember = OUT[n] > 50 ? 1 + 1.6 * smoothstep(16.5, 18.5, t) : 1;
+      c.strokeStyle = COL[n];
+      for (let k = 0; k < BANDS; k++) {
+        const f1 = f - k * BL, f0 = Math.max(0, f1 - BL); if (f1 <= 0) break;
+        c.globalAlpha = Math.min(1, base * vis * ember * Math.pow(1 - k / BANDS, 1.7)); c.lineWidth = lerp(1.9, 0.9, k / BANDS);
+        c.beginPath(); c.moveTo(CX + SIM.tx[o + f1] * R, CY + SIM.ty[o + f1] * R); for (let j = f1 - 1; j >= f0; j--) c.lineTo(CX + SIM.tx[o + j] * R, CY + SIM.ty[o + j] * R); c.stroke();
+      }
+    }
+    // arms (a few, very faint) and the bobs
+    for (let n = 0; n < N; n++) {
+      const vis = 1 - smoothstep(OUT[n] - 0.9, OUT[n], t); if (vis <= 0) continue;
+      const i = n * FR + f, x1 = CX + SIM.mx[i] * R, y1 = CY + SIM.my[i] * R, x2 = CX + SIM.tx[i] * R, y2 = CY + SIM.ty[i] * R;
+      if (n % 8 === 3 || OUT[n] > 50) { c.globalAlpha = (OUT[n] > 50 ? 0.16 : lerp(0.2, 0.07, d)) * vis; c.strokeStyle = '#b8ccff'; c.lineWidth = 1; c.beginPath(); c.moveTo(CX, CY); c.lineTo(x1, y1); c.lineTo(x2, y2); c.stroke(); c.fillStyle = '#b8ccff'; c.beginPath(); c.arc(x1, y1, 2.2, 0, TAU); c.fill(); }
+      c.globalAlpha = lerp(0.3, 0.9, d) * vis; c.fillStyle = COL[n]; c.beginPath(); c.arc(x2, y2, lerp(2.6, 1.9, d), 0, TAU); c.fill();
+    }
+    c.globalAlpha = 0.8; c.fillStyle = '#dfe8ff'; c.beginPath(); c.arc(CX, CY, 3.2, 0, TAU); c.fill(); c.globalAlpha = 1;
+    // composite: the lines, plus a soft bloom of themselves
+    const m = ctx; m.clearRect(0, 0, W, H); m.globalCompositeOperation = 'lighter'; m.filter = 'none'; m.globalAlpha = 1; m.drawImage(c.canvas, 0, 0);
+    m.filter = 'blur(9px)'; m.globalAlpha = 0.7; m.drawImage(c.canvas, 0, 0); m.filter = 'blur(34px)'; m.globalAlpha = 0.35; m.drawImage(c.canvas, 0, 0); m.filter = 'none'; m.globalAlpha = 1; m.globalCompositeOperation = 'source-over';
+    // readout: the spread between the first pendulum and the last
+    const on = prog(t, 1.0, 1.0) * (1 - prog(t, 18.2, 1.0)); m.font = '500 15px "JetBrains Mono Variable"'; m.textBaseline = 'alphabetic'; m.textAlign = 'right';
+    const i0 = f, i1 = (N - 1) * FR + f, sep = Math.hypot(SIM.tx[i0] - SIM.tx[i1], SIM.ty[i0] - SIM.ty[i1]);
+    m.fillStyle = `rgba(170,195,240,${0.62 * on})`; m.fillText('Δθ₀  =  0.0001 rad', W - 96, H - 106);
+    m.fillStyle = `rgba(255,214,160,${0.8 * on})`; m.fillText('Δ  now  =  ' + (sep < 0.001 ? sep.toExponential(1).replace('e-', ' × 10⁻').replace('⁻4', '⁻⁴').replace('⁻5', '⁻⁵').replace('⁻6', '⁻⁶').replace('⁻7', '⁻⁷') : sep.toFixed(3)) + '  arm', W - 96, H - 80);
+  }
+});
+</script>
+</body>
+</html>

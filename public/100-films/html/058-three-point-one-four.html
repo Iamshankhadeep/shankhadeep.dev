@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 058 — Three Point One Four</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 058 — THREE POINT ONE FOUR
+ * The first thousand digits of π as one continuous thread. A ring is divided into ten arcs, 0–9; digit k takes
+ * the k-th place along its arc, and the thread runs from each digit to the next, so the whole number is woven
+ * without ever lifting the needle. The digits are computed here (Machin's formula, BigInt), not typed in.
+ * Sixteen digits at one per eighth-note, then the loom speeds up to a thousand. Each digit is a pentatonic note.
+ * Nine bars at 108 bpm (2.22 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, ND = 1000, CX = 960, CY = 540, RR = 428, EIGHTH = 60 / 108 / 2, T_FAST = 18 * EIGHTH, T_FULL = 15.0;
+const DIG = piDigits(ND + 2);
+const PAL = ['#d8c8a6', '#c4654a', '#dc9a4c', '#e3c669', '#93ad6c', '#4f927d', '#4d88ab', '#6470b4', '#9070a8', '#b86c8c'];
+const GAP = 0.035, ARC = TAU / 10 - GAP;
+const angOf = (k) => -Math.PI / 2 + DIG[k] * TAU / 10 + GAP / 2 + ARC * (0.03 + 0.94 * (k + 0.5) / ND);
+const PTS = Array.from({ length: ND }, (_, k) => { const a = angOf(k); return [CX + Math.cos(a) * RR, CY + Math.sin(a) * RR, a]; });
+// when is digit k placed?
+const tOf = (k) => k < 16 ? (k + 2) * EIGHTH : T_FAST + (T_FULL - T_FAST) * Math.pow((k - 16) / (ND - 17), 1 / 2.3);
+const kAt = (t) => t < 2 * EIGHTH ? -1 : t < T_FAST ? Math.min(15, Math.floor(t / EIGHTH - 2 + 1e-6)) : t < T_FULL ? Math.min(ND - 1, 16 + Math.floor((ND - 17) * Math.pow((t - T_FAST) / (T_FULL - T_FAST), 2.3))) : ND - 1;
+let bg, ctx, buf;
+
+function piDigits(n) {      // Machin: π = 16 atan(1/5) − 4 atan(1/239)
+  const sc = 10n ** BigInt(n + 12);
+  const atanInv = (x) => { const x2 = BigInt(x * x); let term = sc / BigInt(x), sum = term, k = 1n, sign = -1n; while (term > 0n) { term /= x2; k += 2n; sum += sign * (term / k); sign = -sign; } return sum; };
+  const pi = 16n * atanInv(5) - 4n * atanInv(239);
+  return pi.toString().slice(0, n).split('').map(Number);
+}
+// the thread between digit k and k+1: a curve bowed toward the centre
+function ctrl(k) { const p = PTS[k], q = PTS[k + 1]; let da = Math.abs(p[2] - q[2]) % TAU; if (da > Math.PI) da = TAU - da; const pull = lerp(0.82, 0.12, Math.pow(da / Math.PI, 0.7)), mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2; return [lerp(CX, mx, pull * 0.35), lerp(CY, my, pull * 0.35)]; }
+const CT = Array.from({ length: ND - 1 }, (_, k) => ctrl(k));
+function ptOn(k, u) { const p = PTS[k], q = PTS[k + 1], c = CT[k], v = 1 - u; return [v * v * p[0] + 2 * v * u * c[0] + u * u * q[0], v * v * p[1] + 2 * v * u * c[1] + u * u * q[1]]; }
+
+Stage.create({
+  no: 58, title: 'Three Point One Four', subtitle: 'a thousand digits, one thread · 108 bpm',
+  duration: 20, background: '#1b1917', grain: 0.05, poster: 16.4,
+  fonts: ['300 150px "Fraunces Variable"', '400 34px "Fraunces Variable"', '500 15px "JetBrains Mono Variable"', 'italic 300 64px "Fraunces Variable"'],
+  fade: { in: 0.6, out: 1.2 },
+  slate: { at: 0.7, hold: 2.8, pos: 'bl', color: 'rgba(236,226,206,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 58 });
+    M.master({ reverb: { decay: 2.6, size: 1.0, damp: 0.42 }, fadeOut: 1.5 });
+    const kal = M.track('kalimba', { reverb: 0.4, gain: 0.9, pan: -0.15, delay: { time: 0.75, fb: 0.3, mix: 0.2 } }), harp = M.track('harp', { reverb: 0.45, gain: 0.75, pan: 0.2 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.5 });
+    const sh = M.track('shaker', { reverb: 0.15, gain: 0.22 }), bass = M.track('sub', { reverb: 0.05, gain: 0.34 }), gl = M.track('glass', { reverb: 0.6, gain: 0.36 });
+    const sc = ['C4', 'D4', 'E4', 'G4', 'A4', 'C5', 'D5', 'E5', 'G5', 'A5'].map(S.midi);
+    // one digit per eighth; after the loom speeds up, the eighth still plays whichever digit is under the needle
+    for (let e = 2; e < 56; e++) { const k = kAt(e * EIGHTH + 1e-4); if (k < 0) continue; const d = DIG[k]; kal.note(e / 2, sc[d], 0.6, e < 18 ? 0.6 : 0.42 + 0.12 * (e % 2 === 0)); if (e >= 18 && e % 4 === 0) harp.note(e / 2, sc[DIG[Math.max(0, k - 1)]] - 12, 1.6, 0.5); }
+    const ch = [['C2', ['C3', 'G3', 'D4', 'E4']], ['A1', ['A2', 'E3', 'G3', 'C4']], ['F1', ['F2', 'C3', 'E3', 'A3']], ['G1', ['G2', 'D3', 'E3', 'A3']]];
+    for (let bar = 0; bar < 9; bar++) { const c = ch[bar % 4], b = bar * 4; pad.chord(b, bar === 8 ? ['C3', 'G3', 'D4', 'E4', 'A4'] : c[1], 4, bar < 2 ? 0.35 : 0.5); if (bar >= 2) bass.note(b, bar === 8 ? 'C2' : c[0], 3.6, 0.6); if (bar >= 2 && bar < 7) sh.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.45 }); }
+    // the finished weave: a glissando up the scale and a glass chord
+    sc.forEach((p, i) => harp.note(27 + i * 0.16, p, 2.5, 0.42 + 0.02 * i)); gl.chord(28.6, ['C5', 'E5', 'G5', 'D6'], 6, 0.4); harp.note(32, 'C3', 3, 0.5); kal.note(34, 'G5', 1.5, 0.4); kal.note(35, 'C6', 1.5, 0.35);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1, dpr: 2 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); buf = Stage.buffer(W, H);
+    const c = bg, g = c.createRadialGradient(CX, CY, 100, CX, CY, 1150); g.addColorStop(0, '#2a2622'); g.addColorStop(0.6, '#1c1a18'); g.addColorStop(1, '#100f0e'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // the ring: ten dyed arcs, and their numerals
+    c.lineCap = 'butt';
+    for (let d = 0; d < 10; d++) {
+      const a0 = -Math.PI / 2 + d * TAU / 10 + GAP / 2, a1 = a0 + ARC, am = (a0 + a1) / 2;
+      c.strokeStyle = PAL[d]; c.lineWidth = 12; c.beginPath(); c.arc(CX, CY, RR + 13, a0, a1); c.stroke();
+      c.strokeStyle = Stage.color.alpha(PAL[d], 0.3); c.lineWidth = 1.2; c.beginPath(); c.arc(CX, CY, RR + 27, a0, a1); c.stroke();
+      c.fillStyle = Stage.color.mix(PAL[d], '#f2e8d2', 0.45); c.font = '400 34px "Fraunces Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(d), CX + Math.cos(am) * (RR + 62), CY + Math.sin(am) * (RR + 62) + 2);
+    }
+  },
+
+  frame(t) {
+    const c = buf, kc = kAt(t); c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, W, H);
+    // the weave so far
+    c.lineCap = 'round';
+    const glowAll = win(t, 15.0, 20, 1.2, 0.01), baseA = lerp(0.62, 0.4, clamp01(kc / 500));
+    for (let k = 0; k < Math.min(kc, ND - 1); k++) {
+      const p = PTS[k], q = PTS[k + 1], cc = CT[k], age = t - tOf(k + 1), fresh = Math.exp(-Math.max(0, age) * (kc < 40 ? 1.6 : 9));
+      const g = c.createLinearGradient(p[0], p[1], q[0], q[1]); g.addColorStop(0, PAL[DIG[k]]); g.addColorStop(1, PAL[DIG[k + 1]]);
+      c.strokeStyle = g; c.globalAlpha = Math.min(1, baseA + 0.5 * fresh); c.lineWidth = 1.15 + 1.6 * fresh;
+      c.beginPath(); c.moveTo(p[0], p[1]); c.quadraticCurveTo(cc[0], cc[1], q[0], q[1]); c.stroke();
+    }
+    // the thread being drawn right now, and the needle
+    if (kc >= 0 && kc < ND - 1 && t < T_FULL) {
+      const t0 = tOf(kc), t1 = tOf(kc + 1), u = E.inOutCubic(clamp01((t - t0) / Math.max(1e-3, (t1 - t0) * 0.9)));
+      c.strokeStyle = PAL[DIG[kc]]; c.globalAlpha = 1; c.lineWidth = 2.6; c.beginPath(); c.moveTo(PTS[kc][0], PTS[kc][1]); for (let s = 1; s <= 24; s++) { const p = ptOn(kc, u * s / 24); c.lineTo(p[0], p[1]); } c.stroke();
+      const n = ptOn(kc, u); c.fillStyle = '#fff6e0'; c.beginPath(); c.arc(n[0], n[1], 4.2, 0, TAU); c.fill();
+    }
+    // knots where the thread touches the ring
+    for (let k = 0; k <= Math.min(kc, ND - 1); k++) { const p = PTS[k], fresh = Math.exp(-Math.max(0, t - tOf(k)) * 3); if (kc < 60 || fresh > 0.02) { c.globalAlpha = kc < 60 ? 0.9 : fresh; c.fillStyle = Stage.color.mix(PAL[DIG[k]], '#ffffff', 0.5 * fresh); c.beginPath(); c.arc(p[0], p[1], 2.6 + 3.5 * fresh, 0, TAU); c.fill(); } }
+    // finale: a bright shuttle runs the whole thread, start to end
+    const sp = prog(t, 15.5, 3.4, E.inOutSine);
+    if (sp > 0 && sp < 1) { c.globalAlpha = 1; for (let j = 0; j < 46; j++) { const pos = (sp - j * 0.0016) * (ND - 1); if (pos < 0) break; const k = Math.min(ND - 2, Math.floor(pos)), p = ptOn(k, pos - k); c.fillStyle = `rgba(255,246,224,${(1 - j / 46) * 0.9})`; c.beginPath(); c.arc(p[0], p[1], 3.4 * (1 - j / 60), 0, TAU); c.fill(); } }
+    c.globalAlpha = 1;
+
+    const m = ctx; m.clearRect(0, 0, W, H); m.globalCompositeOperation = 'source-over'; m.filter = 'none'; m.globalAlpha = 1; m.drawImage(c.canvas, 0, 0);
+    m.globalCompositeOperation = 'lighter'; m.filter = 'blur(12px)'; m.globalAlpha = 0.3 + 0.35 * glowAll + 0.1 * Math.sin(t * 1.7) * glowAll; m.drawImage(c.canvas, 0, 0); m.filter = 'none'; m.globalAlpha = 1; m.globalCompositeOperation = 'source-over';
+
+    // hub: the digit under the needle, then, at the end, the number itself
+    const hub = m.createRadialGradient(CX, CY, 70, CX, CY, 190); hub.addColorStop(0, 'rgba(27,25,23,.96)'); hub.addColorStop(0.72, 'rgba(27,25,23,.86)'); hub.addColorStop(1, 'rgba(27,25,23,0)'); m.fillStyle = hub; m.beginPath(); m.arc(CX, CY, 190, 0, TAU); m.fill();
+    const endA = prog(t, 16.1, 1.0), liveA = (1 - prog(t, 15.2, 0.8)) * prog(t, 0.6, 0.5);
+    m.textAlign = 'center'; m.textBaseline = 'alphabetic';
+    if (liveA > 0 && kc >= 0) {
+      const d = DIG[kc], pop = kc < 40 ? E.outCubic(clamp01((t - tOf(kc)) / 0.16)) : 1;
+      m.fillStyle = Stage.color.alpha(Stage.color.mix(PAL[d], '#f6ecd6', 0.25), liveA); m.font = '300 150px "Fraunces Variable"'; m.fillText(String(d), CX, CY + 36 + 8 * (1 - pop));
+      const s0 = Math.max(0, kc - 10), tail = DIG.slice(s0, kc + 1).join(''), txt = (s0 === 0 ? (tail.length > 1 ? tail[0] + '.' + tail.slice(1) : tail) : '…' + tail);
+      m.font = '500 15px "JetBrains Mono Variable"'; m.fillStyle = `rgba(226,214,192,${0.62 * liveA})`; m.fillText(txt.split('').join(' '), CX, CY + 84);
+      m.fillStyle = `rgba(226,214,192,${0.36 * liveA})`; m.fillText('D I G I T   ' + String(kc + 1).padStart(4, '0'), CX, CY - 96);
+    }
+    if (endA > 0) { m.fillStyle = `rgba(244,234,212,${endA})`; m.font = 'italic 300 64px "Fraunces Variable"'; m.fillText('3.14159…', CX, CY + 20 + 10 * (1 - E.outCubic(endA))); m.font = '500 15px "JetBrains Mono Variable"'; m.fillStyle = `rgba(226,214,192,${0.5 * endA})`; m.fillText('1 0 0 0   D I G I T S   ·   O N E   T H R E A D', CX, CY + 66); }
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 016 — Truchet</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 016 — TRUCHET
+ * Quarter-circle tiles flip in time with a drum pattern, rewiring a field of paths. Each percussion voice owns
+ * a flip pattern: hats flip single tiles, the kick sends a diagonal wave, the clap flips a checkerboard.
+ * Every flip is read from the score, so picture and groove cannot drift. Eight bars at 120 bpm (2 s each);
+ * in the last bar the field comes to rest and its longest closed loop is traced in coral. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, S = 120, NX = 16, NY = 9, FLIP = 0.26;
+const CREAM = '#f1e9d6', COBALT = '#1d43c4', CORAL = '#f0553a';
+let ctx, tiles = [], loop = [], loopLen = 0;
+
+function longestLoop(or) {                 // or[y][x] ∈ {0,1}; returns arcs [{x,y,k}] of the longest closed loop
+  // each tile has two arcs. orientation 0: arc 0 joins top–left, arc 1 joins bottom–right; orientation 1: top–right, bottom–left
+  const ends = (o, k) => o === 0 ? (k === 0 ? ['T', 'L'] : ['B', 'R']) : (k === 0 ? ['T', 'R'] : ['B', 'L']);
+  const seen = new Set(); let best = [];
+  for (let y = 0; y < NY; y++) for (let x = 0; x < NX; x++) for (let k = 0; k < 2; k++) {
+    if (seen.has(x + ',' + y + ',' + k)) continue;
+    const path = []; let cx = x, cy = y, ck = k, from = ends(or[y][x], k)[0], closed = false;
+    for (let guard = 0; guard < 400; guard++) {
+      const key = cx + ',' + cy + ',' + ck; if (seen.has(key)) { closed = cx === x && cy === y && ck === k; break; }
+      seen.add(key); const e = ends(or[cy][cx], ck), out = e[0] === from ? e[1] : e[0]; path.push({ x: cx, y: cy, k: ck, a: from, b: out });
+      const nx = cx + (out === 'R' ? 1 : out === 'L' ? -1 : 0), ny = cy + (out === 'B' ? 1 : out === 'T' ? -1 : 0);
+      if (nx < 0 || ny < 0 || nx >= NX || ny >= NY) break;
+      from = { R: 'L', L: 'R', T: 'B', B: 'T' }[out]; cx = nx; cy = ny; ck = ends(or[cy][cx], 0).includes(from) ? 0 : 1;
+    }
+    if (closed && path.length > best.length) best = path;
+  }
+  return best;
+}
+
+Stage.create({
+  no: 16, title: 'Truchet', subtitle: 'tiles driven by the score · 120 bpm',
+  duration: 16, background: CREAM, grain: 0.05, poster: 15.2,
+  fade: { in: 0.6, out: 0.8, color: CREAM },
+  slate: { at: 0.8, hold: 2.5, color: 'rgba(20,34,90,.92)', pos: 'bl', margin: 40 },
+
+  music(Sy) {
+    const M = Sy.score({ bpm: 120, duration: 16, seed: 16 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 0.9 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.66 }), clap = M.track('clap', { reverb: 0.25, gain: 0.7 }), hat = M.track('hat', { reverb: 0.05, gain: 0.8 });
+    const rim = M.track('rim', { reverb: 0.2, gain: 0.85 }), wb = M.track('woodblock', { reverb: 0.2, gain: 1.0 });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 1.3, pan: 0.15, delay: { time: 0.75, fb: 0.25, mix: 0.18 }, params: { decay: 1.2, bright: 0.7 } });
+    const bass = M.track('bass', { reverb: 0.03, gain: 0.4, params: { cutoff: 460, envAmt: 2.0 }, duck: { by: 'kick', depth: 0.4 } });
+    const stab = M.track('stab', { reverb: 0.35, gain: 1.5, params: { cutoff: 1500 }, delay: { time: 0.75, fb: 0.3, mix: 0.22 } });
+    for (let bar = 0; bar < 8; bar++) {
+      const b = bar * 4;
+      if (bar < 7) plk.seq(b, 0.5, bar % 2 ? ['B4', 'G4', 'E4', 'G4', 'A4', null, 'D5', 'B4'] : ['E4', 'G4', 'B4', 'G4', 'E5', null, 'D5', 'B4'], { vel: bar < 2 ? 0.55 : 0.7, gate: 1.2 });
+      if (bar === 0) { wb.pattern(b, 0.25, 'x.....x...x...x.', { vel: 0.6 }); rim.pattern(b, 0.25, '....x.......x..x', { vel: 0.45 }); stab.chord(b + 3.5, ['E4', 'B4'], 0.3, 0.45); }
+      if (bar >= 1 && bar < 3) { stab.chord(b + 1.5, ['E4', 'B4'], 0.3, 0.5); stab.chord(b + 3.5, ['D4', 'A4'], 0.3, 0.45); }
+      if (bar === 1) hat.pattern(b, 0.25, 'x...x...x..x..x.', { vel: 0.6 });
+      if (bar >= 2 && bar < 6) hat.pattern(b, 0.25, 'x.x.x.xxx.x.xxx.', { vel: 0.6 });
+      if (bar === 6) hat.pattern(b, 0.25, 'x.x.x...x...x...', { vel: 0.5 });
+      if (bar >= 2 && bar < 7) kick.pattern(b, 0.25, bar === 6 ? 'x.......x.......' : 'x.....x...x.....');
+      if (bar >= 4 && bar < 6) clap.pattern(b, 0.25, '....x.......x...');
+      if (bar >= 3 && bar < 6) rim.pattern(b, 0.25, '..x......x.....x', { vel: 0.5 });
+      if (bar >= 1 && bar < 7) wb.pattern(b, 0.25, bar % 2 ? '......x.......x.' : '...x......x.....', { vel: 0.5 });
+      if (bar >= 2 && bar < 7) bass.seq(b, 0.25, ['E1', null, null, 'E1', null, null, 'E2', null, null, null, 'G1', null, 'A1', null, 'B1', null], { vel: 0.85, gate: 1.4 });
+      if (bar >= 3 && bar < 7) { stab.chord(b + 1.5, ['E4', 'B4'], 0.3, 0.6); stab.chord(b + 3.5, ['D4', 'A4'], 0.3, 0.5); }
+    }
+    kick.hit(28, 1); stab.chord(28, ['E3', 'B3', 'E4', 'G4', 'B4'], 3, 0.8); bass.note(28, 'E1', 3, 0.9); clap.hit(28, 0.6);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 });
+    // collect every flip from the score
+    const flips = Array.from({ length: NX * NY }, () => []);
+    Stage.events('hat').forEach((e, i) => { const k = Math.floor(hash(i, 5) * NX * NY); flips[k].push(e.t); });
+    Stage.events('kick').forEach((e, i) => { if (e.t > 13.5) return; for (let y = 0; y < NY; y++) for (let x = 0; x < NX; x++) if ((x + y + i) % 3 === 0) flips[y * NX + x].push(e.t + (x + y) * 0.022); });
+    Stage.events('clap').forEach((e, i) => { if (e.t > 13.5) return; for (let y = 0; y < NY; y++) for (let x = 0; x < NX; x++) if ((x + y) % 2 === i % 2) flips[y * NX + x].push(e.t + Math.hypot(x - 7.5, y - 4) * 0.018); });
+    // choose the resting pattern with the longest closed loop, then set initial orientations so the flips end there
+    let best = null;
+    for (let seed = 1; seed < 500; seed++) { const or = []; for (let y = 0; y < NY; y++) { or.push([]); for (let x = 0; x < NX; x++) or[y].push(hash(y * NX + x, seed + 100) < 0.5 ? 0 : 1); } const l = longestLoop(or); if (!best || l.length > best.l.length) best = { or, l }; }
+    loop = best.l; loopLen = loop.length;
+    for (let y = 0; y < NY; y++) for (let x = 0; x < NX; x++) { const f = flips[y * NX + x].sort((a, b) => a - b); tiles.push({ x, y, flips: f, init: (best.or[y][x] + f.length) % 2 }); }
+  },
+
+  frame(t) {
+    const c = ctx; c.fillStyle = CREAM; c.fillRect(0, 0, W, H);
+    const kickP = Stage.hit('kick', t, 0.18), LW = 30 + 5 * kickP;
+    c.lineCap = 'butt';
+    for (const tl of tiles) {
+      let q = tl.init, moving = 0;
+      for (const f of tl.flips) { if (t <= f) break; const u = (t - f) / FLIP; if (u >= 1) q += 1; else { q += E.outBack(u); moving = Math.sin(u * Math.PI); } }
+      c.save(); c.translate(tl.x * S + S / 2, tl.y * S + S / 2); c.rotate(q * Math.PI / 2); const sc = 1 - 0.10 * moving; c.scale(sc, sc);
+      c.strokeStyle = COBALT; c.lineWidth = LW;
+      c.beginPath(); c.arc(-S / 2, -S / 2, S / 2, 0, Math.PI / 2); c.stroke();
+      c.beginPath(); c.arc(S / 2, S / 2, S / 2, Math.PI, Math.PI * 1.5); c.stroke();
+      c.restore();
+    }
+    // a blank plate, five tiles wide, for the series slate
+    const pl = win(t, 0.45, 3.9, 0.45, 0.45, E.inOutCubic); if (pl > 0) { c.fillStyle = CREAM; c.fillRect(0, H - S, 5 * S * pl, S); c.fillStyle = COBALT; c.fillRect(5 * S * pl - 6, H - S, 6, S); }
+    // the closed loop, traced in coral once everything is at rest
+    const u = prog(t, 14.05, 1.35, E.inOutCubic);
+    if (u > 0) {
+      const n = u * loopLen, pulse = 1 + 0.12 * Math.exp(-Math.max(0, t - 15.4) * 5) * (t > 15.4 ? 1 : 0);
+      c.strokeStyle = CORAL; c.lineWidth = LW * pulse; c.lineCap = 'round';
+      const corner = { TL: [-1, -1], BR: [1, 1], TR: [1, -1], BL: [-1, 1] }, ang = { T: -Math.PI / 2, R: 0, B: Math.PI / 2, L: Math.PI };
+      for (let i = 0; i < Math.ceil(n); i++) {
+        const a = loop[i], key = (a.a === 'T' || a.b === 'T' ? 'T' : 'B') + (a.a === 'L' || a.b === 'L' ? 'L' : 'R'), cr = corner[key];
+        const cx = a.x * S + S / 2 + cr[0] * S / 2, cy = a.y * S + S / 2 + cr[1] * S / 2;
+        // angles (from the corner) of the entry and exit edge midpoints
+        const pt = (side) => { const mx = a.x * S + S / 2 + (side === 'R' ? S / 2 : side === 'L' ? -S / 2 : 0), my = a.y * S + S / 2 + (side === 'B' ? S / 2 : side === 'T' ? -S / 2 : 0); return Math.atan2(my - cy, mx - cx); };
+        let a0 = pt(a.a), a1 = pt(a.b), d = a1 - a0; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU;
+        const f = Math.min(1, n - i);
+        c.beginPath(); c.arc(cx, cy, S / 2, a0, a0 + d * f, d < 0); c.stroke();
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>

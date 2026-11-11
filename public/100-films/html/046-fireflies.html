@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 046 — Fireflies</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 046 — FIREFLIES
+ * Fireflies in a meadow start out of step and slowly fall into synchrony — the Kuramoto model of coupled
+ * oscillators, integrated once before the film starts. Each insect flashes when its phase wraps round; as the
+ * coupling grows the flashes gather, until the whole meadow pulses as one, on the beat. The score is written
+ * from the same flash times: scattered notes that gradually become a single chord. Eight bars at 80 bpm (3 s). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, NF = 150, BPM = 80, BEAT = 60 / BPM, DUR = 24;
+const SIM = simulate();
+let bg, ctx, glow, N2 = Stage.makeNoise(46);
+
+function simulate() {
+  const r = Stage.rng(46), th = [], om = [], flashes = Array.from({ length: NF }, () => []), order = [];
+  for (let i = 0; i < NF; i++) { th.push(r() * TAU); om.push(TAU / BEAT * (0.72 + 0.56 * r())); }
+  const dt = 1 / 240;
+  for (let s = 0; s < DUR / dt; s++) {
+    const t = s * dt, K = 7.5 * smoothstep(7, 17, t), F = 5 * smoothstep(11, 18, t);      // coupling to each other, and a gentle pull onto the beat
+    let cx = 0, sy = 0; for (let i = 0; i < NF; i++) { cx += Math.cos(th[i]); sy += Math.sin(th[i]); }
+    const R = Math.hypot(cx, sy) / NF, psi = Math.atan2(sy, cx), beat = TAU * ((t + 0.045) / BEAT);
+    if (s % 4 === 0) order.push(R);
+    for (let i = 0; i < NF; i++) { th[i] += dt * (om[i] + K * R * Math.sin(psi - th[i]) + F * Math.sin(beat - th[i])); if (th[i] >= TAU) { th[i] -= TAU; if (t > 0.6 && t < 21.6) flashes[i].push(t); } }
+  }
+  return { flashes, order };
+}
+
+Stage.create({
+  no: 46, title: 'Fireflies', subtitle: 'kuramoto synchrony · 80 bpm',
+  duration: DUR, background: '#081421', grain: 0.065, poster: 17.25, vignette: 0.35,
+  fade: { in: 1.4, out: 2.0 }, slate: { at: 0.9, hold: 3.0, pos: 'tl' },
+
+  music(S) {
+    const M = S.score({ bpm: BPM, duration: DUR, seed: 46 });
+    M.master({ reverb: { decay: 4.0, size: 1.2, damp: 0.45 }, fadeIn: 0.6, fadeOut: 2.8 });
+    const kal = M.track('kalimba', { reverb: 0.55, gain: 0.8, humanize: 0 }), vib = M.track('vibes', { reverb: 0.6, gain: 0.5 }), pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.4 + 0.3 * smoothstep(8, 18, t) });
+    const sub = M.track('sub', { reverb: 0.06, gain: 0.5 }), air = M.track('air', { reverb: 0.3, gain: 1.0 }), str = M.track('strings', { reverb: 0.6, gain: 0.5, params: { cutoff: 2600, A: 1.2, R: 2 } });
+    air.hit(0, 0.8, M.beats);
+    const ch = [['D2', 'A2', 'F#3'], ['B1', 'F#2', 'D3', 'A3'], ['G2', 'D3', 'B3'], ['A2', 'E3', 'C#4'], ['D2', 'A2', 'F#3', 'E4'], ['G2', 'D3', 'B3', 'F#4'], ['D2', 'A2', 'F#3', 'E4'], ['D2', 'A2', 'D3', 'F#3']], rt = ['D1', 'B0', 'G1', 'A1', 'D1', 'G1', 'D1', 'D1'];
+    ch.forEach((c, i) => { pad.chord(i * 4, c, 4, 0.55); if (i >= 1) sub.note(i * 4, rt[i], 3.7, i >= 5 ? 0.8 : 0.5); if (i >= 5 && i < 7) str.chord(i * 4, c.map((n) => S.midi(n) + 12), 4, 0.5); });
+    // twelve fireflies have voices (D major pentatonic); their notes are their flashes
+    const sc = S.scale('D4', 'pentatonic', 2);
+    for (let v = 0; v < 12; v++) for (const t of SIM.flashes[v * 11]) { const late = smoothstep(14, 18, t); (v % 3 === 0 ? vib : kal).note(M.b(t), sc[(v * 2) % sc.length] + (v > 7 ? 12 : 0), 0.9, lerp(0.42, 0.3, late)); }
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 });
+    const c = bg, g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0a1a33'); g.addColorStop(0.45, '#11314a'); g.addColorStop(0.72, '#16424a'); g.addColorStop(1, '#0b2422'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const hz = c.createRadialGradient(960, 610, 40, 960, 610, 1000); hz.addColorStop(0, 'rgba(90,150,160,.30)'); hz.addColorStop(1, 'rgba(90,150,160,0)'); c.fillStyle = hz; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 260; i++) { const m = hash(i, 3); c.fillStyle = `rgba(220,232,255,${0.15 + 0.6 * m * m})`; c.beginPath(); c.arc(hash(i, 1) * W, hash(i, 2) * 520, 0.5 + 1.2 * m * m, 0, TAU); c.fill(); }
+    // distant treeline, then three layers of grass
+    c.fillStyle = '#081a22'; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 6) c.lineTo(x, 600 - 46 * N2.fbm2(x * 0.004, 2, 3) - 26 * Math.abs(N2.noise2(x * 0.03, 5))); c.lineTo(W, H); c.fill();
+    [['#0a2423', 700, 90, 520], ['#071b1b', 820, 130, 420], ['#04100f', 960, 190, 300]].forEach(([col, base, hh, n], li) => { c.fillStyle = col; c.fillRect(0, base, W, H - base); c.strokeStyle = col; c.lineCap = 'round'; for (let i = 0; i < n; i++) { const x = hash(i, 20 + li) * W, h = hh * (0.35 + 0.65 * hash(i, 30 + li)), lean = (hash(i, 40 + li) - 0.5) * hh * 0.7; c.lineWidth = 1.5 + 2.5 * li * hash(i, 50 + li) + li; c.beginPath(); c.moveTo(x, base + 14); c.quadraticCurveTo(x + lean * 0.2, base - h * 0.5, x + lean, base - h); c.stroke(); } });
+    // glow sprite
+    glow = Stage.buffer(128, 128); const gg = glow.createRadialGradient(64, 64, 0, 64, 64, 64); gg.addColorStop(0, 'rgba(244,255,170,1)'); gg.addColorStop(0.12, 'rgba(214,246,110,.8)'); gg.addColorStop(0.4, 'rgba(170,220,80,.22)'); gg.addColorStop(1, 'rgba(170,220,80,0)'); glow.fillStyle = gg; glow.fillRect(0, 0, 128, 128);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const out = 1 - prog(t, 20.8, 1.8, E.inOutSine), R = SIM.order[Math.min(SIM.order.length - 1, Math.floor(t * 60))];
+    // when the meadow is in step, each pulse lifts the whole scene a little
+    let sum = 0; const items = [];
+    for (let i = 0; i < NF; i++) {
+      const fl = SIM.flashes[i]; let lo = 0, hi = fl.length - 1, k = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (fl[m] <= t) { k = m; lo = m + 1; } else hi = m - 1; }
+      const age = k < 0 ? 9 : t - fl[k], b = age < 0.05 ? age / 0.05 : Math.exp(-(age - 0.05) / 0.23);
+      const depth = hash(i, 1), x = hash(i, 2) * W + 90 * N2.noise2(i * 3.1, t * 0.16) + 30 * Math.sin(t * 0.5 + i), y = lerp(430, 980, Math.pow(hash(i, 3), 0.8)) - 60 * depth + 60 * N2.noise2(i * 7.7, t * 0.2 + 9);
+      sum += b; items.push([x, y, depth, b]);
+    }
+    const lift = (sum / NF) * out;
+    if (lift > 0.02) { c.fillStyle = `rgba(170,220,90,${0.11 * lift})`; c.fillRect(0, 0, W, H); }
+    c.globalCompositeOperation = 'lighter';
+    for (const [x, y, depth, b] of items) { const a = (0.05 + 0.95 * b) * out; if (a < 0.01) continue; const s = (26 + 70 * depth) * (0.5 + 0.9 * b); c.globalAlpha = Math.min(1, a * (0.55 + 0.45 * depth)); c.drawImage(glow.canvas, x - s, y - s, s * 2, s * 2); if (b > 0.3) { c.globalAlpha = Math.min(1, b * out); c.drawImage(glow.canvas, x - s * 0.22, y - s * 0.22, s * 0.44, s * 0.44); } }
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+    // a quiet meter of synchrony
+    const ma = prog(t, 2.5, 1.5) * (1 - prog(t, 21, 1.2)); if (ma > 0) { const x0 = W - 150 - 220, y0 = 96; c.fillStyle = `rgba(214,246,150,${0.18 * ma})`; c.fillRect(x0, y0, 220, 2); c.fillStyle = `rgba(214,246,150,${0.85 * ma})`; c.fillRect(x0, y0, 220 * clamp01(R), 2); c.font = '500 15px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.fillStyle = `rgba(214,246,150,${0.6 * ma})`; c.fillText('I N   S T E P   ' + String(Math.round(clamp01(R) * 100)).padStart(3, ' ') + ' %', W - 150, 82); }
+  }
+});
+</script>
+</body>
+</html>

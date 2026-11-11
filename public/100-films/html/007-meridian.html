@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 007 — Meridian</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<style>
+  #hud { position: absolute; right: 104px; bottom: 76px; z-index: 6; width: 236px; color: #fff4e2;
+    font-family: "JetBrains Mono Variable", monospace; text-shadow: 0 1px 18px rgba(40, 20, 50, .35); }
+  #clock { font-size: 34px; font-weight: 300; letter-spacing: 0.14em; text-align: right; line-height: 1; margin-right: -0.14em; }
+  #track { position: relative; height: 15px; margin-top: 16px; }
+  #track .rail { position: absolute; left: 0; right: 0; top: 7px; height: 1.5px; background: currentColor; opacity: .38; }
+  #track .noon { position: absolute; left: 50%; top: 1px; width: 1.5px; height: 13px; margin-left: -.75px; background: currentColor; opacity: .7; }
+  #track .dot { position: absolute; left: 0; top: 2.5px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: currentColor; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="hud"><div id="clock">06:12</div><div id="track"><div class="rail"></div><div class="noon"></div><div class="dot"></div></div></div>
+</div>
+<script>
+/* Nº 007 — MERIDIAN
+ * A day's worth of sun passing over dunes in twenty seconds. One fragment shader raymarches an analytic dune
+ * heightfield (sinuous transverse crests, slip faces, wind ripples in the normal, sand streaming off the brinks);
+ * everything else is the sun's position. Eight bars at 96 bpm (2.5 s each):
+ * dawn, long shadows (bars 1–2) → shadows shorten (3) → the meridian, flat and bleached (4) → afternoon, the shadows
+ * swing round and stretch (5–6) → the sun kisses the far crest on the downbeat of bar 7 (15.0 s) → dusk, one star. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const DEG = Math.PI / 180, KISS = 15.0;
+
+// ── curves: monotone cubic through keyframes (scalars or vectors) — smooth, no overshoot, pure function of t
+function curve(ts, vs) {
+  const vec = Array.isArray(vs[0]), n = ts.length, dim = vec ? vs[0].length : 1, ms = [];
+  for (let c = 0; c < dim; c++) {
+    const y = vs.map((v) => (vec ? v[c] : v)), d = [], m = new Array(n);
+    for (let i = 0; i < n - 1; i++) d.push((y[i + 1] - y[i]) / (ts[i + 1] - ts[i]));
+    m[0] = d[0]; m[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = m[i + 1] = 0; continue; }
+      const a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+      if (s > 9) { const k = 3 / Math.sqrt(s); m[i] = k * a * d[i]; m[i + 1] = k * b * d[i]; }
+    }
+    ms.push({ y, m });
+  }
+  return (t) => {
+    let i = 0; while (i < n - 2 && t > ts[i + 1]) i++;
+    const h = ts[i + 1] - ts[i], u = Math.min(1, Math.max(0, (t - ts[i]) / h)), u2 = u * u, u3 = u2 * u;
+    const out = ms.map(({ y, m }) => (2 * u3 - 3 * u2 + 1) * y[i] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * y[i + 1] + (u3 - u2) * h * m[i + 1]);
+    return vec ? out : out[0];
+  };
+}
+// colours are authored as the display colour we want, then pushed back through the film curve used by the shader
+const TONE = 1.5;
+const disp = (hex) => { const c = Stage.color.parse(hex); return [c[0], c[1], c[2]].map((x) => -Math.log(1 - Math.min(x > 1 ? x / 255 : x, 0.965)) / TONE); };
+
+// ── the day. hour(t): the time-lapse runs fast through the middle of the day and slows for the golden hour.
+const T = [0, 2.5, 5, 8.75, 12.5, 15, 16.6, 18, 20];             // key times: dawn · · noon · golden kiss · set · dusk
+const hour = curve([0, 8.75, KISS, 16.7, 20], [6.22, 12.1, 17.86, 18.25, 19.3]);
+const EL_MAX = 61 * DEG, RISE = 6.0, DAYLEN = 12.2;
+const sunAngles = (t) => { const s = (hour(t) - RISE) / DAYLEN; return { s, el: EL_MAX * Math.sin(Math.PI * s), az: (-112 + 122.5 * s) * DEG }; };
+
+const K = {
+  sun:    curve(T, [[1.30, .70, .46], [1.50, .98, .70], [1.58, 1.24, .96], [1.60, 1.48, 1.30], [1.64, 1.22, .86], [1.72, .92, .46], [1.30, .50, .20], [0, 0, 0], [0, 0, 0]]),
+  shade:  curve(T, ['#56467a', '#62528a', '#70609a', '#93809c', '#6a5690', '#523c7c', '#44336e', '#372c60', '#282450'].map(disp)),
+  skyTop: curve(T, ['#79aeb4', '#7dc0c4', '#7cc8cb', '#7fcdd0', '#72bcc8', '#5c95b2', '#4a6c9c', '#3a4682', '#27275a'].map(disp)),
+  skyHor: curve(T, ['#f4cfb8', '#f5e0c6', '#f6ead2', '#f7efdc', '#f7e4c2', '#f8cb92', '#f0a878', '#c9807c', '#855a7c'].map(disp)),
+  glow:   curve(T, [[.9, .42, .22], [.6, .4, .25], [.35, .3, .22], [.3, .28, .22], [.5, .36, .2], [1.25, .62, .22], [1.35, .52, .2], [1.0, .36, .2], [.5, .17, .14]]),
+  disc:   curve(T, [[3, 1.5, .7], [3, 2, 1.2], [3, 2.6, 2], [3, 2.8, 2.4], [3, 2.5, 1.7], [3.2, 1.9, .8], [3.2, 1.3, .45], [3, 1, .3], [3, 1, .3]]),
+  rim:    curve(T, [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [.04, .02, .01], [.3, .14, .1], [.34, .15, .14], [.2, .09, .12]])
+};
+
+const FRAG = `
+uniform vec3 uCam, uSun, uSunCol, uShade, uSkyTop, uSkyHor, uGlow, uDisc, uRim, uStarDir;
+uniform vec2 uLook;
+uniform float uShim, uWind, uGust, uFlare, uStar, uCloud;
+const float FL = 1.46;                    // focal length (≈ 38° vertical)
+const float L = 15.;                      // dune wavelength
+const float HD = 2.75;                    // dune height
+const float AC = .66;                     // where in the phase the brink sits
+const vec2 WD = vec2(.914, -.407);        // wind: slip faces look this way
+const vec2 WP = vec2(.407, .914);         // along the crests
+const float YM = 27., TMAX = 620.;
+
+float swell(vec2 p){
+  float b = (vnoise(p * .011 + vec2(5.2, 1.3)) - .5) * 9.;
+  float dR = dot(p, vec2(-.243, .970)) - 178.;                                   // the far ridge the sun will set behind
+  b += 13.5 * exp(-dR * dR / 2300.) * (.62 + .38 * sin(dot(p, vec2(.970, .243)) * .018 + 1.1));
+  b -= 2.2 * exp(-dot(p - vec2(0., 2.), p - vec2(0., 2.)) / 900.);                // a hollow under the camera
+  return b;
+}
+// x: height · y: height of this dune's brink · z: phase across the dune (brink at AC)
+vec3 dune(vec2 p){
+  float al = dot(p, WP), ac = dot(p, WD);
+  float n1 = vnoise(p * .021 + vec2(1.7, 9.2));
+  float u = ac / L + .55 * sin(al * .045 + 1.2) + .2 * sin(al * .13 + 4.) + (n1 - .5) * 1.25;
+  float c = floor(u), f = u - c;
+  float amp = .34 + .66 * smoothstep(.12, .88, vnoise(vec2(c * 5.31 + 2.7, al * .03 + c * 1.9)));
+  float w = f / AC; w = w * (1.5 - .5 * w);
+  float h = min(w, (1. - f) / (1. - AC)); h = sqrt(h * h + .004) - .0632;
+  float b = swell(p), H = HD * amp * (1. + .06 * clamp(b, -3., 6.));
+  return vec3(b + h * H, b + .94 * H, f);
+}
+float shadow(vec3 p, vec3 l){
+  float res = 1., t = .1;
+  for (int i = 0; i < 64; i++) {
+    vec3 q = p + l * t; float d = q.y - dune(q.xz).x;
+    res = min(res, 10. * d / t);
+    if (res < .003 || q.y > YM) break;
+    t += clamp(d * .62, .09, 7.);
+  }
+  return smoothstep(0., 1., clamp(res, 0., 1.));
+}
+vec3 sky(vec3 rd){
+  float y = max(rd.y, 0.);
+  vec3 c = mix(uSkyHor, uSkyTop, pow(smoothstep(0., .34, y), .6));
+  float sd = max(dot(rd, uSun), 0.);
+  float az = max(dot(normalize(rd.xz), normalize(uSun.xz)), 0.);
+  c += uGlow * (pow(az, 10.) * exp(-y * 9.) * .5 + pow(sd, 30.) * .3 + pow(sd, 260.) * .55);
+  return c;
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  float cy = cos(uLook.y);
+  vec3 fw = vec3(sin(uLook.x) * cy, sin(uLook.y), cos(uLook.x) * cy);
+  vec3 rt = normalize(cross(vec3(0., 1., 0.), fw)), up = cross(fw, rt);
+  vec3 rd = normalize(fw * FL + rt * uv.x + up * uv.y);
+  // heat shimmer: the air just above the far sand wobbles
+  float band = exp(-pow((rd.y - .012) * 26., 2.));
+  rd.y += uShim * band * .0024 * snoise(vec3(uv.x * 34., uv.y * 150. - uTime * 2.6, uTime * 1.3));
+  rd.x += uShim * band * .0010 * snoise(vec3(uv.x * 21. + 7., uv.y * 110. - uTime * 2.1, uTime * 1.1 + 4.));
+  rd = normalize(rd);
+
+  // march the heightfield, gathering the sand that streams off the brinks on the way
+  float t = .4, tp = 0., d = 1., dp = 1., plume = 0.; bool hit = false;
+  if (uCam.y > YM && rd.y < 0.) t = (uCam.y - YM) / -rd.y;
+  for (int i = 0; i < 170; i++) {
+    vec3 p = uCam + rd * t; vec3 m = dune(p.xz);
+    d = p.y - m.x;
+    if (d < .0007 * t) { hit = true; break; }
+    if (t > TMAX || (rd.y > 0. && p.y > YM)) break;
+    float st = max(d * .55, .0012 * t);
+    float lee = m.z - AC;
+    if (lee > -.012 && lee < .3) {
+      float hgt = p.y - m.y, sg = .05 + lee * .9;
+      float v = exp(-hgt * hgt / (sg * sg)) * smoothstep(-.012, .004, lee) * (1. - smoothstep(.02, .3, lee));
+      if (v > .004) {
+        vec2 q = vec2(dot(p.xz, WP), dot(p.xz, WD));
+        float n = vnoise(vec2(q.x * 1.6, q.y * .22 - uWind * 1.9)) * .65 + vnoise(vec2(q.x * .37 + 5., q.y * .1 - uWind * 1.1)) * .5;
+        plume += st * v * smoothstep(.42, .95, n) * (m.y - swell(p.xz)) / (1. + t * .012);
+      }
+    }
+    tp = t; dp = d; t += st;
+  }
+  vec3 hz = sky(normalize(vec3(rd.x, .0, rd.z)));
+  vec3 col;
+  if (hit) {
+    t = mix(tp, t, clamp(dp / (dp - d), 0., 1.));
+    vec3 p = uCam + rd * t;
+    float e = max(.014, .0011 * t);
+    vec3 m = dune(p.xz);
+    vec3 n = normalize(vec3(dune(p.xz - vec2(e, 0.)).x - dune(p.xz + vec2(e, 0.)).x, 2. * e, dune(p.xz - vec2(0., e)).x - dune(p.xz + vec2(0., e)).x));
+    // wind ripples on the windward flanks only (the slip faces are raked smooth)
+    float al = dot(p.xz, WP), ac = dot(p.xz, WD);
+    float rw = smoothstep(36., 4., t) * (1. - smoothstep(AC - .07, AC + .005, m.z)) * smoothstep(.0, .12, m.z);
+    float ph = ac * 37. + 2.4 * sin(al * 1.6 + 2. * vnoise(p.xz * .7)) + 6. * vnoise(p.xz * .3);
+    n = normalize(n + vec3(WD.x, 0., WD.y) * cos(ph) * .13 * rw);
+    float streak = vnoise(vec2(al * .5, ac * .06)) * .6 + vnoise(vec2(al * 2.1, ac * .25)) * .4;
+    vec3 alb = mix(vec3(.80, .50, .26), vec3(.90, .65, .38), streak);
+    float ndl = max(dot(n, uSun), 0.);
+    float sh = (ndl > 0. && uSunCol.r > .003) ? shadow(p + n * .05, uSun) : 0.;
+    vec3 lit = uSunCol * pow(vec3(ndl), vec3(.92, 1.12, 1.45)) * pow(vec3(sh), vec3(1., 1.5, 2.3));
+    float skyv = .5 + .5 * n.y;
+    vec3 amb = uShade * (.42 + .58 * skyv) * (.9 + .25 * streak);
+    vec3 bounce = uSunCol * vec3(.34, .15, .09) * (1. - skyv) * 1.6;               // warm light thrown back by the lit sand
+    vec3 gdir = normalize(vec3(uSun.x, .25, uSun.z));
+    vec3 rim = uRim * pow(clamp(dot(n, gdir) * .5 + .5, 0., 1.), 2.5) * 2.2;        // afterglow modelling at dusk
+    col = alb * lit + amb + bounce + rim;
+    float fog = 1. - exp(-pow(t / 300., 1.35));
+    col = mix(col, hz * .96, fog);
+  } else {
+    col = sky(rd);
+    // thin high cloud, raked by the time-lapse
+    vec2 cp = rd.xz / (rd.y + .18) * vec2(1.1, 2.6) + vec2(uWind * .05, uWind * .012);
+    float cl = smoothstep(.5, .86, fbm(cp * .9)) * smoothstep(.02, .16, rd.y) * uCloud;
+    col = mix(col, col * .55 + (uSunCol * .5 + uGlow * .5 + uSkyHor * .5), cl * .5);
+    float ang = acos(clamp(dot(rd, uSun), -1., 1.));
+    col = mix(col, uDisc, smoothstep(.0262, .0244, ang));
+    float sa = acos(clamp(dot(rd, uStarDir), -1., 1.));
+    col += vec3(1., .95, .88) * uStar * (smoothstep(.0028, .0008, sa) * 2. + exp(-sa * 260.) * .5 + exp(-sa * 60.) * .12);
+  }
+  // sand in the air: lit from behind it glows
+  float fs = pow(max(dot(rd, uSun), 0.), 5.);
+  vec3 pc = vec3(.95, .72, .46) * (uSunCol * (.5 + 2.6 * fs) + uShade * .8);
+  col = mix(col, pc, clamp(plume * uGust * 1.5, 0., .8));
+  // the sun's bloom spills over the crest in front of it
+  vec2 sp = vec2(dot(uSun, rt), dot(uSun, up)) / max(dot(uSun, fw), .05) * FL;
+  float fd = length(uv - sp);
+  col += uGlow * uFlare * (exp(-fd * fd * 60.) * .55 + exp(-fd * 7.) * .22) * step(0., dot(uSun, fw));
+  col *= 1. - .22 * dot(uv, uv);
+  col = 1. - exp(-col * ${TONE.toFixed(2)});
+  col = pow(col, vec3(1.04, 1.02, 1.0)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(col, 1.);
+}`;
+
+let land, clockEl, dotEl, hudEl, starT = 18.4;
+
+Stage.create({
+  no: 7, title: 'Meridian', subtitle: 'raymarched dunes · 96 bpm',
+  duration: 20, background: '#1a1630', grain: 0.055, vignette: 0.18, poster: 15.3,
+  fonts: ['300 34px "JetBrains Mono Variable"'],
+  fade: { in: 1.4, out: 1.6, inColor: '#17132c', outColor: '#0e0c20' },
+  slate: { at: 0.8, hold: 3.2, color: 'rgba(255,244,226,.92)', shadow: '0 1px 14px rgba(40,20,50,.45)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 7 });
+    M.master({ reverb: { decay: 2.8, size: 1.05, damp: 0.5 }, fadeOut: 2.6, fadeIn: 0.3 });
+    const swellG = (t) => 0.55 + 0.45 * Math.min(1, t / 15) - 0.35 * Math.max(0, Math.min(1, (t - 17.5) / 2.5));
+    const gtr = M.track('guitar', { reverb: 0.3, gain: 0.95, pan: -0.2, humanize: 0.25, delay: { time: 0.75, fb: 0.22, mix: 0.12 } });
+    const koto = M.track('koto', { reverb: 0.4, gain: 0.62, pan: 0.28, humanize: 0.25, delay: { time: 1.5, fb: 0.25, mix: 0.16 } });
+    const flute = M.track('flute', { reverb: 0.6, gain: 0.78, pan: 0.05, delay: { time: 1.5, fb: 0.3, mix: 0.2 } });
+    const conga = M.track('conga', { reverb: 0.22, gain: 0.55, humanize: 0.2 });
+    const low = M.track('congaLow', { inst: 'conga', reverb: 0.22, gain: 0.62, pan: 0.15, params: { tone: 147, decay: 0.26 } });
+    const shaker = M.track('shaker', { reverb: 0.15, gain: 0.34, humanize: 0.3 });
+    const bass = M.track('bass', { inst: 'sub', reverb: 0.04, gain: 0.62 });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.55, gain: (t) => 0.5 * swellG(t) });
+    const wind = M.track('wind', { reverb: 0.3, gain: (t) => 0.45 + 0.35 * Math.max(0, (t - 16) / 4) });
+    const whoosh = M.track('whoosh', { reverb: 0.5, gain: 0.5 }), boom = M.track('impact', { reverb: 0.6, gain: 0.42 });
+    const chime = M.track('chime', { inst: 'harp', reverb: 0.7, gain: 0.7, pan: 0.2, delay: { time: 0.75, fb: 0.4, mix: 0.3 } });
+    wind.hit(0, 0.8, M.beats);
+    // D dorian: Dm9 · Dm9 · Am7 · G · Dm9 · Fmaj7 · Gadd9 (the kiss) · Dm9
+    const fig = {
+      Dm: ['D3', 'A3', 'D4', 'F4', 'E4', 'D4', 'A3', 'C4'], Am: ['A2', 'E3', 'A3', 'C4', 'E4', 'C4', 'G3', 'E3'],
+      G: ['G2', 'D3', 'G3', 'B3', 'D4', 'B3', 'A3', 'D3'], F: ['F2', 'C3', 'F3', 'A3', 'E4', 'C4', 'A3', 'C4'],
+      Gp: ['G2', 'D3', 'A3', 'B3', 'D4', 'G4', 'D4', 'B3']
+    };
+    const bars = [['Dm', 'Dm9', 'D2'], ['Dm', 'Dm9', 'D2'], ['Am', 'Am7', 'A1'], ['G', 'G', 'G1'], ['Dm', 'Dm9', 'D2'], ['F', 'Fmaj7', 'F1'], ['Gp', 'Gadd9', 'G1'], ['Dm', 'Dm9', 'D2']];
+    bars.forEach(([f, c, root], i) => {
+      const b = i * 4, v = [0.42, 0.5, 0.56, 0.6, 0.64, 0.7, 0.78, 0.5][i];
+      if (i === 0) gtr.seq(b, 0.5, ['D3', null, 'A3', null, 'D4', null, 'F4', 'E4'], { vel: v, gate: 1.8 });
+      else if (i === 7) gtr.seq(b, 0.5, ['D3', 'A3', 'D4', null, 'E4', null, null, null], { vel: v, vels: [0.5, 0.4, 0.42, 0, 0.36], gate: 3 });
+      else gtr.seq(b, 0.5, fig[f], { vel: v, vels: [v + 0.1, v - 0.1, v, v - 0.04, v + 0.04, v - 0.08, v - 0.04, v - 0.1], gate: 1.5 });
+      pad.chord(b, c, 4, 0.5, { octave: 3 });
+      if (i >= 2 && i < 7) { bass.note(b, root, 1.4, 0.7); bass.note(b + 2.5, root, 1.2, 0.5); }
+      if (i === 7) bass.note(b, root, 3.5, 0.6);
+    });
+    // koto: answers in the gaps, climbs into bar 7, then one last high note for the evening star
+    koto.seq(8, 0.5, [null, null, 'A4', null, 'C5', 'D5', null, 'A4', 'B4', null, 'D5', null, 'G4', 'A4', 'B4', null], { vel: 0.5, gate: 1.6 });
+    koto.seq(16, 0.25, [null, null, 'D5', 'F5', null, 'E5', null, 'D5', null, 'A4', null, null, 'C5', null, 'D5', null,
+      'C5', null, 'A4', 'C5', null, 'F5', null, 'E5', null, 'C5', 'E5', null, 'F5', 'G5', 'A5', 'B5'], { vel: 0.5, gate: 2 });
+    koto.chord(24, ['G4', 'B4', 'D5', 'A5', 'D6'], 2, 0.62, { strum: 0.06 });
+    koto.seq(26, 0.25, ['B5', null, 'A5', 'G5', null, 'D5', 'B4', null], { vel: 0.46, gate: 2 });
+    koto.note(28.5, 'A4', 1.5, 0.4); koto.note(M.b(starT), 'A5', 3, 0.5);
+    // flute: a hint in the morning, the phrase proper through the afternoon, held over the kiss
+    flute.seq(9, 0.5, ['A4', '-', '-', 'C5', 'D5', '-', '-', null, 'E5', '-', 'D5', 'B4', 'A4', '-', '-', null], { vel: 0.42 });
+    flute.seq(16, 0.5, ['D5', '-', 'F5', 'G5', 'A5', '-', '-', '-', 'A5', 'G5', 'F5', '-', 'E5', 'F5', 'G5', 'A5',
+      'B5', '-', '-', '-', '-', 'A5', 'G5', '-', 'A5', '-', 'F5', 'E5', 'D5', '-', '-', '-'], { vel: 0.6 });
+    // hands
+    for (let i = 1; i < 8; i++) {
+      const b = i * 4;
+      if (i >= 1 && i < 7) shaker.pattern(b, 0.25, i < 4 ? 'o...x...o...x.o.' : 'o.o.x.o.o.o.x.oo', { vel: 0.5 });
+      if (i === 7) shaker.pattern(b, 0.5, 'x.o.....', { vel: 0.4 });
+      if (i >= 2 && i < 7) { conga.pattern(b, 0.25, i < 4 ? '...x..x...o.x...' : '..ox..x..o.xx.o.', { vel: 0.6 }); low.pattern(b, 0.25, i < 4 ? 'x.........x.....' : 'x......x..x....o', { vel: 0.66 }); }
+      if (i === 7) { low.pattern(b, 0.25, 'x.........o.....', { vel: 0.5 }); conga.pattern(b, 0.25, '......o.........', { vel: 0.4 }); }
+    }
+    conga.pattern(23, 0.25, 'oxxX', { vel: 0.7 });
+    // the kiss
+    whoosh.hit(21.6, 0.6, 2.4); boom.hit(24, 0.7, 4);
+    chime.arp(24, ['D5', 'A5', 'B5', 'D6', 'A6'], 0.25, 1.25, { mode: 'up', vel: 0.4, gate: 3 });
+    return M;
+  },
+
+  setup() {
+    land = Stage.shader({ frag: FRAG, z: 1 });
+    clockEl = document.getElementById('clock'); dotEl = document.querySelector('#track .dot'); hudEl = document.getElementById('hud');
+  },
+
+  frame(t) {
+    const { s, el, az } = sunAngles(t);
+    const ce = Math.cos(el), sun = [Math.sin(az) * ce, Math.sin(el), Math.cos(az) * ce];
+    const noon = Math.exp(-Math.pow((t - 8.75) / 2.6, 2));
+    const up = smoothstep(-0.035, 0.03, sun[1]);                     // direct light dies as the sun meets the horizon
+    const sc = K.sun(t).map((v) => v * up);
+    const gust = 0.55 + 0.3 * Stage.noise2(t * 0.6, 3.1) + 0.5 * Stage.hit('conga', t, 0.5) + 0.4 * Stage.hit('congaLow', t, 0.7);
+    const kiss = Stage.hit('impact', t, 2.2);
+    land.draw(t, {
+      uCam: [lerp(-4, 5, t / 20), 6.4 + 0.5 * E.inOutSine(t / 20), lerp(0, 7, t / 20)], uLook: [0, -2.2 * DEG],
+      uSun: sun, uSunCol: sc, uShade: K.shade(t), uSkyTop: K.skyTop(t), uSkyHor: K.skyHor(t), uGlow: K.glow(t), uDisc: K.disc(t), uRim: K.rim(t),
+      uShim: 0.35 + 0.65 * noon, uWind: t, uGust: gust * (0.6 + 0.4 * smoothstep(10, 15, t)) * (1 - 0.75 * smoothstep(17, 20, t)),
+      uFlare: win(t, 12.6, 17.1, 2.2, 1.2) * (0.75 + 0.5 * kiss), uCloud: 0.6,
+      uStar: prog(t, starT - 0.15, 1.2, E.outCubic) * (0.85 + 0.15 * Math.sin(t * 9)), uStarDir: (() => { const a = -9.5 * DEG, e = 11.5 * DEG; return [Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e)]; })()
+    });
+
+    // the clock and the day-rail
+    const h = hour(t), hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+    clockEl.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    dotEl.style.left = (clamp01((h - 6) / 13.5) * 100).toFixed(2) + '%';
+    hudEl.style.opacity = (prog(t, 1.2, 1.2, E.outCubic) * (0.9 - 0.1 * 0)).toFixed(3);
+  }
+});
+</script>
+</body>
+</html>

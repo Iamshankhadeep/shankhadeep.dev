@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 094 — Lighthouse</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 094 — LIGHTHOUSE
+ * A lighthouse keeps watch while a small boat finds its way home. Flat shapes and soft gradients: a navy
+ * night, five bands of swell sliding at different speeds, a cream tower with a red band. The lamp turns once
+ * every two bars; seen from the side its beam is a cone that lengthens as it swings across the picture and
+ * shrinks to a glare as it points at us. Fog banks are almost invisible until the cone passes through them.
+ * A fishing boat with one warm lamp crosses from the right; when the fog is thickest the beam finds it, on
+ * the downbeat of bar 8. A waltz in G minor: twelve bars of 3/4 at 90 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, LX = 330, LY = 232;
+const LAYER = [{ y: 640, a: 5, k: 0.011, w: 0.5, v: 12, c0: '#1a3266', c1: '#142a58' }, { y: 690, a: 9, k: 0.008, w: 0.62, v: 22, c0: '#17305f', c1: '#11244f' }, { y: 762, a: 13, k: 0.0062, w: 0.75, v: 36, c0: '#132a56', c1: '#0e1e45' }, { y: 852, a: 19, k: 0.0048, w: 0.9, v: 56, c0: '#102449', c1: '#0b1839' }, { y: 960, a: 26, k: 0.0036, w: 1.05, v: 84, c0: '#0d1d3d', c1: '#07112a' }];
+const wave = (j, x, t) => { const L = LAYER[j], p = (x + t * L.v) * L.k; return L.y + L.a * Math.sin(p + j * 1.7) + L.a * 0.42 * Math.sin(p * 2.3 - t * L.w + j) + L.a * 0.2 * Math.sin(p * 5.1 + t * L.w * 1.6); };
+const boatX = (t) => lerp(1990, 742, E.inOutSine(prog(t, 4.6, 16.2))), beamA = (t) => TAU * (t - 3) / 4;      // points right, across the sea, at t = 3, 7, 11, 15, 19
+const fogAmt = (t) => 0.22 + 0.78 * smoothstep(8.5, 12.5, t) * (1 - smoothstep(16.4, 20, t));
+let bg, ctx, fogTex, stars;
+
+function cone(c, t, fill) {   // the beam as nested soft wedges; calls fill(alpha) for each
+  const th = beamA(t), dx = Math.cos(th), dep = Math.sin(th), len = 150 + 1750 * Math.abs(dx), dir = dx >= 0 ? 1 : -1, tilt = 0.33, half = 0.15 + 0.12 * (1 - Math.abs(dx));
+  for (let k = 0; k < 5; k++) { const h = half * (0.45 + k * 0.16), a0 = tilt - h, a1 = tilt + h; c.beginPath(); c.moveTo(LX, LY); c.lineTo(LX + dir * len * Math.cos(a0), LY + len * Math.sin(a0)); c.lineTo(LX + dir * len * Math.cos(a1), LY + len * Math.sin(a1)); c.closePath(); fill((0.5 + 0.5 * Math.abs(dx)) * (1 - k / 6) * 0.2, dir, len); }
+  return { dx, dep, dir, len, tilt, half };
+}
+
+Stage.create({
+  no: 94, title: 'Lighthouse', subtitle: 'a waltz for one small boat · 90 bpm',
+  duration: 24, background: '#081028', grain: 0.055, poster: 15.1,
+  fade: { in: 1.0, out: 1.6 },
+  slate: { at: 0.8, hold: 2.8, pos: 'br' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 24, seed: 94, meter: 3 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.42 }, fadeOut: 2.2 });
+    const org = M.track('organ', { reverb: 0.45, gain: 0.34, chorus: 0.5, lowpass: 3200 }), bass = M.track('pluck', { reverb: 0.2, gain: 0.9, params: { decay: 1.0, bright: 0.3 } }), oom = M.track('guitar', { reverb: 0.3, gain: 0.4, pan: 0.2 }), br = M.track('brush', { reverb: 0.25, gain: 0.3 }), wind = M.track('wind', { reverb: 0.4, gain: (t) => 0.12 + 0.16 * fogAmt(t) }), bell = M.track('bell', { reverb: 0.7, gain: 0.5 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.3 });
+    const bars = [['G2', ['Bb3', 'D4', 'G4']], ['G2', ['Bb3', 'D4', 'G4']], ['C3', ['C4', 'Eb4', 'G4']], ['D3', ['C4', 'F#4', 'A4']], ['G2', ['Bb3', 'D4', 'G4']], ['Eb3', ['Bb3', 'Eb4', 'G4']], ['C3', ['C4', 'Eb4', 'G4']], ['G2', ['Bb3', 'D4', 'G4']], ['Bb2', ['Bb3', 'D4', 'F4']], ['F2', ['A3', 'C4', 'F4']], ['D3', ['C4', 'F#4', 'A4']], ['G2', ['Bb3', 'D4', 'G4']]];
+    const mel = [[[0, 'D5', 1], [1, 'G5', 1], [2, 'Bb5', 1]], [[0, 'A5', 1.5], [1.5, 'G5', 0.5], [2, 'D5', 1]], [[0, 'Eb5', 1], [1, 'G5', 1], [2, 'C6', 1]], [[0, 'Bb5', 1.5], [1.5, 'A5', 0.5], [2, 'F#5', 1]], [[0, 'G5', 2], [2, 'D5', 1]], [[0, 'Eb5', 1], [1, 'G5', 1], [2, 'Bb5', 1]], [[0, 'C6', 1], [1, 'Bb5', 1], [2, 'A5', 1]], [[0, 'G5', 3]],
+      [[0, 'F5', 1], [1, 'Bb5', 1], [2, 'D6', 1]], [[0, 'C6', 1.5], [1.5, 'A5', 0.5], [2, 'F5', 1]], [[0, 'Eb5', 1], [1, 'D5', 1], [2, 'F#5', 1]], [[0, 'G5', 3]]];
+    bars.forEach(([r, ch], i) => { const b = i * 3; pad.chord(b, ch, 3, 0.4); bass.note(b, r, 1.2, 0.75); if (i < 11) { oom.chord(b + 1, ch, 0.5, 0.42); oom.chord(b + 2, ch, 0.5, 0.36); br.hit(b + 1, 0.5); br.hit(b + 2, 0.4); } if (i >= 1) mel[i].forEach(([o, n, d]) => org.note(b + o, n, d * 0.96, 0.5)); });
+    [[0, 'D5'], [1, 'G5'], [2, 'Bb5']].forEach(([o, n]) => org.note(o, n, 0.9, 0.3));
+    bell.note(21, 'G5', 4, 0.6); bell.note(21, 'D6', 4, 0.4); bell.note(31.5, 'G4', 4, 0.5); wind.hit(0, 0.6, 24);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 });
+    const c = bg, g = c.createLinearGradient(0, 0, 0, 660); g.addColorStop(0, '#070d24'); g.addColorStop(0.6, '#10204a'); g.addColorStop(1, '#22386c'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    stars = Array.from({ length: 150 }, (_, i) => [hash(i, 1) * W, Math.pow(hash(i, 2), 1.4) * 560, 0.6 + 1.5 * hash(i, 3), hash(i, 4)]);
+    // fog texture
+    fogTex = Stage.buffer(1024, 256); const fd = fogTex.createImageData(1024, 256), nz = Stage.makeNoise(94); for (let y = 0; y < 256; y++) for (let x = 0; x < 1024; x++) { const v = smoothstep(0.42, 0.85, 0.5 + 0.5 * nz.fbm2(x / 150, y / 46, 4)), i = (y * 1024 + x) * 4; fd.data[i] = 196; fd.data[i + 1] = 208; fd.data[i + 2] = 232; fd.data[i + 3] = Math.round(255 * v * smoothstep(0, 40, y) * smoothstep(256, 210, y)); } fogTex.putImageData(fd, 0, 0);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    // stars
+    for (const [x, y, r, ph] of stars) { c.fillStyle = `rgba(230,236,255,${0.25 + 0.5 * (0.5 + 0.5 * Math.sin(t * (0.8 + 2 * ph) + ph * 20))})`; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+    const fog = fogAmt(t), fogLayer = (y, sp, sc, a) => { const off = Stage.mod(t * sp, 1024 * sc); for (let x = -off; x < W; x += 1024 * sc) c.drawImage(fogTex.canvas, x, y, 1024 * sc, 256 * sc * 0.9); };
+    // far fog, then the swell back to front, with the boat riding the second band
+    c.globalAlpha = 0.16 + 0.3 * fog; fogLayer(430, 14, 2.2, 1); c.globalAlpha = 1;
+    const bx = boatX(t), by = wave(1, bx, t) - 4, tiltB = Math.atan((wave(1, bx + 30, t) - wave(1, bx - 30, t)) / 60);
+    const boat = (lit) => { c.save(); c.translate(bx, by); c.rotate(tiltB * 0.8); c.scale(1.5, 1.5); c.fillStyle = lit ? '#b6533a' : '#3c2230'; c.beginPath(); c.moveTo(-48, -14); c.lineTo(50, -14); c.lineTo(36, 10); c.lineTo(-36, 10); c.closePath(); c.fill(); c.fillStyle = lit ? '#f1e6cf' : '#56506a'; c.fillRect(-12, -34, 26, 20); c.fillStyle = lit ? '#7a3a2a' : '#2a1a26'; c.fillRect(-16, -38, 34, 5); c.strokeStyle = lit ? '#e9dcc0' : '#4a445e'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(-28, -14); c.lineTo(-28, -62); c.stroke();
+      const lg = c.createRadialGradient(-28, -64, 0, -28, -64, 46); lg.addColorStop(0, 'rgba(255,214,140,.95)'); lg.addColorStop(0.2, 'rgba(255,190,110,.45)'); lg.addColorStop(1, 'rgba(255,180,100,0)'); c.fillStyle = lg; c.fillRect(-80, -116, 104, 104); c.fillStyle = '#fff2c8'; c.beginPath(); c.arc(-28, -64, 3.6, 0, TAU); c.fill(); c.restore(); };
+    LAYER.forEach((L, j) => {
+      const g = c.createLinearGradient(0, L.y - 30, 0, L.y + 160); g.addColorStop(0, L.c0); g.addColorStop(1, L.c1); c.fillStyle = g; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 16) c.lineTo(x, wave(j, x, t)); c.lineTo(W, H); c.closePath(); c.fill();
+      // white caps on the crests
+      c.strokeStyle = `rgba(226,236,255,${0.16 + 0.07 * j})`; c.lineWidth = 1.5 + j * 0.5; c.lineCap = 'round'; c.beginPath(); for (let x = 0; x <= W; x += 16) { const y = wave(j, x, t), y0 = wave(j, x - 16, t), y1 = wave(j, x + 16, t); if (y < y0 + 0.2 && y < y1 + 0.6 && hash(Math.floor((x + t * L.v) / 96), j) < 0.6) { c.moveTo(x - 22, y + 1.5); c.quadraticCurveTo(x, y - 2.5, x + 22, y + 1.5); } } c.stroke();
+      if (j === 1) { boat(false); c.strokeStyle = 'rgba(255,200,130,.22)'; c.lineWidth = 2; for (let k = 1; k < 5; k++) { c.beginPath(); c.moveTo(bx - 34 + k * 5, by + 16 + k * 9); c.lineTo(bx - 20 - k * 5, by + 16 + k * 9); c.stroke(); } }
+      if (j === 2) { c.globalAlpha = 0.07 + 0.4 * fog; fogLayer(520, 30, 2.6, 1); c.globalAlpha = 1; }
+    });
+    // headland, jetty with its harbour light, cottage, tower
+    c.fillStyle = '#060a1c'; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 566); c.quadraticCurveTo(120, 520, 250, 528); c.quadraticCurveTo(420, 530, 520, 590); c.quadraticCurveTo(600, 640, 690, 668); c.lineTo(690, 700); c.quadraticCurveTo(480, 720, 300, 800); c.lineTo(160, H); c.closePath(); c.fill();
+    c.strokeStyle = '#0c1226'; c.lineWidth = 8; c.beginPath(); c.moveTo(640, 664); c.lineTo(800, 664); c.stroke(); for (const x of [700, 760, 796]) { c.beginPath(); c.moveTo(x, 664); c.lineTo(x, 700); c.stroke(); } c.lineWidth = 4; c.beginPath(); c.moveTo(796, 664); c.lineTo(796, 616); c.stroke();
+    const hl = 0.7 + 0.3 * Math.sin(t * 3); { const g = c.createRadialGradient(796, 612, 0, 796, 612, 40); g.addColorStop(0, `rgba(140,255,190,${0.9 * hl})`); g.addColorStop(1, 'rgba(140,255,190,0)'); c.fillStyle = g; c.fillRect(756, 572, 80, 80); c.fillStyle = '#d8ffe6'; c.beginPath(); c.arc(796, 612, 4, 0, TAU); c.fill(); }
+    c.fillStyle = '#0d142c'; c.fillRect(420, 508, 96, 52); c.beginPath(); c.moveTo(410, 510); c.lineTo(468, 474); c.lineTo(526, 510); c.closePath(); c.fill();
+    const lamp = E.outCubic(prog(t, 21.0, 0.5)); c.fillStyle = Stage.color.mix('#1a2444', '#ffd27a', lamp); c.fillRect(452, 522, 22, 22); if (lamp > 0) { const g = c.createRadialGradient(463, 533, 0, 463, 533, 90); g.addColorStop(0, `rgba(255,206,120,${0.5 * lamp})`); g.addColorStop(1, 'rgba(255,206,120,0)'); c.fillStyle = g; c.fillRect(373, 443, 180, 180); }
+    // tower: cream, red band, gallery, lantern
+    const tg = c.createLinearGradient(290, 0, 372, 0); tg.addColorStop(0, '#efe6d0'); tg.addColorStop(0.55, '#d9cdb4'); tg.addColorStop(1, '#8f8a8a'); c.fillStyle = tg; c.beginPath(); c.moveTo(292, 530); c.lineTo(306, 262); c.lineTo(354, 262); c.lineTo(368, 530); c.closePath(); c.fill();
+    const rb = c.createLinearGradient(290, 0, 372, 0); rb.addColorStop(0, '#d5503c'); rb.addColorStop(1, '#7c2a2a'); c.fillStyle = rb; c.beginPath(); c.moveTo(298.3, 410); c.lineTo(302, 340); c.lineTo(358, 340); c.lineTo(361.7, 410); c.closePath(); c.fill();
+    c.fillStyle = '#10172e'; c.fillRect(322, 300, 14, 20); c.fillRect(322, 446, 14, 22); c.fillStyle = '#1a2038'; c.fillRect(294, 254, 72, 10); c.fillRect(308, 208, 44, 48); c.beginPath(); c.moveTo(302, 210); c.lineTo(330, 180); c.lineTo(358, 210); c.closePath(); c.fill();
+    // the beam
+    const th = beamA(t), dep = Math.sin(th), dxb = Math.cos(th);
+    c.globalCompositeOperation = 'lighter';
+    const B = cone(c, t, (a, dir, len) => { const g = c.createLinearGradient(LX, 0, LX + dir * len, 0); g.addColorStop(0, `rgba(255,240,200,${a})`); g.addColorStop(1, 'rgba(255,240,200,0)'); c.fillStyle = g; c.fill(); });
+    // fog, waves and boat inside the cone answer the light
+    c.save(); cone(c, t, () => {}); c.beginPath(); { const h = B.half * 1.1, a0 = B.tilt - h, a1 = B.tilt + h; c.moveTo(LX, LY); c.lineTo(LX + B.dir * B.len * Math.cos(a0), LY + B.len * Math.sin(a0)); c.lineTo(LX + B.dir * B.len * Math.cos(a1), LY + B.len * Math.sin(a1)); c.closePath(); } c.clip();
+    c.globalAlpha = (0.1 + 0.26 * fog) * Math.abs(dxb); fogLayer(410, 14, 2.2, 1); fogLayer(520, 30, 2.6, 1); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; if (B.dir > 0 && Math.abs(dxb) > 0.5) { c.globalAlpha = smoothstep(0.5, 0.92, Math.abs(dxb)); boat(true); c.globalAlpha = 1; } c.restore();
+    c.globalCompositeOperation = 'lighter';
+    // light on the water where the cone comes down
+    if (B.dir > 0) { const gx = LX + (700 - LY) / Math.tan(B.tilt) - 500, a = 0.3 * Math.abs(dxb); const g = c.createRadialGradient(gx + 500, 2300, 0, gx + 500, 2300, 700); g.addColorStop(0, `rgba(190,214,255,${a})`); g.addColorStop(1, 'rgba(190,214,255,0)'); c.save(); c.scale(1, 0.32); c.fillStyle = g; c.fillRect(0, 1900, W, 1400); c.restore(); }
+    // the lamp itself: steady glow, and a glare when it swings toward us
+    const glare = smoothstep(0.55, 1, dep), lg = c.createRadialGradient(LX, LY, 0, LX, LY, 90 + 420 * glare); lg.addColorStop(0, `rgba(255,246,214,${0.9})`); lg.addColorStop(0.12, `rgba(255,236,190,${0.4 + 0.5 * glare})`); lg.addColorStop(1, 'rgba(255,230,180,0)'); c.fillStyle = lg; c.fillRect(LX - 520, LY - 520, 1040, 1040);
+    if (glare > 0.02) { const sg = c.createLinearGradient(LX - 900, 0, LX + 900, 0); sg.addColorStop(0, 'rgba(255,240,210,0)'); sg.addColorStop(0.5, `rgba(255,240,210,${0.5 * glare})`); sg.addColorStop(1, 'rgba(255,240,210,0)'); c.fillStyle = sg; c.fillRect(LX - 900, LY - 2, 1800, 4); }
+    c.globalCompositeOperation = 'source-over';
+    // near fog over everything
+    c.globalAlpha = 0.32 * fog; fogLayer(700, 52, 3.2, 1); c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

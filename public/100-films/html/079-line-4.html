@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 079 — Line 4</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 079 — LINE 4
+ * A transit map of an invented city draws itself, then a train rides it. Everything sits on a 60-pixel grid
+ * and every segment runs at 0, 45 or 90 degrees, with rounded corners; the six routes are planned so they only
+ * ever meet at interchanges, never share track. Each line advances stop-and-go, station by station; an
+ * interchange ring pops when its second line arrives. Then a train runs Line 4 end to end and each station it
+ * passes rings a bell one step further up an E-major scale. Eleven bars at 132 bpm (1.82 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, U = 60, X = (g) => 120 + g * U, Y = (g) => 112 + g * U, INK = '#262b36', RAD = 30, T_TRAIN = 14.5, TRAIN_DUR = 3.8;
+const LINES = [
+  { n: 1, col: '#e23b2e', a: 1.8, b: 3.7, pts: [[1, 4], [8, 4], [11, 7], [17, 7], [20, 4], [27, 4]] },
+  { n: 2, col: '#1f6fd0', a: 3.7, b: 5.1, pts: [[14, 2], [14, 13]] },
+  { n: 3, col: '#2a9d59', a: 5.1, b: 6.9, pts: [[2, 10], [10, 10], [11, 11], [17, 11], [18, 10], [26, 10]] },
+  { n: 5, col: '#8a4bbf', a: 6.9, b: 8.4, pts: [[3, 7], [8, 7], [10, 9], [12, 9], [16, 13]] },
+  { n: 6, col: '#12a7a0', a: 8.4, b: 10.1, pts: [[9, 2], [16, 2], [18, 4], [20, 4], [23, 7], [26, 7]] },
+  { n: 4, col: '#f08a1c', a: 10.1, b: 12.7, pts: [[3, 1], [5, 1], [8, 4], [8, 10], [11, 13], [17, 13], [20, 10], [20, 4], [22, 2], [27, 2]] }
+];
+// stations: [gx, gy, name, label side, lines]
+const ST = [
+  [1, 4, 'Westgate', 'N', [1]], [3, 4, 'Larkhill', 'S', [1]], [5.5, 4, 'Quay Road', 'N', [1]], [8, 4, 'Foundry', 'E', [1, 4]], [10, 6, 'Mill Lane', 'E', [1]], [12.5, 7, 'Tannery', 'N', [1]], [14, 7, 'Exchange', 'NE', [1, 2]], [16, 7, 'Kiln Street', 'S', [1]], [18.5, 5.5, 'Aster Park', 'W', [1]], [20, 4, 'Northfield', 'NW', [1, 4, 6]], [22.5, 4, 'Vale', 'N', [1]], [24.5, 4, 'Harrow End', 'S', [1]], [27, 4, 'Eastmoor', 'N', [1]],
+  [14, 2, 'Observatory', 'N', [2, 6]], [14, 4.5, 'Cathedral', 'E', [2]], [14, 9, 'Lowgate', 'E', [2]], [14, 11, 'Saltmarket', 'SW', [2, 3, 5]], [14, 13, 'Dockside', 'S', [2, 4]],
+  [2, 10, 'Fenwick', 'N', [3]], [4, 10, 'Brook', 'S', [3]], [6, 10, 'Orchard', 'N', [3]], [8, 10, 'Garden Gate', 'SW', [3, 4]], [12.5, 11, 'Weir', 'N', [3]], [16, 11, 'Ropewalk', 'N', [3]], [20, 10, 'Union Square', 'SE', [3, 4]], [22.5, 10, 'Marsh Lane', 'N', [3]], [24.5, 10, 'Pinfold', 'S', [3]], [26, 10, 'Sandhaven', 'N', [3]],
+  [3, 7, 'Warren', 'N', [5]], [5.5, 7, 'Candlewick', 'S', [5]], [8, 7, 'Lantern Row', 'NW', [4, 5]], [11, 9, 'Guildhall', 'N', [5]], [16, 13, 'Shipwright', 'S', [4, 5]],
+  [9, 2, 'Upland', 'N', [6]], [11.5, 2, 'Priory', 'S', [6]], [16, 2, 'Bellfield', 'N', [6]], [22, 6, 'Potter’s Row', 'E', [6]], [24.5, 7, 'Lime Wharf', 'S', [6]], [26, 7, 'Tidewater', 'E', [6]],
+  [3, 1, 'Skylark Hill', 'N', [4]], [6.5, 2.5, 'Abbey Rise', 'E', [4]], [8, 8.5, 'Cooper’s Yard', 'W', [4]], [9.5, 11.5, 'Ferry Steps', 'W', [4]], [12, 13, 'Anchor', 'S', [4]], [18.5, 11.5, 'Tollbar', 'E', [4]], [20, 8, 'Glasshouse', 'E', [4]], [20, 6, 'Signal Hill', 'W', [4]], [21, 3, 'Kestrel', 'E', [4]], [24, 2, 'Beacon', 'N', [4]], [27, 2, 'Airfield', 'N', [4]]
+];
+const RIVER = [[-0.5, 8.5], [5, 8.5], [7.5, 6], [12, 6], [15, 9], [22, 9], [24.5, 6.5], [28.5, 6.5]];
+// a polyline with rounded corners, densely sampled, with running length
+function round(pts, r) {
+  const P = pts.map(([x, y]) => [X(x), Y(y)]), out = [P[0]];
+  for (let i = 1; i < P.length - 1; i++) { const a = P[i - 1], b = P[i], c = P[i + 1], d1 = [b[0] - a[0], b[1] - a[1]], d2 = [c[0] - b[0], c[1] - b[1]], l1 = Math.hypot(...d1), l2 = Math.hypot(...d2), u1 = [d1[0] / l1, d1[1] / l1], u2 = [d2[0] / l2, d2[1] / l2], th = Math.acos(Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1]))), t = Math.min(r * Math.tan(th / 2), l1 / 2, l2 / 2), p0 = [b[0] - u1[0] * t, b[1] - u1[1] * t], p1 = [b[0] + u2[0] * t, b[1] + u2[1] * t];
+    for (let k = 0; k <= 10; k++) { const s = k / 10; out.push([(1 - s) * (1 - s) * p0[0] + 2 * s * (1 - s) * b[0] + s * s * p1[0], (1 - s) * (1 - s) * p0[1] + 2 * s * (1 - s) * b[1] + s * s * p1[1]]); } }
+  out.push(P[P.length - 1]); let L = 0; out.forEach((p, i) => { if (i) L += Math.hypot(p[0] - out[i - 1][0], p[1] - out[i - 1][1]); p[2] = L; }); out.len = L; return out;
+}
+const at = (pl, s) => { let i = 1; while (i < pl.length - 1 && pl[i][2] < s) i++; const a = pl[i - 1], b = pl[i], u = clamp01((s - a[2]) / Math.max(1e-6, b[2] - a[2])); return [lerp(a[0], b[0], u), lerp(a[1], b[1], u), Math.atan2(b[1] - a[1], b[0] - a[0])]; };
+const RIV = round(RIVER, 46);
+LINES.forEach((l) => { l.pl = round(l.pts, RAD);
+  // where each of its stations sits along it, and a stop-and-go schedule
+  l.st = ST.filter((s) => s[4].includes(l.n)).map((s) => { let best = 0, bd = 1e9; l.pl.forEach((p) => { const d = Math.hypot(p[0] - X(s[0]), p[1] - Y(s[1])); if (d < bd) { bd = d; best = p[2]; } }); return { s, at: best }; }).sort((p, q) => p.at - q.at);
+  l.stops = [0, ...l.st.map((x) => x.at).filter((v) => v > 1 && v < l.pl.len - 1), l.pl.len]; });
+const drawn = (l, t) => { const u = clamp01((t - l.a) / (l.b - l.a)) * l.pl.len; if (u <= 0) return 0; let k = 1; while (k < l.stops.length - 1 && l.stops[k] < u) k++; const s0 = l.stops[k - 1], s1 = l.stops[k]; return lerp(s0, s1, E.inOutCubic(clamp01((u - s0) / (s1 - s0)))); };
+const reach = (l, s) => l.a + (l.b - l.a) * s / l.pl.len;            // when the line's head reaches length s
+ST.forEach((s) => { s.t = s[4].map((n) => { const l = LINES.find((q) => q.n === n); return reach(l, l.st.find((x) => x.s === s).at); }).sort((a, b) => a - b); });
+const L4 = LINES[5], trainS = (t) => L4.pl.len * E.inOutSine(clamp01((t - T_TRAIN) / TRAIN_DUR)), passT = (s) => T_TRAIN + TRAIN_DUR * Math.acos(1 - 2 * s / L4.pl.len) / Math.PI;
+const LAB = { N: [0, -21, 'center'], S: [0, 33, 'center'], E: [19, 5, 'left'], W: [-19, 5, 'right'], NE: [15, -15, 'left'], SE: [16, 28, 'left'], NW: [-15, -15, 'right'], SW: [-16, 28, 'right'] };
+let bg, ctx;
+
+Stage.create({
+  no: 79, title: 'Line 4', subtitle: 'a city’s lines, drawn · 132 bpm',
+  duration: 20, background: '#fbfaf6', grain: 0.03, poster: 16.4,
+  fonts: ['500 15px "Inter Variable"', '600 15px "Inter Variable"', '700 22px "Inter Variable"', 'italic 400 20px "Newsreader Variable"'],
+  fade: { in: 0.5, out: 1.0, color: '#fbfaf6' },
+  slate: { at: 0.4, hold: 2.4, pos: 'bl', color: 'rgba(38,43,54,.86)', margin: 84 },
+
+  music(S) {
+    const M = S.score({ bpm: 132, duration: 20, seed: 79 });
+    M.master({ reverb: { decay: 1.5, size: 0.8, damp: 0.5 }, fadeOut: 1.2 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.5 }), hat = M.track('hat', { reverb: 0.08, gain: 0.2 }), bass = M.track('bass', { reverb: 0.05, gain: 0.36, lowpass: 1100 }), arp = M.track('arp', { reverb: 0.3, gain: 0.68, pan: 0.2, delay: { time: 0.75, fb: 0.35, mix: 0.22 }, lowpass: (t) => 1200 + 3600 * smoothstep(5, 13, t) }), bell = M.track('bell', { reverb: 0.5, gain: 0.5, humanize: 0 }), pad = M.track('pad', { reverb: 0.5, gain: 0.34 }), plk = M.track('pluck', { reverb: 0.3, gain: 0.7, humanize: 0 }), cl = M.track('clap', { reverb: 0.25, gain: 0.3 });
+    const sc = S.scale('E4', 'major', 3), chords = [['E2', ['E3', 'G#3', 'B3', 'F#4']], ['C#2', ['C#3', 'E3', 'G#3', 'B3']], ['A1', ['A2', 'C#3', 'E3', 'B3']], ['B1', ['B2', 'D#3', 'F#3', 'A3']]];
+    for (let bar = 0; bar < 11; bar++) {
+      const b = bar * 4, [r, ch] = chords[bar % 4], end = bar === 10; pad.chord(b, ch, 4, 0.4);
+      if (!end) { hat.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.45 }); if (bar >= 1) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); for (let k = 0; k < 8; k++) bass.note(b + k * 0.5, r, 0.4, k % 2 ? 0.55 : 0.75); } if (bar >= 3) arp.seq(b, 0.5, [0, 2, 1, 3, 2, 3, 1, 2].map((k) => S.midi(ch[k]) + 12), { vel: 0.45, dur: 0.3 }); if (bar >= 5) cl.pattern(b, 1, '.x.x', { vel: 0.6 }); }
+      else { bass.note(b, 'E2', 3, 0.7); arp.chord(b, ['E4', 'G#4', 'B4', 'F#5'], 3, 0.5); kick.hit(b, 1); }
+    }
+    // each line sets out with a small rising figure
+    LINES.forEach((l, i) => [0, 2, 4].forEach((d, k) => plk.note(M.b(l.a) + k * 0.25, sc[d + i], 0.3, 0.5)));
+    // the train: every station on Line 4 rings, one step up the scale each time
+    L4.st.forEach((x, i) => bell.note(M.b(passT(x.at)), sc[i + 3], 1.2, 0.5));
+    return M;
+  },
+
+  setup() { bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); const g = bg.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, 1300); g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#f1efe8'); bg.fillStyle = g; bg.fillRect(0, 0, W, H); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H); c.lineJoin = 'round';
+    const stroke = (pl, upTo, w, col) => { if (upTo <= 0) return; c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.beginPath(); c.moveTo(pl[0][0], pl[0][1]); for (let i = 1; i < pl.length; i++) { if (pl[i][2] <= upTo) c.lineTo(pl[i][0], pl[i][1]); else { const p = at(pl, upTo); c.lineTo(p[0], p[1]); break; } } c.stroke(); };
+    // river
+    const rv = prog(t, 0.3, 1.6, E.inOutCubic) * RIV.len; stroke(RIV, rv, 50, '#d9edf8');
+    const ra = prog(t, 1.4, 0.8); if (ra > 0) { c.globalAlpha = ra; c.fillStyle = '#7fb2cf'; c.font = 'italic 400 20px "Newsreader Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; 'RIVER  SOL'.split('').forEach((ch, i) => c.fillText(ch, X(15.7) + i * 25, Y(9) + 1)); c.globalAlpha = 1; }
+    // lines
+    for (const l of LINES) { const s = drawn(l, t); stroke(l.pl, s, 12, l.col); if (s > 0 && s < l.pl.len) { const p = at(l.pl, s); c.fillStyle = '#fff'; c.strokeStyle = l.col; c.lineWidth = 4; c.beginPath(); c.arc(p[0], p[1], 8, 0, TAU); c.fill(); c.stroke(); } }
+    // stations
+    const tS = trainS(t);
+    for (const s of ST) {
+      if (t < s.t[0]) continue; const x = X(s[0]), y = Y(s[1]), hub = s[4].length > 1, a = E.outBack(clamp01((t - s.t[0]) / 0.25)), term = LINES.some((l) => s[4].includes(l.n) && (l.st[0].s === s || l.st[l.st.length - 1].s === s));
+      // a ping when the train passes
+      let ping = 0; if (s[4].includes(4) && t >= T_TRAIN) { const tp = passT(L4.st.find((q) => q.s === s).at); if (t >= tp) ping = Math.exp(-(t - tp) * 3.2); if (ping > 0.02) { c.strokeStyle = Stage.color.alpha('#f08a1c', ping); c.lineWidth = 3; c.beginPath(); c.arc(x, y, 14 + 34 * (1 - ping), 0, TAU); c.stroke(); } }
+      if (hub && t >= s.t[1]) { const h = E.outBack(clamp01((t - s.t[1]) / 0.3)); c.fillStyle = '#fff'; c.strokeStyle = INK; c.lineWidth = 4.5; c.beginPath(); c.arc(x, y, (13.5 + 3 * ping) * h, 0, TAU); c.fill(); c.stroke(); }
+      else if (term) { c.fillStyle = '#fff'; c.strokeStyle = LINES.find((l) => l.n === s[4][0]).col; c.lineWidth = 4.5; c.beginPath(); c.arc(x, y, 9 * a, 0, TAU); c.fill(); c.stroke(); }
+      else { c.fillStyle = '#fff'; c.beginPath(); c.arc(x, y, (4.6 + 2.5 * ping) * a, 0, TAU); c.fill(); }
+      // names cascade west to east once the network is complete
+      const la = prog(t, 12.6 + s[0] * 0.055, 0.5, E.outCubic); if (la > 0) { const [dx, dy, al] = LAB[s[3]]; c.globalAlpha = la; c.font = (hub ? '600' : '500') + ' 15px "Inter Variable"'; c.textAlign = al; c.textBaseline = 'alphabetic'; c.lineWidth = 5; c.strokeStyle = 'rgba(251,250,246,.92)'; c.strokeText(s[2], x + dx, y + dy + 6 * (1 - la)); c.fillStyle = ping > 0.05 ? Stage.color.mix(INK, '#c05f00', ping) : INK; c.fillText(s[2], x + dx, y + dy + 6 * (1 - la)); c.globalAlpha = 1; }
+    }
+    // the train on Line 4
+    if (t >= T_TRAIN - 0.3 && t < T_TRAIN + TRAIN_DUR + 0.6) { const a = prog(t, T_TRAIN - 0.3, 0.3, E.outBack) * (1 - prog(t, T_TRAIN + TRAIN_DUR + 0.2, 0.4)), p = at(L4.pl, Math.max(0.01, Math.min(L4.pl.len - 0.01, tS))); c.save(); c.translate(p[0], p[1]); c.rotate(p[2]); c.scale(a, a); c.fillStyle = 'rgba(0,0,0,.18)'; c.beginPath(); c.roundRect(-22, -8, 48, 24, 12); c.fill(); c.fillStyle = INK; c.beginPath(); c.roundRect(-25, -13, 50, 26, 13); c.fill(); c.fillStyle = '#fff'; c.beginPath(); c.roundRect(-20, -8, 40, 16, 8); c.fill(); c.fillStyle = '#f08a1c'; c.beginPath(); c.roundRect(-14, -4, 28, 8, 4); c.fill(); c.restore(); }
+    // legend
+    const lg = prog(t, 18.0, 0.8, E.outCubic); if (lg > 0) { const lx = 1396, ly = 818 + 40 * (1 - lg); c.globalAlpha = lg; c.save(); c.shadowColor = 'rgba(30,40,60,.16)'; c.shadowBlur = 30; c.shadowOffsetY = 10; c.fillStyle = '#fff'; c.beginPath(); c.roundRect(lx, ly, 404, 176, 16); c.fill(); c.restore(); c.strokeStyle = 'rgba(38,43,54,.12)'; c.lineWidth = 1; c.beginPath(); c.roundRect(lx + 0.5, ly + 0.5, 403, 175, 16); c.stroke();
+      c.fillStyle = INK; c.font = '700 22px "Inter Variable"'; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillText('Halvering Transit', lx + 26, ly + 44); c.font = '500 15px "Inter Variable"'; c.fillStyle = 'rgba(38,43,54,.55)'; c.textAlign = 'right'; c.fillText('50 stations', lx + 378, ly + 43);
+      LINES.slice().sort((p, q) => p.n - q.n).forEach((l, i) => { const x = lx + 26 + (i % 3) * 124, y = ly + 86 + Math.floor(i / 3) * 44; c.strokeStyle = l.col; c.lineWidth = 12; c.lineCap = 'round'; c.beginPath(); c.moveTo(x + 6, y); c.lineTo(x + 34, y); c.stroke(); c.fillStyle = INK; c.font = (l.n === 4 ? '700' : '500') + ' 15px "Inter Variable"'; c.textAlign = 'left'; c.fillText('Line ' + l.n, x + 50, y + 5); }); c.globalAlpha = 1; }
+  }
+});
+</script>
+</body>
+</html>

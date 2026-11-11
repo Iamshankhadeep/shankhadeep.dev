@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 006 — Petrichor</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 006 — PETRICHOR
+ * Rain on a window at night. Behind the glass the city is only bokeh; on the glass, beads sit still and heavier
+ * drops run, each one a tiny lens that flips and sharpens the lights behind it, wiping a clear track through
+ * the fog. Eight bars at 80 bpm with a lazy swing; the rain thickens toward bar 6 (15 s), then eases. */
+const { ease: E, prog, clamp01, lerp, smoothstep } = Stage;
+
+const FRAG = `
+uniform float uRain, uFog, uDrift, uPulse;
+// ── the city: three depths of out-of-focus lights. soft 0 = in focus (small, crisp rim) … 1 = fogged (large, veiled)
+vec3 lights(vec2 p, float soft, float gain){
+  vec3 c = vec3(0.);
+  for (int L = 0; L < 3; L++) {
+    float fl = float(L), sc = 1.9 + fl * 1.5;
+    vec2 q = p * sc + vec2(uDrift * (.5 + .4 * fl) + fl * 7.3, fl * 3.1), id = floor(q), f = fract(q) - .5;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 o = vec2(float(i), float(j)), cell = id + o, h = hash22(cell + fl * 17.);
+      float yw = smoothstep(.62, -.18, (cell.y + .5) / sc - .05 * fl);           // the street is low in the frame
+      if (hash21(cell + 31.7 + fl) > .30 + .42 * yw) continue;
+      vec2 c0 = o + (h - .5) * .9;
+      float rad = (.13 + .19 * hash21(cell + 3.3)) * (.55 + soft * .95);
+      float d = length(f - c0), edge = rad * (.10 + soft * .55);
+      float disc = smoothstep(rad, rad - edge, d) * (1. + .55 * smoothstep(rad - edge * 2.2, rad - edge * .4, d) * (1. - soft));
+      float hue = hash21(cell + 9.1);
+      vec3 col = hue < .52 ? vec3(1., .58, .22) : hue < .80 ? vec3(.14, .72, .78) : hue < .91 ? vec3(1., .22, .20) : vec3(.90, .93, 1.);
+      float tw = .78 + .22 * sin(uTime * (.6 + 2. * h.x) + h.y * 40.);
+      c += col * disc * tw * (.62 - .12 * fl) * mix(1.5, .66, soft);
+    }
+  }
+  vec3 bg = mix(vec3(.050, .034, .040), vec3(.008, .014, .034), smoothstep(-.5, .4, p.y));
+  bg += vec3(.13, .055, .02) * exp(-pow((p.y + .36) / .24, 2.));
+  return bg + c * gain;
+}
+// ── running drops. xy = offset from the drop centre in screen units (scaled for lensing), z = wetness
+vec3 layer(vec2 uv, float t, float sc, float amount){
+  vec2 asp = vec2(2.3, 1.), q = uv * sc * asp;
+  q.y += t * .20;
+  q.y += hash11(floor(q.x) * 7.13 + 1.7);
+  vec2 gid = floor(q), st = fract(q) - vec2(.5, 0.);
+  vec3 n = hash33(vec3(gid, 3.1));
+  if (n.z > amount) return vec3(0.);
+  float tt = fract(t * (.13 + .11 * n.x) + n.z * 5.) * 6.2832;
+  float x = (n.x - .5) * .5;
+  float wig = uv.y * 16.; x += (.5 - abs(x)) * (.4 + .6 * n.y) * sin(wig + sin(wig * .63 + n.y * 6.)) * .20;   // the meander
+  float y = -sin(tt + sin(tt + sin(tt) * .5)) * .43 + .5;                      // sticks, slips, slows
+  vec2 dw = (st - vec2(x, y)) / (sc * asp);
+  vec2 dd = dw; dd.y -= dd.x * dd.x * 26.;                                      // teardrop
+  float r = (.011 + .010 * n.y) * pow(2.4 / sc, .7);
+  float drop = smoothstep(r, r * .62, length(dd * vec2(1., .82)));
+  float above = smoothstep(-.2 * r, r, dw.y), fadeUp = smoothstep(1., y + .05, st.y);
+  float track = above * fadeUp * smoothstep(r * .85, r * .30, abs(dw.x));       // the wiped path it leaves
+  vec2 bc = vec2(dw.x, (fract(st.y * 11. + n.y) - .5) / (11. * sc));            // small beads left behind
+  float br = r * .34 * (.4 + .6 * fract(n.x * 13. + floor(st.y * 11. + n.y) * .618));
+  float bead = smoothstep(br, br * .5, length(bc)) * above * fadeUp;
+  return vec3(dw * drop * 3.6 + bc * bead * 3.6, max(drop, max(track * .8, bead)));
+}
+vec3 mist(vec2 uv, float t, float amount){                                     // fine condensation beads, scattered
+  vec2 q = uv * 21. + vec2(hash11(floor(uv.y * 21.) + 4.) * 9., 0.), id = floor(q), f = fract(q) - .5;
+  vec3 n = hash33(vec3(id, 9.7));
+  if (n.x > .16 + .30 * amount) return vec3(0.);
+  vec2 c = (n.yz - .5) * .7;
+  float life = fract(t * .04 + n.z * 7.), fade = smoothstep(0., .05, life) * smoothstep(1., .6, life);
+  float r = .07 + .17 * fract(n.z * 9.3), d = length(f - c);
+  float m = smoothstep(r, r * .55, d) * fade;
+  return vec3((f - c) / 21. * m * 3.6, m);
+}
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  float t = uTime;
+  vec3 a = layer(p, t, 2.4, uRain * .85), b = layer(p * 1.3 + 3.7, t * 1.15, 3.6, uRain * .75), c = layer(p * .8 - 1.9, t * .85, 1.6, uRain * .5);
+  vec3 s = mist(p, t, uRain);
+  vec2 off = a.xy + b.xy / 1.3 + c.xy / .8 + s.xy;
+  float wet = clamp(max(max(a.z, b.z), max(c.z, s.z)), 0., 1.);
+  float lens = smoothstep(.0, .004, length(off)) * wet;
+  // fogged glass: big veiled discs. where water has run the fog is wiped. inside a drop: flipped, small and sharp.
+  float fog = uFog * (1. - wet * .9);
+  vec3 col = lights(p, .30 + fog * .7, 1.);
+  col = mix(col, vec3(.070, .080, .105), fog * .30);
+  vec3 inside = lights(p - off, .03, 1.9) + vec3(.060, .050, .048);
+  col = mix(col, inside, lens);
+  float lo = length(off);
+  col *= 1. - .5 * lens * smoothstep(.022, .050, lo);                           // dark meniscus at the rim
+  col += vec3(.85, .92, 1.) * lens * smoothstep(.016, .030, off.y) * smoothstep(.052, .034, lo) * .62;   // sky caught on the lower lip (image is flipped)
+  col *= 1. + .08 * uPulse;
+  vec2 v = vUv - .5; col *= 1. - .85 * dot(v, v);
+  col = 1. - exp(-col * 2.15);
+  col = pow(col, vec3(1.06, 1.02, .98)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(col, 1.);
+}`;
+
+let sh;
+Stage.create({
+  no: 6, title: 'Petrichor', subtitle: 'fragment shader · 80 bpm',
+  duration: 24, background: '#05070c', grain: 0.07, poster: 15.6,
+  fade: { in: 1.4, out: 1.6 }, slate: { at: 0.9, hold: 3.2 },
+
+  music(S) {
+    const M = S.score({ bpm: 80, duration: 24, seed: 6, swing: 0.3 });
+    M.master({ reverb: { decay: 2.6, size: 0.9, damp: 0.55 }, fadeIn: 0.6, fadeOut: 2.2, saturate: 0.35 });
+    const keys = M.track('keys', { inst: 'epiano', reverb: 0.35, gain: 0.95, chorus: { rate: 0.4, depth: 2.5, mix: 0.4 }, lowpass: 3200, humanize: 0.5 });
+    const bass = M.track('bass', { inst: 'sub', reverb: 0.03, gain: 0.62 });
+    const kick = M.track('kick', { inst: 'softkick', reverb: 0.06, gain: 0.8 }), sn = M.track('snare', { inst: 'brush', reverb: 0.25, gain: 0.8 });
+    const hat = M.track('hat', { reverb: 0.08, gain: 0.34, humanize: 0.6 });
+    const lead = M.track('lead', { inst: 'vibes', reverb: 0.5, gain: 0.6, delay: { time: 1.5, fb: 0.3, mix: 0.25 } });
+    const vinyl = M.track('vinyl', { reverb: 0, gain: 1.0 }), rain = M.track('rain', { inst: 'air', reverb: 0.1, gain: (t) => 0.35 + 0.8 * Math.exp(-Math.pow((t - 15.5) / 5, 2)), params: { type: 'bp', freq: 3400, q: 0.5 } });
+    vinyl.hit(0, 0.9, M.beats); rain.hit(0, 0.9, M.beats);
+    // Eb: Ebmaj9 — Cm9 — Abmaj9 — Bb13sus … with a lift to Gm7 → Fm9 → Bb in the last two bars
+    const prog = ['Ebmaj9', 'Cm9', 'Abmaj9', 'Bb7sus4', 'Ebmaj9', 'Cm9', 'Abmaj9', 'Ebmaj7'];
+    const roots = ['Eb1', 'C1', 'Ab0', 'Bb0', 'Eb1', 'C1', 'Ab0', 'Eb1'];
+    prog.forEach((c, i) => {
+      const b = i * 4, v = i === 7 ? 0.5 : 0.56;
+      keys.chord(b, c, 1.6, v, { octave: 3, strum: 0.03 }); keys.chord(b + 2.5, c, 1.2, v * 0.8, { octave: 3, strum: 0.03 });
+      if (i < 7) keys.chord(b + 3.5, c, 0.4, v * 0.6, { octave: 3 });
+      if (i >= 1) { bass.note(b, roots[i], 1.4, 0.8); bass.note(b + 2.5, roots[i], 1.2, 0.6); }
+      if (i >= 2 && i < 7) { kick.pattern(b, 0.5, 'x....x..', { vel: 0.8 }); sn.pattern(b, 0.5, '..x...x.', { vel: 0.6 }); hat.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.5 }); }
+    });
+    lead.seq(8, 0.5, ['G4', null, 'Bb4', 'C5', null, 'Eb5', null, null, 'D5', null, 'C5', null, 'Bb4', null, null, null], { vel: 0.5, gate: 1.8 });
+    lead.seq(16, 0.5, ['Bb4', null, 'D5', 'F5', null, 'G5', null, null, 'F5', null, 'Eb5', 'D5', null, 'C5', null, null, 'Eb5', null, 'G5', null, 'Bb5', null, null, 'G5', null, null, 'F5', null, 'Eb5', null, null, null], { vel: 0.55, gate: 1.8 });
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const rain = 0.22 + 0.5 * smoothstep(3, 14, t) + 0.28 * Math.exp(-Math.pow((t - 15.5) / 3.2, 2)) - 0.3 * smoothstep(18.5, 24, t);
+    sh.draw(t, {
+      uRain: clamp01(rain), uFog: 0.55 + 0.4 * smoothstep(0, 9, t) - 0.2 * smoothstep(17, 24, t),
+      uDrift: t * 0.035 + 0.25 * prog(t, 0, 24, E.inOutSine),
+      uPulse: Stage.hit('keys', t, 0.5)
+    });
+  }
+});
+</script>
+</body>
+</html>

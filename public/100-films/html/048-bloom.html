@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 048 — Bloom</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 048 — BLOOM
+ * A peony opens from tight bud to full bloom, then lets its petals go. Sixty petals in six whorls, each a
+ * gradient-filled bezier with veins and a soft shadow; the outer whorls peel back first, the centre last.
+ * Ten bars of 3/4 at 90 bpm (2 s each): bud → unfurling → full bloom on bar 6 → a held breath → petals fall. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2, CX = 960, CY = 452;
+// whorls, outer → inner: [count, length, width, open start (s), tilt when open (0 flat … 1 upright)]
+const WH = [[9, 318, 190, 1.0, 0.0], [10, 286, 176, 2.2, 0.08], [11, 244, 156, 3.6, 0.2], [11, 198, 132, 5.0, 0.36], [10, 150, 106, 6.4, 0.55], [9, 104, 80, 7.8, 0.72]];
+const petals = [];
+WH.forEach(([n, L, Wd, t0, tilt], w) => { for (let i = 0; i < n; i++) { const id = petals.length; petals.push({ w, a: (i + (w % 2) * 0.5 + (hash(id, 1) - 0.5) * 0.3) / n * TAU, L: L * (0.92 + 0.16 * hash(id, 2)), Wd: Wd * (0.9 + 0.2 * hash(id, 3)), t0: t0 + hash(id, 4) * 1.1, tilt, hue: hash(id, 5), drop: 14.2 + (5 - w) * 0.55 + hash(id, 6) * 2.6, sw: hash(id, 7) * TAU, dir: hash(id, 8) - 0.5 }); } });
+let bg, ctx;
+
+function petalPath(c, L, Wd, curl) {
+  // base at the origin, tip up (−y). curl pulls the tip in while the petal is still cupped.
+  const w = Wd * 0.5, tipW = w * (0.55 - 0.35 * curl);
+  c.beginPath(); c.moveTo(0, 0);
+  c.bezierCurveTo(w * 0.75, -L * 0.12, w * 1.12, -L * 0.62, tipW, -L * 0.93);
+  c.quadraticCurveTo(tipW * 0.55, -L * 1.02, 0, -L * 0.955);                    // a small notch at the tip
+  c.quadraticCurveTo(-tipW * 0.55, -L * 1.02, -tipW, -L * 0.93);
+  c.bezierCurveTo(-w * 1.12, -L * 0.62, -w * 0.75, -L * 0.12, 0, 0); c.closePath();
+}
+
+Stage.create({
+  no: 48, title: 'Bloom', subtitle: 'canvas 2d · a waltz at 90 bpm',
+  duration: 20, background: '#a3ad9c', grain: 0.05, poster: 12.4,
+  fade: { in: 1.0, out: 1.6, color: '#8f9a8a' },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(48,56,44,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 20, seed: 48, meter: 3 });
+    M.master({ reverb: { decay: 3.6, size: 1.2, damp: 0.4 }, fadeIn: 0.4, fadeOut: 2.6 });
+    const str = M.track('strings', { reverb: 0.6, gain: (t) => 0.5 + 0.4 * smoothstep(3, 11, t), params: { cutoff: 3200, A: 0.4, R: 1.2 } }), harp = M.track('harp', { reverb: 0.5, gain: 0.85 });
+    const cel = M.track('celesta', { reverb: 0.6, gain: 0.7, delay: { time: 1.5, fb: 0.25, mix: 0.2 } }), bass = M.track('sub', { reverb: 0.06, gain: 0.5 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.4 });
+    const prog = ['Db', 'Bbm7', 'Gbmaj7', 'Ab', 'Dbmaj7', 'Gbmaj7', 'Dbmaj9', 'Bbm7', 'Gbmaj7', 'Db'], rt = ['Db2', 'Bb1', 'Gb1', 'Ab1', 'Db2', 'Gb1', 'Db2', 'Bb1', 'Gb1', 'Db2'];
+    const mel = [['F4', 3], ['Ab4', 2, 'F4', 1], ['Bb4', 3], ['C5', 2, 'Eb5', 1], ['F5', 3], ['Ab5', 1.5, 'Gb5', 1.5], ['F5', 3], ['Db5', 2, 'F5', 1], ['Bb4', 3], ['Ab4', 3]];
+    prog.forEach((c, i) => {
+      const b = i * 3, n = S.chord(c, 3); bass.note(b, rt[i], 2.7, i >= 4 && i < 7 ? 0.8 : 0.55); pad.chord(b, c, 3, 0.5, { octave: 3 });
+      if (i >= 1) harp.arp(b, [n[0] + 12, n[1] + 12, n[2] + 12, n[0] + 24, n[1] + 24, n[2] + 24], 0.5, 3, { mode: i >= 7 ? 'down' : 'up', vel: i >= 4 && i < 7 ? 0.5 : 0.36 });
+      let q = b; const m = mel[i]; for (let j = 0; j < m.length; j += 2) { str.note(q, m[j], m[j + 1] * 0.97, i >= 4 && i < 7 ? 0.7 : 0.5); if (i >= 4 && i < 7) str.note(q, S.midi(m[j]) - 12, m[j + 1] * 0.97, 0.4); q += m[j + 1]; }
+    });
+    cel.seq(15, 0.5, ['F6', 'Ab6', 'Db7', null, 'C7', 'Ab6', 'F6', null, 'Eb6', 'F6', 'Ab6', null], { vel: 0.5, gate: 1.8 });       // full bloom
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const c = bg, g = c.createRadialGradient(CX, CY, 80, CX, CY + 80, 1200); g.addColorStop(0, '#c2cab8'); g.addColorStop(0.55, '#a3ad9c'); g.addColorStop(1, '#788372'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 9000; i++) { c.fillStyle = `rgba(${hash(i, 1) > 0.5 ? '255,255,250' : '40,50,36'},${0.03 * hash(i, 2)})`; c.fillRect(hash(i, 3) * W, hash(i, 4) * H, 1 + 2 * hash(i, 5), 1 + 2 * hash(i, 6)); }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const sway = 0.025 * Math.sin(t * 0.8), breath = 1 + 0.012 * Math.sin(t * 1.5), bloom = prog(t, 0.8, 10.6, E.inOutSine);
+    // stem and two leaves
+    c.save(); c.translate(CX, CY); c.rotate(sway * 0.6);
+    c.strokeStyle = '#5c7350'; c.lineWidth = 15; c.lineCap = 'round'; c.beginPath(); c.moveTo(0, 30); c.bezierCurveTo(8, 240, -40, 420, -70, H); c.stroke();
+    c.strokeStyle = 'rgba(190,215,170,.4)'; c.lineWidth = 3; c.beginPath(); c.moveTo(4, 30); c.bezierCurveTo(12, 240, -36, 420, -66, H); c.stroke();
+    for (const [x, y, rot, sc] of [[-8, 330, -2.2, 1], [-22, 440, -0.95, 0.85]]) { c.save(); c.translate(x, y); c.rotate(rot + 0.05 * Math.sin(t * 0.9 + x)); c.scale(sc, sc); const lg = c.createLinearGradient(0, 0, 0, -230); lg.addColorStop(0, '#4f6b47'); lg.addColorStop(1, '#7a9668'); c.fillStyle = lg; c.beginPath(); c.moveTo(0, 0); c.bezierCurveTo(70, -60, 62, -180, 0, -240); c.bezierCurveTo(-62, -180, -70, -60, 0, 0); c.fill(); c.strokeStyle = 'rgba(40,60,36,.5)'; c.lineWidth = 2; c.beginPath(); c.moveTo(0, -6); c.lineTo(0, -226); c.stroke(); c.restore(); }
+    c.restore();
+    // sepals fold back as the bud swells
+    c.save(); c.translate(CX, CY); c.rotate(sway);
+    for (let k = 0; k < 5; k++) { const a = k / 5 * TAU + 0.3, op = prog(t, 0.6 + k * 0.12, 3.2, E.inOutCubic); c.save(); c.rotate(a); c.scale(1, lerp(0.75, 1.15, op)); c.fillStyle = '#607a52'; c.beginPath(); c.moveTo(0, 14); c.bezierCurveTo(34, -30, 26, -100, 0, -150 - 40 * op); c.bezierCurveTo(-26, -100, -34, -30, 0, 14); c.fill(); c.restore(); }
+    // petals, outer whorl first
+    for (const p of petals) {
+      const o = prog(t, p.t0, 3.6, E.inOutCubic);                        // 0 cupped in the bud … 1 open
+      const age = t - p.drop, falling = age > 0;
+      // foreshortening: closed petals stand upright around a small bud; open petals lie out, inner whorls less so
+      const up = lerp(1, p.tilt, o), len = p.L * breath * lerp(0.34, 1, o) * (1 - 0.48 * up * o), wid = p.Wd * lerp(0.42, 1, o) * (1 + 0.1 * up);
+      const baseR = lerp(4, 16 + p.w * 2, o), ang = p.a + (1 - o) * (1.3 + p.w * 0.35) + 0.02 * Math.sin(t * 1.1 + p.sw);
+      c.save();
+      if (falling) {    // let go: drift down and aside, turning, fading near the bottom
+        const fx = Math.cos(ang - Math.PI / 2) * (baseR + len * 0.5), fy = Math.sin(ang - Math.PI / 2) * (baseR + len * 0.5);
+        const x = fx + p.dir * 260 * (1 - Math.exp(-age * 0.8)) + 46 * Math.sin(age * 2.2 + p.sw), y = fy + 70 * age + 150 * age * age * 0.5;
+        c.translate(x, y); c.rotate(ang + age * (1.2 + 2 * p.dir) + 0.5 * Math.sin(age * 3 + p.sw)); c.scale(1, 0.55 + 0.45 * Math.cos(age * 2.6 + p.sw)); c.translate(0, len * 0.5);
+        c.globalAlpha = clamp01(1.2 - (CY + y) / (H + 120) * 0.4) * (1 - prog(age, 2.4, 1.2));
+      } else { c.rotate(ang); c.translate(0, -baseR); }
+      const g = c.createLinearGradient(0, 0, 0, -len);
+      const deep = Stage.color.mix('#c2607f', '#d27a94', p.hue), mid = Stage.color.mix('#eea9bd', '#f4bccb', p.hue), pale = Stage.color.mix('#fbe6e2', '#fff3ee', p.hue);
+      g.addColorStop(0, deep); g.addColorStop(0.3 + 0.1 * p.w / 5, mid); g.addColorStop(1, pale);
+      c.shadowColor = 'rgba(96,40,60,.30)'; c.shadowBlur = 20; c.shadowOffsetY = 5;
+      petalPath(c, len, wid, 1 - o); c.fillStyle = g; c.fill();
+      c.shadowColor = 'transparent';
+      c.strokeStyle = 'rgba(190,96,124,.20)'; c.lineWidth = 1.2; c.beginPath(); for (const k of [-0.5, 0, 0.5]) { c.moveTo(0, -len * 0.08); c.quadraticCurveTo(k * wid * 0.5, -len * 0.5, k * wid * 0.42, -len * 0.86); } c.stroke();
+      c.restore();
+    }
+    // stamens, revealed as the inner whorl opens
+    const st = prog(t, 8.2, 2.6, E.outCubic); if (st > 0) { for (let k = 0; k < 44; k++) { const a = k * 2.39996, r = 5 + 34 * Math.sqrt(k / 44) * st; c.fillStyle = k % 3 ? '#f1c64f' : '#e3a733'; c.beginPath(); c.arc(Math.cos(a) * r, Math.sin(a) * r * 0.9, 4.2 * st, 0, TAU); c.fill(); } c.fillStyle = 'rgba(120,150,70,.9)'; c.beginPath(); c.arc(0, 0, 7 * st, 0, TAU); c.fill(); }
+    c.restore();
+  }
+});
+</script>
+</body>
+</html>

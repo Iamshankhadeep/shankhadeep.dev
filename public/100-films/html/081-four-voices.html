@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 081 — Four Voices</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 081 — FOUR VOICES
+ * A four-voice counterpoint drawn as it sounds. The piece is an original fugue-like exposition in D minor:
+ * a two-bar subject in the alto; a tonal answer a fifth higher in the soprano over a countersubject (built
+ * in thirds and sixths against it); the subject again in the tenor; then the answer in the bass with the
+ * soprano chasing it in canon two beats later; a dominant pedal and a cadence that ends on a Picardy third.
+ * One table of notes below is both the score and the picture: angle = time within a two-bar phrase,
+ * radius = pitch, one ink per voice; a note glows while it sounds and stays as a fading trace.
+ * Ten bars at 100 bpm (2.4 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BEAT = 0.6, CX = 1010, CY = 540, R0 = 132, R1 = 486, M0 = 36, M1 = 84;
+const VO = [{ name: 'SOPRANO', col: '#f6eedb', inst: 'harp' }, { name: 'ALTO', col: '#ecbb4b', inst: 'pluck' }, { name: 'TENOR', col: '#ea7c90', inst: 'guitar' }, { name: 'BASS', col: '#4fc6b2', inst: 'organ' }];
+const N = { C: 0, 'C#': 1, D: 2, Eb: 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, Bb: 10, B: 11 }, m = (s) => { const o = +s.slice(-1); return 12 * (o + 1) + N[s.slice(0, -1)]; };
+// subject (in D), its answer a fifth up, and the countersubject (written against the answer)
+const SUBJ = [[0, 'D4', 1], [1, 'A4', 1], [2, 'F4', .5], [2.5, 'E4', .5], [3, 'D4', .5], [3.5, 'C#4', .5], [4, 'D4', .5], [4.5, 'E4', .5], [5, 'F4', .5], [5.5, 'G4', .5], [6, 'A4', 1], [7, 'G4', .5], [7.5, 'F4', .5]].map(([b, n, d]) => [b, m(n), d]);
+const CSUB = [[0.5, 'C4', .5], [1, 'G4', 1], [2, 'A4', .5], [2.5, 'G4', .5], [3, 'F4', .5], [3.5, 'E4', .5], [4, 'E4', 1], [5, 'E4', .5], [5.5, 'F4', .5], [6, 'G#4', 1], [7, 'F4', .5], [7.5, 'E4', .5]].map(([b, n, d]) => [b, m(n), d]);
+const put = (v, at, notes, tr = 0) => notes.map(([b, p, d]) => ({ v, b: at + b, p: p + tr, d }));
+const free = (v, list) => list.map(([b, n, d]) => ({ v, b, p: m(n), d }));
+const NOTES = [
+  ...put(1, 0, SUBJ),                                              // bars 1–2 · subject, alto
+  ...put(0, 8, SUBJ, 7), ...put(1, 8, CSUB),                       // bars 3–4 · answer, soprano · countersubject, alto
+  ...put(2, 16, SUBJ, -12), ...put(0, 16, CSUB, 5), ...free(1, [[16, 'A4', 2], [18, 'F4', 2], [20, 'D4', 2], [22, 'E4', 1], [23, 'C#4', 1]]),   // bars 5–6 · subject, tenor
+  ...put(3, 24, SUBJ, -17), ...put(0, 26, SUBJ.slice(0, 9), 7), ...put(2, 24, CSUB, -12), ...free(1, [[24, 'E4', 2], [26, 'E4', 2], [28, 'C4', 2], [30, 'B3', 2]]),   // bars 7–8 · answer, bass; soprano in canon
+  ...free(3, [[32, 'A2', 4], [36, 'D2', 4]]), ...free(2, [[32, 'G3', 2], [34, 'E3', 1], [35, 'G3', 1], [36, 'A3', 4]]), ...free(1, [[32, 'C#4', 2], [34, 'D4', 1], [35, 'C#4', 1], [36, 'F#4', 4]]), ...free(0, [[32, 'E5', 1], [33, 'D5', .5], [33.5, 'C#5', .5], [34, 'D5', 1], [35, 'E5', .5], [35.5, 'C#5', .5], [36, 'D5', 4]])
+].map((n) => ({ ...n, t0: n.b * BEAT, t1: (n.b + n.d) * BEAT }));
+const rad = (p) => lerp(R0, R1, (p - M0) / (M1 - M0)), ang = (b) => -TAU / 4 + (b % 8) / 8 * TAU;
+let bg, ctx, glow;
+
+Stage.create({
+  no: 81, title: 'Four Voices', subtitle: 'a small fugue, drawn as it sounds · 100 bpm',
+  duration: 24, background: '#1c1024', grain: 0.045, poster: 18.6,
+  fonts: ['600 14px "JetBrains Mono Variable"', 'italic 400 30px "Fraunces Variable"'],
+  fade: { in: 0.6, out: 1.6 },
+  slate: { at: 0.5, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 100, duration: 24, seed: 81 });
+    M.master({ reverb: { decay: 2.8, size: 1.1, damp: 0.4 }, fadeOut: 0.6 });
+    const tr = [M.track('harp', { reverb: 0.4, gain: 0.8, pan: 0.3, humanize: 0.006 }), M.track('pluck', { reverb: 0.35, gain: 0.95, pan: -0.25, humanize: 0.006, params: { decay: 1.2, bright: 0.5 } }), M.track('guitar', { reverb: 0.35, gain: 0.8, pan: 0.12, humanize: 0.006 }), M.track('organ', { reverb: 0.45, gain: 0.34, pan: -0.1, lowpass: 1400 })];
+    NOTES.forEach((n) => tr[n.v].note(n.b, n.p, n.d * (n.v === 3 ? 0.96 : 1.25), n.b >= 36 ? 0.62 : (n.b % 1 === 0 ? 0.62 : 0.5)));
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); glow = Stage.buffer(W, H);
+    const c = bg, g = c.createRadialGradient(CX, CY, 80, CX, CY, 1150); g.addColorStop(0, '#2a1836'); g.addColorStop(0.55, '#1c1026'); g.addColorStop(1, '#0d0712'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // the staff: a circle for every D and A, spokes for the eight beats
+    for (let p = M0; p <= M1; p++) { const pc = p % 12; if (pc !== 2 && pc !== 9) continue; c.strokeStyle = pc === 2 ? 'rgba(240,225,255,.11)' : 'rgba(240,225,255,.05)'; c.lineWidth = 1; c.beginPath(); c.arc(CX, CY, rad(p), 0, TAU); c.stroke(); if (pc === 2) { c.fillStyle = 'rgba(240,225,255,.32)'; c.font = '600 12px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.fillText('D' + (Math.floor(p / 12) - 1), CX + 6, CY - rad(p) - 5); } }
+    for (let b = 0; b < 8; b++) { const a = ang(b); c.strokeStyle = b % 4 ? 'rgba(240,225,255,.05)' : 'rgba(240,225,255,.13)'; c.lineWidth = 1; c.beginPath(); c.moveTo(CX + Math.cos(a) * (R0 - 26), CY + Math.sin(a) * (R0 - 26)); c.lineTo(CX + Math.cos(a) * (R1 + 22), CY + Math.sin(a) * (R1 + 22)); c.stroke(); c.fillStyle = 'rgba(240,225,255,.3)'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '600 12px "JetBrains Mono Variable"'; c.fillText(String(b + 1), CX + Math.cos(a) * (R1 + 40), CY + Math.sin(a) * (R1 + 40)); }
+  },
+
+  frame(t) {
+    const c = ctx, gl = glow; c.clearRect(0, 0, W, H); gl.globalCompositeOperation = 'source-over'; gl.clearRect(0, 0, W, H); gl.globalCompositeOperation = 'lighter'; gl.lineCap = 'round';
+    const beat = t / BEAT, phrase = Math.floor(Math.min(beat, 39.99) / 8), fin = smoothstep(21.4, 22.6, t), active = [0, 0, 0, 0];
+    c.lineCap = 'round';
+    for (const n of NOTES) {
+      if (t < n.t0) continue; const on = t < n.t1, age = Math.floor(Math.min(beat, 39.99) / 8) - Math.floor(n.b / 8), r = rad(n.p), a0 = ang(n.b), span = n.d / 8 * TAU, done = clamp01((t - n.t0) / (n.t1 - n.t0)), a1 = a0 + Math.max(0.004, span * done - 0.018);
+      const fade = on ? 1 : lerp([0.62, 0.36, 0.24, 0.17, 0.13][Math.min(4, age)], 0.9, fin), col = VO[n.v].col, att = Math.exp(-(t - n.t0) * 5);
+      if (on) active[n.v] = 1;
+      c.strokeStyle = Stage.color.alpha(col, fade); c.lineWidth = on ? 9 + 5 * att : 7; c.beginPath(); c.arc(CX, CY, r, a0, a1); c.stroke();
+      if (on || fin > 0) { gl.strokeStyle = Stage.color.alpha(col, on ? 0.9 : 0.4 * fin); gl.lineWidth = on ? 16 : 10; gl.beginPath(); gl.arc(CX, CY, r, a0, a1); gl.stroke(); }
+      if (on) { const hx = CX + Math.cos(a1) * r, hy = CY + Math.sin(a1) * r; c.fillStyle = '#fff'; c.beginPath(); c.arc(hx, hy, 5.5 + 4 * att, 0, TAU); c.fill(); gl.fillStyle = col; gl.beginPath(); gl.arc(hx, hy, 20, 0, TAU); gl.fill(); }
+    }
+    // playhead
+    if (t < 24) { const a = ang(beat), pa = 1 - fin; c.strokeStyle = `rgba(255,245,230,${0.5 * pa})`; c.lineWidth = 1.4; c.beginPath(); c.moveTo(CX + Math.cos(a) * (R0 - 30), CY + Math.sin(a) * (R0 - 30)); c.lineTo(CX + Math.cos(a) * (R1 + 26), CY + Math.sin(a) * (R1 + 26)); c.stroke(); }
+    c.save(); c.globalCompositeOperation = 'lighter'; c.filter = 'blur(12px)'; c.globalAlpha = 0.9; c.drawImage(gl.canvas, 0, 0, W, H); c.restore();
+    // centre: which phrase, and what is happening in it
+    const what = ['subject', 'answer', 'subject', 'stretto', 'cadence'][phrase]; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = 'rgba(246,238,219,.9)'; c.font = 'italic 400 30px "Fraunces Variable"'; const wa = clamp01((beat % 8) / 0.6) * (1 - 0.0); c.globalAlpha = prog(t, 0.3, 0.6) * (0.35 + 0.65 * Math.min(1, wa)); c.fillText(what, CX, CY + 4); c.font = '600 12px "JetBrains Mono Variable"'; c.fillStyle = 'rgba(240,225,255,.5)'; c.fillText('B A R   ' + String(Math.min(10, Math.floor(beat / 4) + 1)).padStart(2, '0') + '  /  1 0', CX, CY + 32); c.globalAlpha = 1;
+    // the four parts, named
+    VO.forEach((v, i) => { const y = 430 + i * 62, ent = [8, 0, 16, 24][i] * BEAT, a = prog(t, ent - 0.2, 0.5, E.outCubic), lit = active[i]; c.globalAlpha = lerp(0.22, 1, a); c.fillStyle = v.col; c.beginPath(); c.roundRect(120, y - 9, lit ? 44 : 26, 10, 5); c.fill(); if (lit) { c.shadowColor = v.col; c.shadowBlur = 16; c.fill(); c.shadowBlur = 0; }
+      c.font = '600 14px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = lit ? v.col : 'rgba(240,225,255,.6)'; c.fillText(v.name.split('').join(' '), 182, y + 1); c.globalAlpha = 1; });
+  }
+});
+</script>
+</body>
+</html>

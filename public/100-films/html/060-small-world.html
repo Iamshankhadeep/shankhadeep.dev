@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 060 — Small World</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/d3.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 060 — SMALL WORLD
+ * A network assembles itself. Four communities grow by preferential attachment (new nodes prefer well-connected
+ * ones, so hubs appear); eight bridges then join them into one small world, and messages hop along shortest
+ * paths, one hop per eighth-note. The whole d3-force layout is simulated before the film starts — 1200 ticks,
+ * positions stored per frame — so the score can be written from the same graph and any frame can be drawn alone.
+ * Ten bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, FPS = 60, FR = 1201, CX = 960, CY = 540;
+const HUE = ['#52b8aa', '#ea826f', '#e3c68f', '#a996e2'];
+const NET = build();
+let bg, ctx, buf;
+
+function build() {
+  const r = Stage.rng(606), nodes = [], links = [], deg = [];
+  const home = [[-300, -165], [300, -150], [-280, 180], [310, 170]];
+  // births: four seeds, then growth on a sixteenth-note grid, accelerating
+  const add = (c, t) => { const i = nodes.length; nodes.push({ id: i, c, born: t }); deg.push(0); return i; };
+  const link = (a, b, t, bridge) => { links.push({ a, b, born: t, bridge: !!bridge }); deg[a]++; deg[b]++; };
+  [0.6, 1.0, 1.4, 1.8].forEach((t, c) => add(c, t));
+  const members = [[0], [1], [2], [3]];
+  for (let k = 0; k < 104; k++) {
+    const t = 2.0 + 8.0 * Math.pow(k / 103, 0.72), tq = Math.round(t * 8) / 8, c = k % 4, m = members[c], i = add(c, tq);
+    const pick = () => { let tot = 0; for (const j of m) tot += deg[j] + 1; let x = r() * tot; for (const j of m) { x -= deg[j] + 1; if (x <= 0) return j; } return m[0]; };
+    const a = pick(); link(i, a, tq); if (m.length > 3 && r() < 0.42) { const b = pick(); if (b !== a) link(i, b, tq + 0.06); }
+    m.push(i);
+  }
+  // bridges between communities, one every half-beat from 10 s
+  const pairs = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2], [0, 1], [2, 3]];
+  pairs.forEach(([ca, cb], k) => { const pa = members[ca][Math.floor(r() * 12)], pb = members[cb][Math.floor(r() * 12)]; link(pa, pb, 10.0 + k * 0.25, true); });
+  // simulate
+  const N = nodes.length, px = new Float32Array(N * FR), py = new Float32Array(N * FR);
+  const simNodes = [], simLinks = [], sim = d3.forceSimulation([]).velocityDecay(0.32).alphaDecay(0).stop();
+  const fl = d3.forceLink([]).id((d) => d.id).distance((l) => l.bridge ? 120 : 40).strength((l) => l.bridge ? 0.12 : 0.7);
+  let pull = 1;
+  sim.force('link', fl).force('charge', d3.forceManyBody().strength(-95).distanceMax(520)).force('collide', d3.forceCollide().radius((d) => 9 + 2.4 * Math.sqrt(d.k || 1)))
+    .force('x', d3.forceX((d) => home[d.c][0] * pull).strength(0.05)).force('y', d3.forceY((d) => home[d.c][1] * pull).strength(0.07));
+  const live = new Array(N).fill(null); let li = 0, ni = 0;
+  const orderN = nodes.slice().sort((a, b) => a.born - b.born), orderL = links.slice().sort((a, b) => a.born - b.born);
+  for (let f = 0; f < FR; f++) {
+    const t = f / FPS; let changed = false;
+    while (ni < orderN.length && orderN[ni].born <= t) { const n = orderN[ni++]; const par = links.find((l) => l.a === n.id); const p = par && live[par.b]; const o = { id: n.id, c: n.c, k: 1, x: p ? p.x + (r() - 0.5) * 30 : home[n.c][0] * 0.8 + (r() - 0.5) * 60, y: p ? p.y + (r() - 0.5) * 30 : home[n.c][1] * 0.8 + (r() - 0.5) * 60 }; live[n.id] = o; simNodes.push(o); changed = true; }
+    while (li < orderL.length && orderL[li].born <= t) { const l = orderL[li]; if (!live[l.a] || !live[l.b]) break; li++; simLinks.push({ source: l.a, target: l.b, bridge: l.bridge }); live[l.a].k++; live[l.b].k++; changed = true; }
+    pull = lerp(1, 0.62, smoothstep(10, 13, t));
+    if (changed || (t > 10 && t < 13.2)) { sim.nodes(simNodes); fl.links(simLinks); sim.force('x').initialize(simNodes); sim.force('y').initialize(simNodes); sim.force('collide').initialize(simNodes); }
+    sim.alpha(t < 12.5 ? 0.3 : lerp(0.3, 0.05, smoothstep(12.5, 15, t))); sim.tick();
+    for (let i = 0; i < N; i++) { const o = live[i]; px[i * FR + f] = o ? o.x : NaN; py[i * FR + f] = o ? o.y : NaN; }
+  }
+  // adjacency and shortest paths on the finished graph
+  const adj = nodes.map(() => []); links.forEach((l, i) => { adj[l.a].push([l.b, i]); adj[l.b].push([l.a, i]); });
+  const bfs = (s) => { const prev = new Int32Array(N).fill(-1), dist = new Int32Array(N).fill(-1), q = [s]; dist[s] = 0; for (let h = 0; h < q.length; h++) { const u = q[h]; for (const [v] of adj[u]) if (dist[v] < 0) { dist[v] = dist[u] + 1; prev[v] = u; q.push(v); } } return { prev, dist }; };
+  const path = (a, b) => { const { prev, dist } = bfs(a); if (dist[b] < 0) return null; const p = [b]; while (p[0] !== a) p.unshift(prev[p[0]]); return p; };
+  const far = (c1, c2, salt) => { let best = null; for (let k = 0; k < 40; k++) { const a = members[c1][Math.floor(hash(k, salt) * members[c1].length)], b = members[c2][Math.floor(hash(k, salt + 1) * members[c2].length)], p = path(a, b); if (p && (!best || Math.abs(p.length - 8) < Math.abs(best.length - 8))) best = p; } return best; };
+  const msgs = [];
+  const send = (p, t0, hop, col) => { if (p) msgs.push({ p, t0, hop, col }); };
+  send(far(0, 3, 1), 12.0, 0.25, 0); send(far(1, 2, 5), 13.0, 0.25, 1);
+  send(far(2, 1, 9), 14.0, 0.125, 2); send(far(3, 0, 13), 14.0, 0.125, 3); send(far(0, 1, 17), 14.5, 0.125, 0);
+  send(far(1, 3, 21), 15.0, 0.125, 1); send(far(2, 0, 25), 15.0, 0.125, 2); send(far(3, 2, 29), 15.25, 0.125, 3); send(far(0, 2, 33), 15.5, 0.125, 0);
+  // broadcast from the biggest hub at 16 s: one level every eighth
+  let hub = 0; for (let i = 0; i < N; i++) if (deg[i] > deg[hub]) hub = i;
+  const B = bfs(hub), wave = []; for (let i = 0; i < N; i++) if (B.prev[i] >= 0) wave.push({ a: B.prev[i], b: i, t0: 16.0 + (B.dist[i] - 1) * 0.25 });
+  const maxLevel = Math.max(...B.dist);
+  // when is each node lit?
+  const lit = nodes.map(() => []); msgs.forEach((m) => m.p.forEach((n, i) => lit[n].push(m.t0 + i * m.hop))); lit[hub].push(16.0); wave.forEach((w) => lit[w.b].push(w.t0 + 0.25));
+  return { nodes, links, deg, px, py, msgs, wave, lit, hub, maxLevel, N };
+}
+
+Stage.create({
+  no: 60, title: 'Small World', subtitle: 'a network finds itself · 120 bpm',
+  duration: 20, background: '#121821', grain: 0.045, poster: 14.6,
+  fonts: ['500 15px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.2 },
+  slate: { at: 0.7, hold: 2.8, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 60 });
+    M.master({ reverb: { decay: 2.2, size: 0.95, damp: 0.45 }, fadeOut: 1.6 });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 0.55, params: { decay: 0.5, bright: 0.5 } }), kal = M.track('kalimba', { reverb: 0.4, gain: 0.95, delay: { time: 0.75, fb: 0.3, mix: 0.2 } }), arp = M.track('arp', { reverb: 0.35, gain: 0.5, delay: { time: 0.75, fb: 0.35, mix: 0.25 }, lowpass: 3200 });
+    const kick = M.track('softkick', { reverb: 0.05, gain: 0.6 }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 }), pad = M.track('pad', { reverb: 0.6, gain: 0.5 }), bell = M.track('glass', { reverb: 0.55, gain: 0.42 }), hat = M.track('hat', { reverb: 0.1, gain: 0.16 });
+    const sc = S.scale('F3', 'minorPent', 3);
+    // every arrival is a soft pluck, pitched by community
+    NET.nodes.forEach((n, i) => { if (i < 4 || hash(i, 2) < 0.62) plk.note(M.b(n.born), sc[2 + n.c * 2 + (i % 3)], 0.3, i < 4 ? 0.6 : 0.34, { pan: [-0.5, 0.5, -0.3, 0.3][n.c] }); });
+    // bridges ring
+    NET.links.filter((l) => l.bridge).forEach((l, k) => bell.note(M.b(l.born), sc[5 + (k * 2) % 7], 1.5, 0.5));
+    // message hops
+    NET.msgs.forEach((m, mi) => m.p.forEach((n, i) => { if (i === 0) return; kal.note(M.b(m.t0 + i * m.hop), sc[3 + (n % 8)], 0.4, m.hop > 0.2 ? 0.62 : 0.42, { pan: (mi % 2 ? 0.4 : -0.4) }); }));
+    for (let lv = 0; lv <= NET.maxLevel; lv++) arp.chord(M.b(16.0 + lv * 0.25), [sc[4 + lv], sc[6 + lv]], 0.5, 0.5);
+    const ch = [['F1', ['F2', 'C3', 'Ab3', 'Eb4']], ['Db2', ['Db3', 'Ab3', 'C4', 'F4']], ['Bb1', ['Bb2', 'F3', 'Ab3', 'Db4']], ['C2', ['C3', 'G3', 'Bb3', 'Eb4']]];
+    for (let bar = 0; bar < 10; bar++) { const c = ch[bar % 4], b = bar * 4; pad.chord(b, bar === 9 ? ch[0][1] : c[1], 4, 0.45); if (bar >= 1) sub.note(b, bar === 9 ? 'F1' : c[0], 3.6, 0.65); if (bar >= 1 && bar < 9) kick.pattern(b, 1, bar >= 5 ? 'xxxx' : 'x.x.', { vel: 0.75 }); if (bar >= 5 && bar < 9) hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.5 }); }
+    bell.chord(36, ['F4', 'C5', 'Ab5'], 4, 0.4);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); buf = Stage.buffer(W, H);
+    const g = bg.createRadialGradient(CX, CY, 100, CX, CY, 1200); g.addColorStop(0, '#1e2836'); g.addColorStop(0.6, '#151c27'); g.addColorStop(1, '#0c1017'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx, gl = buf, f = Math.min(FR - 1, Math.round(t * FPS)), { nodes, links, px, py, msgs, wave, lit } = NET;
+    c.clearRect(0, 0, W, H); gl.globalCompositeOperation = 'source-over'; gl.clearRect(0, 0, W, H); gl.globalCompositeOperation = 'lighter';
+    const zoom = lerp(1.25, 0.95, prog(t, 1.5, 8.5, E.inOutSine)) * (1 + 0.12 * prog(t, 10, 3.6, E.inOutSine)) * (1 + 0.03 * prog(t, 13.6, 6.4, E.inOutSine));
+    const X = (i) => CX + px[i * FR + f] * zoom * 1.42, Y = (i) => CY - 12 + py[i * FR + f] * zoom * 1.42;
+    // links
+    c.lineCap = 'round';
+    for (const l of links) {
+      if (l.born > t) continue; const a = clamp01((t - l.born) / 0.4), fl = Math.exp(-(t - l.born) * (l.bridge ? 1.6 : 3.5));
+      const xa = X(l.a), ya = Y(l.a), xb = lerp(xa, X(l.b), E.outCubic(a)), yb = lerp(ya, Y(l.b), E.outCubic(a));
+      c.strokeStyle = l.bridge ? `rgba(255,236,200,${0.34 + 0.6 * fl})` : `rgba(160,182,214,${0.2 + 0.5 * fl})`; c.lineWidth = l.bridge ? 1.3 + 1.4 * fl : 1 + fl; c.beginPath(); c.moveTo(xa, ya); c.lineTo(xb, yb); c.stroke();
+      if (fl > 0.05) { gl.strokeStyle = l.bridge ? `rgba(255,220,160,${fl})` : `rgba(140,180,230,${0.6 * fl})`; gl.lineWidth = 3; gl.beginPath(); gl.moveTo(xa, ya); gl.lineTo(xb, yb); gl.stroke(); }
+    }
+    // pulses: messages along their paths, then the broadcast wave
+    const pulse = (a, b, u, col, big) => { const xa = X(a), ya = Y(a), xb = X(b), yb = Y(b), e = E.inOutSine(u), x = lerp(xa, xb, e), y = lerp(ya, yb, e);
+      c.strokeStyle = Stage.color.alpha(col, 0.85); c.lineWidth = 2.2; c.beginPath(); c.moveTo(lerp(xa, xb, Math.max(0, e - 0.45)), lerp(ya, yb, Math.max(0, e - 0.45))); c.lineTo(x, y); c.stroke();
+      gl.strokeStyle = col; gl.lineWidth = 5; gl.beginPath(); gl.moveTo(xa, ya); gl.lineTo(x, y); gl.stroke();
+      c.fillStyle = '#ffffff'; c.beginPath(); c.arc(x, y, big ? 4.6 : 3.6, 0, TAU); c.fill(); gl.fillStyle = col; gl.beginPath(); gl.arc(x, y, 12, 0, TAU); gl.fill(); };
+    for (const m of msgs) { const h = (t - m.t0) / m.hop; if (h < 0 || h >= m.p.length - 1) continue; const i = Math.floor(h); pulse(m.p[i], m.p[i + 1], h - i, Stage.color.mix(HUE[m.col], '#ffffff', 0.35), true); }
+    for (const w of wave) { const u = (t - w.t0) / 0.25; if (u < 0 || u >= 1) continue; pulse(w.a, w.b, u, '#ffe9c4', false); }
+    // nodes
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i]; if (n.born > t) continue; let k = 0; for (const l of links) if (l.born <= t && (l.a === i || l.b === i)) k++;
+      const x = X(i), y = Y(i), pop = E.outBack(clamp01((t - n.born) / 0.35)), born = Math.exp(-(t - n.born) * 3);
+      let glow = 0; for (const tl of lit[i]) if (t >= tl) glow = Math.max(glow, Math.exp(-(t - tl) * 2.6));
+      const rad = (5.2 + 3.1 * Math.sqrt(k)) * pop * (1 + 0.28 * glow) * Math.sqrt(zoom);
+      c.fillStyle = Stage.color.mix(HUE[n.c], '#ffffff', 0.75 * glow + 0.4 * born); c.beginPath(); c.arc(x, y, rad, 0, TAU); c.fill();
+      c.strokeStyle = `rgba(12,16,23,.55)`; c.lineWidth = 1.2; c.beginPath(); c.arc(x, y, rad, 0, TAU); c.stroke();
+      c.fillStyle = `rgba(255,255,255,${0.22 + 0.5 * glow})`; c.beginPath(); c.arc(x - rad * 0.28, y - rad * 0.3, rad * 0.32, 0, TAU); c.fill();
+      gl.fillStyle = Stage.color.alpha(HUE[n.c], 0.34 + 0.66 * Math.max(glow, born)); gl.beginPath(); gl.arc(x, y, rad * (1.25 + 1.6 * glow), 0, TAU); gl.fill();
+    }
+    c.save(); c.globalCompositeOperation = 'lighter'; c.filter = 'blur(14px)'; c.globalAlpha = 0.85; c.drawImage(gl.canvas, 0, 0, W, H); c.restore();
+    // readout
+    let nn = 0, nl = 0; for (const n of nodes) if (n.born <= t) nn++; for (const l of links) if (l.born <= t) nl++;
+    const on = prog(t, 0.8, 0.8) * (1 - prog(t, 18.8, 1.0)); c.font = '500 15px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    c.fillStyle = `rgba(170,190,220,${0.7 * on})`; c.fillText('N O D E S  ' + String(nn).padStart(3, '0') + '   ·   L I N K S  ' + String(nl).padStart(3, '0'), CX, H - 62);
+    const stage = t < 10 ? 'G R O W T H' : t < 12 ? 'B R I D G E S' : t < 16 ? 'M E S S A G E S' : t < 18 ? 'B R O A D C A S T' : 'O N E   W O R L D';
+    c.fillStyle = `rgba(255,226,180,${0.8 * on})`; c.fillText(stage, CX, H - 36);
+  }
+});
+</script>
+</body>
+</html>

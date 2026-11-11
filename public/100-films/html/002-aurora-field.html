@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 002 — Aurora Field</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 002 — AURORA FIELD
+ * Curtains of aurora breathing over a snowbound ridge of pines, painted in one fragment shader.
+ * Each curtain is a thin folded sheet hanging in the sky; the shader integrates it along the view ray, so the
+ * folds brighten where the sheet is seen edge-on and the rays stay vertical. Six bars at 72 bpm (3.33 s each):
+ * horizon glow → first curtain unfurls left to right (bars 2–3) → second curtain crosses it (bar 4)
+ * → the lake lights up (bar 5, 13.33 s) → the curtains thin to a veil. Every chord change of the pad sends a
+ * pulse of brightness travelling along the curtains. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const BAR = 10 / 3, PEAK = 4 * BAR;
+
+const FRAG = `
+uniform float uF1, uF2, uI1, uI2, uGlow, uVeil, uShim, uLake, uPan, uZoom, uBreath;
+uniform vec4 uPA, uPV;                       // chord pulses: age in seconds and strength of the last four chord changes
+const float HZ = -.285, FOC = .95;           // shoreline height on screen, focal length
+const vec3 MINT = vec3(.30, 1., .60), TEAL = vec3(.04, .60, .72), VIOL = vec3(.46, .24, .95);
+
+float pulse(float u, float u0, float speed){
+  float s = 0.;
+  for (int i = 0; i < 4; i++) {
+    float a = uPA[i], x = (u - (u0 + speed * a)) / 1.7;
+    s += uPV[i] * exp(-x * x) * smoothstep(0., .35, a) * exp(-a * .42);
+  }
+  return s;
+}
+
+// One curtain: a thin sheet v = v0 + fold(u) in the ground plane (u along the sheet, v across it), hanging
+// from altitude ~1 upward. d is the unit view ray; the sheet is integrated with n steps inside its slab.
+vec3 curtain(vec3 d, vec2 ax, float v0, float sd, float fr, float w, vec2 pl, int n){
+  vec2 nx = vec2(-ax.y, ax.x);
+  float du = dot(d.xz, ax), dv = dot(d.xz, nx);
+  dv = abs(dv) < 1e-4 ? 1e-4 : dv;
+  float m = 1.42 + 2.4 * w;
+  float sa = (v0 - m) / dv, sb = (v0 + m) / dv;
+  float s0 = max(max(min(sa, sb), .82 / d.y), 0.), s1 = min(min(max(sa, sb), 4.4 / d.y), 34.);
+  if (s1 <= s0) return vec3(0.);
+  float ds = (s1 - s0) / float(n), tm = uTime;
+  float jit = hash21(gl_FragCoord.xy + 61.7 * fract(uTime * .731) + sd);   // jittered march: banding becomes fine grain
+  vec3 acc = vec3(0.);
+  for (int i = 0; i < n; i++) {
+    float s = s0 + (float(i) + jit) * ds;
+    float u = du * s, v = dv * s, h = d.y * s;
+    float a1 = u * .55 + sd + tm * .15, a2 = u * 1.27 - tm * .22 + sd * 2.3, a3 = u * 2.9 + tm * .29 + sd * 5.1;
+    float f = .85 * sin(a1) + .40 * sin(a2) + .13 * sin(a3);
+    float fd = .4675 * cos(a1) + .508 * cos(a2) + .377 * cos(a3);
+    float dist = (v - v0 - f) / sqrt(1. + fd * fd);
+    float dens = exp(-dist * dist / (w * w)) * smoothstep(m, m * .62, abs(v - v0)) * smoothstep(4.4, 2.7, h);
+    if (dens < .003) continue;
+    float mk = smoothstep(fr, fr - 3.2, u);
+    if (mk <= 0.) continue;
+    float ru = u + f * .8;
+    float r1 = vnoise(vec2(ru * 2.3 + sd * 3., tm * .10 + sd));            // broad bundles
+    float r2 = vnoise(vec2(ru * 8.5 - tm * .30, sd * 9. + tm * .05));      // rays
+    float r3 = vnoise(vec2(ru * 27. + tm * .8, tm * 1.6 + sd));            // fine shimmer
+    float ray = (.16 + 1.5 * r1 * r1) * (.42 + .78 * r2) * (.80 + (.40 + .5 * uShim) * r3);
+    ray = mix(ray, .62, uVeil * .8);
+    float hb = 1. + .09 * sin(u * .83 + sd * 1.9) + .05 * sin(u * 2.1 - tm * .2);
+    float hh = h - hb, L = mix(.34, 1.20, r1) * (.75 + .6 * r2) * (1. + .5 * uVeil);
+    float on = smoothstep(0., .07, hh), hp = max(hh, 0.);
+    vec3 col = mix(MINT, TEAL, smoothstep(0., 1.25, hp)) * exp(-hp / L);
+    col += MINT * .55 * exp(-hp / .13) * (1. - .7 * uVeil);                // the crisp lower border
+    col += VIOL * .34 * smoothstep(.3, 1.3, hp) * exp(-hp / (L * 2.3 + .35));   // thin violet fringe above
+    float head = exp(-pow((u - fr + 1.9) / 1.1, 2.));
+    acc += col * on * dens * ray * mk * (1. + 1.25 * pulse(u, pl.x, pl.y) + .9 * head) * exp(-s * .035) * smoothstep(34., 22., s) * ds;
+  }
+  return acc * (.62 / w);
+}
+
+const vec2 AX1 = vec2(.9766, .2149), AX2 = vec2(.589, -.808);
+
+vec3 sky(vec2 p, int n, float wk, bool st){
+  float y = p.y - HZ, g = clamp(y / .8, 0., 1.);
+  vec3 c = mix(vec3(.020, .040, .082), vec3(.005, .009, .028), pow(g, .55));
+  vec3 d = normalize(vec3(p.x, max(y, .003), FOC));
+  float wv = wk * (1. + 1.5 * uVeil);
+  vec3 a = vec3(0.);
+  if (uI1 > .001) a += uI1 * curtain(d, AX1, 5.2, 1.3, uF1, .17 * wv, vec2(-8., 6.), n);
+  if (uI2 > .001) a += uI2 * curtain(d, AX2, 2.6, 4.1, uF2, .15 * wv, vec2(-18., 7.5), n);
+  a *= uBreath;
+  float gx = p.x + .14;
+  float gl = exp(-pow((y - .03) / .08, 2.)) * exp(-gx * gx * 1.3) * (.78 + .22 * vnoise(vec2(p.x * 24., uTime * .25)));
+  c += mix(TEAL, MINT, .55) * gl * uGlow * .40;
+  c += TEAL * .045 * (uI1 + uI2) * exp(-y * 4.);
+  if (st) {
+    float dim = 1. - clamp(dot(a, vec3(.3, .5, .2)) * 2.2, 0., .92);
+    vec2 sg = p * 64., id = floor(sg), sf = fract(sg) - .5;
+    vec2 so = (hash22(id) - .5) * .7; float sb = hash21(id + 7.3);
+    float star = smoothstep(.11, 0., length(sf - so)) * smoothstep(.72, 1., sb) * (.6 + .4 * sin(uTime * (1.2 + sb * 2.6) + sb * 40.));
+    sg = p * 19. + 3.; id = floor(sg); sf = fract(sg) - .5; so = (hash22(id) - .5) * .7; sb = hash21(id + 1.9);
+    float big = (smoothstep(.07, 0., length(sf - so)) + .25 * exp(-length(sf - so) * 22.)) * smoothstep(.80, 1., sb) * (.7 + .3 * sin(uTime * (.9 + sb * 2.) + sb * 31.));
+    c += vec3(.78, .86, 1.) * (star * .75 + big * 1.1) * dim * smoothstep(.0, .12, y);
+  }
+  return c + a;
+}
+
+float ground(float x, float k){
+  if (k < .5) return .008 + .017 * vnoise(vec2(x * 2.3 + 9., 1.)) + .010 * smoothstep(-.2, .7, x);   // far shore
+  float l = smoothstep(.12, -.95, x), r = smoothstep(.42, .98, x);                                    // two headlands
+  return -.014 + .082 * pow(l, 1.4) + .050 * r + .012 * (vnoise(vec2(x * 4.1 + 2., 4.)) - .3) * (l + r);
+}
+float pines(vec2 q, float cw, float hmax, float sd, float k){
+  float cov = 0., id0 = floor(q.x / cw);
+  for (int j = -1; j <= 1; j++) {
+    float id = id0 + float(j);
+    float h1 = hash21(vec2(id, sd)), h2 = hash21(vec2(id, sd + 3.7));
+    float xc = (id + .5 + (h1 - .5) * .8) * cw, base = ground(xc, k) - .003;
+    if (base < -.002) continue;
+    float ht = hmax * (.42 + .58 * h2) * (k < .5 ? 1. : smoothstep(-.004, .030, base) * .75 + .25);
+    float yy = (q.y - base) / ht;
+    if (yy > 1.) continue;
+    yy = max(yy, 0.);
+    float saw = 1. - fract(yy * floor(5. + 5. * h1));
+    float wd = max(ht * .20 * (1. - yy) * (.50 + .50 * saw), ht * .012 * (1. - yy));
+    cov = max(cov, smoothstep(.0011, -.0011, abs(q.x - xc) - wd));
+  }
+  return cov;
+}
+// far shore, pine ridge and the snow bank at the waterline, painted over colour c
+vec3 land(vec2 p, vec3 c, vec3 amb){
+  float y = p.y - HZ, aa = .0011;
+  float xf = p.x + uPan * .35;
+  float far = max(smoothstep(aa, -aa, y - ground(xf, 0.)), pines(vec2(xf, y), .0125, .030, 7., 0.));
+  c = mix(c, vec3(.011, .021, .045) + amb * .030, far);
+  float xn = p.x + uPan;
+  float near = max(smoothstep(aa, -aa, y - ground(xn, 1.)), max(pines(vec2(xn, y), .052, .125, 1., 1.), pines(vec2(xn, y), .027, .072, 2., 1.)));
+  c = mix(c, vec3(.004, .007, .016) + amb * .005, near);
+  float sn = smoothstep(aa, -aa, y - (.0032 + .0030 * vnoise(vec2(xn * 16., 3.))));
+  c = mix(c, vec3(.030, .050, .088) + amb * .15, sn);
+  return c;
+}
+
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  p = (p - vec2(0., HZ)) * uZoom + vec2(0., HZ);
+  vec3 amb = mix(TEAL, MINT, .62) * (uI1 * .55 + uI2 * .9) * uBreath;
+  vec3 c;
+  if (p.y >= HZ) c = land(p, sky(p, 30, 1., true), amb);
+  else {
+    float dp = HZ - p.y;                                           // distance below the far shore
+    float u = (p.x + uPan * (1. + dp * 2.)) / (dp + .05), v = 1. / (dp + .03);
+    float n1 = fbm(vec2(u * 1.1, v * .30)) - .48;                  // wind-polished ice: slow lateral wobble
+    float jit = hash21(gl_FragCoord.xy + 3.7);
+    vec3 r = vec3(0.);
+    for (int k = 0; k < 3; k++) {
+      float o = (float(k) + jit) / 3. - .5;
+      vec2 rp = vec2(p.x + n1 * .035 * (dp * 5. + .08), HZ + dp * (1. + .55 * o) + .002 + abs(n1) * .012);
+      r += land(rp, sky(rp, 10, 2.3, false), amb);
+    }
+    r /= 3.;
+    float fres = mix(.34, .78, exp(-dp * 7.));
+    c = vec3(.006, .011, .026) + r * fres * (1. + .55 * uLake);
+    // drifts of snow lying on the ice catch the light diffusely
+    float dr = smoothstep(.50, .74, fbm(vec2(u * .55 + 4., v * .21 + 2.)));
+    c = mix(c, vec3(.020, .034, .062) + amb * (.10 + .10 * uLake), dr * (.35 + .4 * smoothstep(.0, .2, dp)));
+  }
+  vec2 q = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  c *= 1. - .55 * dot(q, q);
+  c = 1. - exp(-c * 1.55);
+  c = pow(c, vec3(1.05, 1.0, .98)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(c, 1.);
+}`;
+
+let sky, chords = [];
+
+Stage.create({
+  no: 2, title: 'Aurora Field', subtitle: 'fragment shader · 72 bpm',
+  duration: 20, background: '#02040b', grain: 0.055, vignette: 0.18, poster: 14.6,
+  fade: { in: 1.5, out: 1.9, inColor: '#01020a', outColor: '#02040b' },
+  slate: { at: 0.9, hold: 3.2, pos: 'bl', color: 'rgba(226,240,244,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 23 });
+    M.master({ reverb: { decay: 5.2, size: 1.3, damp: 0.45 }, fadeOut: 2.4, fadeIn: 0.5 });
+    const swell = (t) => 0.55 + 0.45 * Math.min(1, t / PEAK) - 0.3 * Math.max(0, Math.min(1, (t - 16.6) / 3));
+    const pad = M.track('pad', { inst: 'glasspad', reverb: 0.6, gain: (t) => 0.9 * swell(t), params: { A: 1.5, R: 3.2, cutoff: 3600 },
+      lowpass: (t) => 1100 + 3600 * Math.min(1, t / PEAK) - 2200 * Math.max(0, Math.min(1, (t - 16.6) / 3)) });
+    const sub = M.track('sub', { reverb: 0.06, gain: 0.8, params: { A: 1.4, R: 1.8 } });
+    const low = M.track('low', { inst: 'warmpad', reverb: 0.3, gain: 0.5 });
+    const glass = M.track('glass', { reverb: 0.7, gain: 0.85, delay: { time: 1.5, fb: 0.38, mix: 0.3, ping: true } });
+    const cel = M.track('celesta', { reverb: 0.65, gain: 0.6, delay: { time: 0.75, fb: 0.4, mix: 0.28, ping: true } });
+    const air = M.track('air', { reverb: 0.2, gain: 0.7 });
+    const wh = M.track('whoosh', { reverb: 0.5, gain: 0.5 }), boom = M.track('impact', { reverb: 0.6, gain: 0.34 });
+    air.hit(0, 0.8, M.beats);
+    // harmony: A lydian over an A drone — the D# is the colour of the light
+    const ch = [
+      [0, ['A3', 'E4', 'B4'], 4, 0.42],
+      [4, ['A3', 'D#4', 'F#4', 'B4'], 4, 0.5],
+      [8, ['A3', 'E4', 'G#4', 'C#5'], 2, 0.55], [10, ['G#3', 'C#4', 'E4', 'B4'], 2, 0.55],
+      [12, ['A3', 'B3', 'D#4', 'F#4', 'B4'], 2, 0.62], [14, ['A3', 'E4', 'G#4', 'B4', 'D#5'], 2, 0.7],
+      [16, ['A3', 'E4', 'G#4', 'C#5', 'D#5', 'B5'], 2, 0.9], [18, ['A3', 'C#4', 'E4', 'G#4', 'B4', 'F#5'], 2, 0.8],
+      [20, ['A3', 'E4', 'B4', 'C#5'], 4, 0.5]
+    ];
+    ch.forEach(([b, notes, d, v]) => pad.chord(b, notes, d + 0.5, v));
+    sub.note(0, 'A1', 8, 0.4); sub.note(8, 'A1', 8, 0.55); sub.note(16, 'A1', 7.5, 0.8);
+    low.note(4, 'A2', 12, 0.3); low.note(16, 'A2', 4, 0.5); low.note(16, 'E3', 4, 0.4); low.note(20, 'A2', 4, 0.3);
+    // the glass figure: slow, high, each phrase a little higher than the last
+    glass.note(4, 'E6', 1.5, 0.5); glass.note(5.5, 'D#6', 1.5, 0.42); glass.note(7, 'B5', 1, 0.4);
+    glass.note(8, 'C#6', 1.5, 0.5); glass.note(9.5, 'G#5', 0.5, 0.36); glass.note(10, 'B5', 1, 0.44); glass.note(11, 'E6', 1, 0.5);
+    glass.note(12, 'F#6', 1, 0.55); glass.note(13, 'D#6', 0.5, 0.45); glass.note(13.5, 'E6', 0.5, 0.48); glass.note(14, 'G#6', 1, 0.58); glass.note(15, 'B6', 1, 0.6);
+    glass.note(16, 'C#7', 2, 0.7); glass.note(18, 'G#6', 1, 0.55); glass.note(19, 'D#6', 1, 0.5);
+    glass.note(20, 'E6', 1.5, 0.45); glass.note(21.5, 'B5', 1, 0.36); glass.note(22.5, 'A5', 1.5, 0.34);
+    // celesta: shimmer that gathers into the peak and scatters after it
+    cel.seq(14, 0.5, ['E5', 'B5', 'D#6', 'G#6'], { vel: 0.3, gate: 1.4 });
+    cel.seq(16, 0.5, ['E6', 'G#6', 'B6', 'D#7', 'C#7', 'B6', 'G#6', 'E6', 'F#6', 'B6', 'C#7', 'E7', 'D#7', 'B6', 'G#6', 'F#6'], { vels: [0.5, 0.4, 0.44, 0.5, 0.46, 0.4, 0.38, 0.36, 0.42, 0.4, 0.44, 0.46, 0.4, 0.36, 0.32, 0.3], gate: 1.4 });
+    cel.seq(20, 1, ['B6', 'G#6', 'E6'], { vel: 0.26, gate: 1.5 });
+    wh.hit(10.2, 0.7, 3.4);                    // the second curtain arrives
+    boom.hit(16, 0.7, 4);                      // the lake lights up
+    return M;
+  },
+
+  setup() {
+    sky = Stage.shader({ frag: FRAG, z: 1 });
+    const seen = new Map();
+    for (const e of Stage.events('pad')) { const k = e.t.toFixed(3); seen.set(k, Math.max(seen.get(k) || 0, e.vel)); }
+    chords = [...seen.entries()].map(([k, v]) => ({ t: +k, v })).sort((a, b) => a.t - b.t);
+  },
+
+  frame(t) {
+    const veil = prog(t, 16.3, 3.4, E.inOutSine);
+    const peak = win(t, PEAK - 1.2, 16.4, 1.3, 2.6, E.inOutSine);
+    // the last four chord changes → travelling pulses
+    const age = [99, 99, 99, 99], vel = [0, 0, 0, 0]; let k = 0;
+    for (let i = chords.length - 1; i >= 0 && k < 4; i--) if (chords[i].t <= t) { age[k] = t - chords[i].t; vel[k] = chords[i].v * 1.5; k++; }
+    sky.draw(t, {
+      uF1: lerp(-7.5, 10.5, prog(t, BAR, 6.3, E.inOutSine)),
+      uF2: lerp(-20, 6, prog(t, 9.6, 4.4, E.inOutSine)),
+      uI1: (0.78 * prog(t, BAR - 0.2, 2.6, E.outSine) + 0.26 * peak) * (1 - 0.62 * veil),
+      uI2: (0.85 * prog(t, 9.6, 3.2, E.inOutSine) + 0.3 * peak) * (1 - 0.72 * veil),
+      uGlow: prog(t, 0.2, 3.2, E.inOutSine) * (1 - 0.45 * prog(t, 6, 6)) * (1 + 0.35 * Stage.hit('pad', t, 1.6)),
+      uVeil: veil,
+      uShim: Stage.hit('glass', t, 0.7) + 0.6 * Stage.hit('celesta', t, 0.35),
+      uLake: peak + 0.5 * Stage.hit('impact', t, 2.2),
+      uBreath: 1 + 0.07 * Math.sin(t * 0.95) + 0.1 * Stage.hit('impact', t, 1.8),
+      uPan: lerp(-0.03, 0.03, t / 20), uZoom: lerp(1.0, 0.972, E.inOutSine(t / 20)),
+      uPA: age, uPV: vel
+    });
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 078 — Movement</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 078 — MOVEMENT
+ * A mechanical watch movement assembles itself and starts to tick. The going train is real arithmetic:
+ * barrel 84 → centre pinion 12 · centre wheel 64 → third pinion 8 · third wheel 60 → fourth pinion 8 ·
+ * fourth wheel 48 → escape pinion 12 · escape wheel 15 teeth. All teeth share one pitch, every pair sits at
+ * the sum of its pitch radii, and each gear's angle is derived from its neighbour's so teeth always fall in
+ * gaps. The balance swings at 1 Hz; each pass is a tick (2 Hz — the film's drum kit), the escape wheel
+ * advances 12°, so the fourth wheel turns 6°/s (a true seconds hand) and the centre wheel once an hour.
+ * Parts seat on the beat through bars 1–6; the first tick is the downbeat of bar 7. Ten bars at 120 bpm. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, CX = 960, CY = 540, PR = 404, MOD = 0.7, T_RUN = 12, T_DIAL = 16;
+const R_ = (n) => n / MOD;                                   // pitch radius for n teeth (px)
+const pol = (p, d, a) => [p[0] + d * Math.cos(a), p[1] + d * Math.sin(a)];
+// arbors: positions follow from the meshing distances
+const P_C = [0, 0], A_CB = 3.75, P_B = pol(P_C, R_(12) + R_(84), A_CB), A_C3 = -0.72, P_3 = pol(P_C, R_(64) + R_(8), A_C3), A_34 = 1.02, P_4 = pol(P_3, R_(60) + R_(8), A_34), A_4E = 1.78, P_E = pol(P_4, R_(48) + R_(12), A_4E);
+const P_BAL = [P_E[0] - 86, P_E[1] + 128], P_PAL = [lerp(P_E[0], P_BAL[0], 0.44), lerp(P_E[1], P_BAL[1], 0.44) + 6];
+const mesh = (thA, nA, nB, phi) => phi + Math.PI - (TAU / nB) * (0.5 - (phi - thA) * nA / TAU);
+const BRASS = ['#f0d08a', '#c79a45', '#7d5c22'], STEEL = ['#eef1f5', '#aab1bc', '#5f6672'];
+// parts: seat time (s), exploded offset
+const PARTS = { plate: [1.0, [0, 0]], barrel: [2.0, [-640, -210]], ratchet: [2.5, [-560, 300]], centre: [3.0, [620, -300]], third: [4.0, [700, 40]], fourth: [5.0, [560, 330]], escape: [6.0, [-700, 60]], pallet: [7.0, [-420, 380]], balance: [8.0, [300, 420]], cock: [9.0, [690, -120]] };
+let bg, ctx, plateBuf, dialBuf;
+
+function gear(c, x, y, n, ang, o = {}) {
+  const R = R_(n), h = o.h || 6.2, r0 = R - h * 0.62, r1 = R + h * 0.5, col = o.col || BRASS, tw = TAU / n;
+  c.save(); c.translate(x, y);
+  const g = c.createLinearGradient(-R, -R, R, R); g.addColorStop(0, col[0]); g.addColorStop(0.5, col[1]); g.addColorStop(1, col[2]);
+  c.beginPath(); for (let i = 0; i < n; i++) { const a = ang + i * tw; c.lineTo(r0 * Math.cos(a - tw * 0.27), r0 * Math.sin(a - tw * 0.27)); c.lineTo(r1 * Math.cos(a - tw * 0.13), r1 * Math.sin(a - tw * 0.13)); c.lineTo(r1 * Math.cos(a + tw * 0.13), r1 * Math.sin(a + tw * 0.13)); c.lineTo(r0 * Math.cos(a + tw * 0.27), r0 * Math.sin(a + tw * 0.27)); } c.closePath();
+  const ri = o.solid ? 0 : R - (o.rim || 13); if (ri > 0) { c.moveTo(ri, 0); c.arc(0, 0, ri, 0, TAU, true); }
+  c.shadowColor = 'rgba(0,0,0,.45)'; c.shadowBlur = 10; c.shadowOffsetY = 5; c.fillStyle = g; c.fill('evenodd'); c.shadowColor = 'transparent';
+  c.strokeStyle = 'rgba(40,24,6,.35)'; c.lineWidth = 0.8; c.stroke();
+  if (ri > 0) { const ns = o.spokes || 5; c.strokeStyle = g; c.lineCap = 'butt'; c.lineWidth = o.sw || 9; for (let i = 0; i < ns; i++) { const a = ang + i * TAU / ns; c.beginPath(); c.moveTo(Math.cos(a) * 6, Math.sin(a) * 6); c.lineTo(Math.cos(a) * (ri + 2), Math.sin(a) * (ri + 2)); c.stroke(); } c.fillStyle = g; c.beginPath(); c.arc(0, 0, o.hub || 15, 0, TAU); c.fill(); }
+  if (o.solid) { c.strokeStyle = 'rgba(60,40,10,.3)'; c.lineWidth = 1; for (const k of [0.82, 0.6, 0.38]) { c.beginPath(); c.arc(0, 0, R * k, 0, TAU); c.stroke(); } }
+  c.restore();
+}
+function pinion(c, x, y, n, ang) { gear(c, x, y, n, ang, { col: STEEL, solid: true, h: 5.4 }); }
+function jewel(c, x, y, r, a = 1) { c.save(); c.globalAlpha *= a; c.fillStyle = '#d9b566'; c.beginPath(); c.arc(x, y, r + 4, 0, TAU); c.fill(); const g = c.createRadialGradient(x - r * 0.3, y - r * 0.35, 1, x, y, r); g.addColorStop(0, '#ff8aa0'); g.addColorStop(0.5, '#d2193c'); g.addColorStop(1, '#7a0a22'); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); c.fillStyle = 'rgba(255,255,255,.7)'; c.beginPath(); c.arc(x - r * 0.32, y - r * 0.36, r * 0.2, 0, TAU); c.fill(); c.fillStyle = '#2a0a12'; c.beginPath(); c.arc(x, y, r * 0.22, 0, TAU); c.fill(); c.restore(); }
+function screw(c, x, y, r, rot, a = 1) { c.save(); c.globalAlpha *= a; const g = c.createRadialGradient(x - r * 0.3, y - r * 0.3, 1, x, y, r); g.addColorStop(0, '#7ea0f0'); g.addColorStop(0.55, '#2c4fb0'); g.addColorStop(1, '#152a6a'); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); c.strokeStyle = '#0a1230'; c.lineWidth = r * 0.28; c.beginPath(); c.moveTo(x - r * 0.8 * Math.cos(rot), y - r * 0.8 * Math.sin(rot)); c.lineTo(x + r * 0.8 * Math.cos(rot), y + r * 0.8 * Math.sin(rot)); c.stroke(); c.restore(); }
+
+Stage.create({
+  no: 78, title: 'Movement', subtitle: 'a going train, assembled · 120 bpm',
+  duration: 20, background: '#0a1024', grain: 0.04, poster: 14.2,
+  fonts: ['600 22px "Cormorant Garamond Variable"', '500 13px "JetBrains Mono Variable"'],
+  fade: { in: 0.7, out: 1.2 },
+  slate: { at: 0.5, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 78 });
+    M.master({ reverb: { decay: 2.2, size: 0.95, damp: 0.45 }, fadeOut: 1.4 });
+    const tk = M.track('tick', { reverb: 0.18, gain: 0.7, humanize: 0, params: { tone: 3600 } }), rim = M.track('rim', { reverb: 0.2, gain: 0.34, humanize: 0 }), mb = M.track('musicbox', { reverb: 0.5, gain: 0.7 }), bass = M.track('pluck', { reverb: 0.2, gain: 0.8, params: { decay: 0.9, bright: 0.3 } }), ch = M.track('chime', { reverb: 0.6, gain: 0.34, humanize: 0 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.34 }), wd = M.track('woodblock', { reverb: 0.2, gain: 0.3, humanize: 0 });
+    const sc = S.scale('A4', 'minor', 2);
+    // each part seats with a chime (and a small knock)
+    Object.values(PARTS).forEach(([t], i) => { ch.note(M.b(t), sc[[0, 2, 4, 7, 4, 2, 9, 7, 11, 14][i]], 2, 0.5); wd.hit(M.b(t), 0.6, 0.08, { pitch: 48 + i }); });
+    for (let k = 0; k < 7; k++) ch.note(M.b(9.5 + k * 0.25), sc[k + 3], 0.8, 0.26);
+    const bars = [['A1', ['A3', 'C4', 'E4']], ['F1', ['A3', 'C4', 'F4']], ['C2', ['G3', 'C4', 'E4']], ['G1', ['G3', 'B3', 'D4']], ['A1', ['A3', 'C4', 'E4']], ['F1', ['A3', 'C4', 'F4']], ['D2', ['A3', 'D4', 'F4']], ['E2', ['G#3', 'B3', 'E4']], ['A1', ['A3', 'C4', 'E4']], ['A1', ['A3', 'E4', 'A4']]];
+    bars.forEach(([r, c], i) => { const b = i * 4; pad.chord(b, c, 4, 0.4); if (i >= 1) { bass.note(b, r, 1.6, 0.7); bass.note(b + 2, S.midi(r) + 12, 1, 0.5); if (i >= 6) bass.note(b + 3, S.midi(r) + 7, 0.8, 0.45); } });
+    // once it runs: tick on the beat, tock between — and the music box finally plays whole phrases
+    for (let k = 0; k < 16; k++) { tk.hit(24 + k, k % 2 ? 0.55 : 0.8, 0.04, { tone: k % 2 ? 2900 : 3700 }); rim.hit(24 + k + 0.5, 0.3); }
+    [[24, 'E5', 1], [25, 'A5', 0.5], [25.5, 'B5', 0.5], [26, 'C6', 1], [27, 'B5', 0.5], [27.5, 'A5', 0.5], [28, 'G#5', 1], [29, 'B5', 1], [30, 'E5', 2], [32, 'A5', 0.5], [32.5, 'C6', 0.5], [33, 'E6', 1], [34, 'D6', 0.5], [34.5, 'C6', 0.5], [35, 'B5', 1], [36, 'A5', 1], [37, 'E5', 1], [38, 'A5', 2]].forEach(([b, n, d]) => mb.note(b, n, d + 0.4, 0.5));
+    [[8, 'E5'], [12, 'C5'], [16, 'A5'], [20, 'E5'], [21, 'G#5']].forEach(([b, n]) => mb.note(b, n, 2, 0.34));
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const g = bg.createRadialGradient(CX, CY, 150, CX, CY, 1200); g.addColorStop(0, '#16204a'); g.addColorStop(0.6, '#0c1430'); g.addColorStop(1, '#050817'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+    // main plate: brushed steel with perlage, recesses under each wheel
+    const S2 = PR * 2 + 40, p = plateBuf = Stage.buffer(S2 * 2, S2 * 2); p.scale(2, 2); p.translate(S2 / 2, S2 / 2);
+    const pg = p.createLinearGradient(-PR, -PR, PR, PR); pg.addColorStop(0, '#dfe3ea'); pg.addColorStop(0.5, '#9aa2ae'); pg.addColorStop(1, '#646b78'); p.fillStyle = pg; p.beginPath(); p.arc(0, 0, PR, 0, TAU); p.fill();
+    p.save(); p.beginPath(); p.arc(0, 0, PR - 14, 0, TAU); p.clip(); const r = Stage.rng(78);
+    for (let j = -14; j <= 14; j++) for (let i = -14; i <= 14; i++) { const x = i * 30 + (j % 2 ? 15 : 0), y = j * 26, cg = p.createRadialGradient(x - 5, y - 5, 1, x, y, 19); cg.addColorStop(0, 'rgba(255,255,255,.22)'); cg.addColorStop(0.7, 'rgba(255,255,255,0)'); cg.addColorStop(1, 'rgba(0,0,0,.12)'); p.fillStyle = cg; p.beginPath(); p.arc(x, y, 19, 0, TAU); p.fill(); }
+    for (const [pt, rr] of [[P_B, R_(84) + 12], [P_C, R_(64) + 10], [P_3, R_(60) + 10], [P_4, R_(48) + 10], [P_E, 54], [P_BAL, 118]]) { const sg = p.createRadialGradient(pt[0], pt[1], rr * 0.6, pt[0], pt[1], rr); sg.addColorStop(0, 'rgba(18,22,34,.55)'); sg.addColorStop(1, 'rgba(18,22,34,.35)'); p.fillStyle = sg; p.beginPath(); p.arc(pt[0], pt[1], rr, 0, TAU); p.fill(); p.strokeStyle = 'rgba(255,255,255,.25)'; p.lineWidth = 1; p.stroke(); }
+    p.restore(); p.strokeStyle = 'rgba(255,255,255,.5)'; p.lineWidth = 2; p.beginPath(); p.arc(0, 0, PR - 1, 0, TAU); p.stroke(); p.strokeStyle = 'rgba(20,24,36,.5)'; p.lineWidth = 1.5; p.beginPath(); p.arc(0, 0, PR - 14, 0, TAU); p.stroke();
+    // dial: sunburst silver, applied indices, an open heart over the balance
+    const d = dialBuf = Stage.buffer(1000 * 2, 1000 * 2); d.scale(2, 2); d.translate(500, 500);
+    const bz = d.createLinearGradient(-470, -470, 470, 470); bz.addColorStop(0, '#f4f6f9'); bz.addColorStop(0.5, '#8f97a4'); bz.addColorStop(1, '#4c525e'); d.fillStyle = bz; d.beginPath(); d.arc(0, 0, 468, 0, TAU); d.fill();
+    const dg = d.createRadialGradient(-80, -120, 30, 0, 0, 420); dg.addColorStop(0, '#f7f5ef'); dg.addColorStop(1, '#c9c9c4'); d.fillStyle = dg; d.beginPath(); d.arc(0, 0, 412, 0, TAU); d.fill();
+    d.save(); d.beginPath(); d.arc(0, 0, 412, 0, TAU); d.clip(); for (let i = 0; i < 360; i++) { d.strokeStyle = `rgba(${r() < 0.5 ? '255,255,255' : '60,60,70'},${0.03 + 0.07 * r()})`; d.lineWidth = 2 + 4 * r(); const a = i / 360 * TAU + r() * 0.01; d.beginPath(); d.moveTo(0, 0); d.lineTo(Math.cos(a) * 420, Math.sin(a) * 420); d.stroke(); } d.restore();
+    for (let i = 0; i < 60; i++) { const a = i / 60 * TAU; d.strokeStyle = 'rgba(30,34,48,.8)'; d.lineWidth = i % 5 ? 1.4 : 3; d.beginPath(); d.moveTo(Math.cos(a) * (i % 5 ? 388 : 380), Math.sin(a) * (i % 5 ? 388 : 380)); d.lineTo(Math.cos(a) * 400, Math.sin(a) * 400); d.stroke(); }
+    for (let i = 0; i < 12; i++) { if (i === 6) continue; d.save(); d.rotate(i / 12 * TAU); const ig = d.createLinearGradient(-8, 0, 8, 0); ig.addColorStop(0, '#f3d994'); ig.addColorStop(0.5, '#b88a36'); ig.addColorStop(1, '#f0d48a'); d.fillStyle = ig; d.shadowColor = 'rgba(0,0,0,.35)'; d.shadowBlur = 6; d.shadowOffsetY = 3; if (i === 0) { d.fillRect(-17, -372, 12, 70); d.fillRect(5, -372, 12, 70); } else d.fillRect(-7, -372, 14, i % 3 ? 54 : 70); d.restore(); }
+    d.fillStyle = 'rgba(30,34,48,.85)'; d.textAlign = 'center'; d.font = '600 22px "Cormorant Garamond Variable"'; d.fillText('M O V E M E N T', 0, -150); d.font = '500 13px "JetBrains Mono Variable"'; d.fillText('N º 0 7 8   ·   2 1   J E W E L S', 0, -122);
+    d.globalCompositeOperation = 'destination-out'; d.beginPath(); d.arc(P_BAL[0], P_BAL[1], 104, 0, TAU); d.fill(); d.globalCompositeOperation = 'source-over'; d.strokeStyle = '#c39a48'; d.lineWidth = 7; d.beginPath(); d.arc(P_BAL[0], P_BAL[1], 106, 0, TAU); d.stroke(); d.strokeStyle = 'rgba(0,0,0,.3)'; d.lineWidth = 1.5; d.beginPath(); d.arc(P_BAL[0], P_BAL[1], 102, 0, TAU); d.stroke();
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const push = 1 + 0.035 * E.inOutSine(clamp01(t / 20)); c.save(); c.translate(CX, CY); c.scale(push, push);
+    // how seated is each part, and its transform
+    const place = (name, draw) => { const [T, off] = PARTS[name], a = E.inOutCubic(prog(t, T - 0.95, 0.95)), born = prog(t, 0.15 + T * 0.06, 0.5, E.outCubic); if (born <= 0) return; const dt = t - T, bounce = dt > 0 ? 1 + 0.045 * Math.exp(-dt * 9) * Math.sin(dt * 34) : 1, sc = lerp(0.72, 1, a) * bounce, hov = (1 - a);
+      c.save(); c.translate(off[0] * hov + 8 * hov * Math.sin(t * 0.9 + off[0]), off[1] * hov + 8 * hov * Math.cos(t * 0.7 + off[1])); c.scale(sc, sc); c.rotate(0.5 * hov * Math.sin(off[0] * 0.01 + t * 0.2)); c.globalAlpha = born * lerp(0.9, 1, a); draw(a); c.restore(); };
+    // the escapement's clock
+    const run = t >= T_RUN, n = run ? Math.floor((t - T_RUN) / 0.5) : 0, ph = run ? (t - T_RUN) / 0.5 - n : 0, step = n + E.outBack(clamp01(ph / 0.14)), thE = -step * TAU / 30 + (run ? 0 : 0);
+    const th4 = mesh(thE, 12, 48, A_4E + Math.PI), th3 = mesh(th4, 8, 60, A_34 + Math.PI), thC = mesh(th3, 8, 64, A_C3 + Math.PI), thB = mesh(thC, 12, 84, A_CB);
+    const swing = run ? 2.2 * Math.sin((t - T_RUN) * TAU - Math.PI / 2 + Math.PI / 2 * 0) * 1 : 0.5 * Math.exp(-Math.max(0, t - 8) * 0.9) * Math.sin((t - 8) * 9) * (t > 8 ? 1 : 0), balA = run ? 2.2 * Math.sin((t - T_RUN) * TAU) : swing;
+
+    place('plate', () => { c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 50; c.shadowOffsetY = 24; c.drawImage(plateBuf.canvas, -PR - 20, -PR - 20, PR * 2 + 40, PR * 2 + 40); c.shadowColor = 'transparent'; });
+    place('barrel', () => { gear(c, P_B[0], P_B[1], 84, thB, { solid: true }); });
+    place('centre', () => { gear(c, 0, 0, 64, thC, { spokes: 4 }); pinion(c, 0, 0, 12, thC); });
+    place('third', () => { gear(c, P_3[0], P_3[1], 60, th3, { spokes: 5 }); pinion(c, P_3[0], P_3[1], 8, th3); });
+    place('fourth', () => { gear(c, P_4[0], P_4[1], 48, th4, { spokes: 5, sw: 7 }); pinion(c, P_4[0], P_4[1], 8, th4); });
+    place('escape', () => {   // club-tooth escape wheel, steel
+      c.save(); c.translate(P_E[0], P_E[1]); c.rotate(thE); const g = c.createLinearGradient(-44, -44, 44, 44); g.addColorStop(0, STEEL[0]); g.addColorStop(0.5, STEEL[1]); g.addColorStop(1, STEEL[2]); c.fillStyle = g; c.shadowColor = 'rgba(0,0,0,.4)'; c.shadowBlur = 8; c.shadowOffsetY = 4;
+      c.beginPath(); for (let i = 0; i < 15; i++) { const a = i * TAU / 15; c.lineTo(30 * Math.cos(a), 30 * Math.sin(a)); c.lineTo(46 * Math.cos(a + 0.2), 46 * Math.sin(a + 0.2)); c.lineTo(45 * Math.cos(a + 0.3), 45 * Math.sin(a + 0.3)); c.lineTo(30 * Math.cos(a + 0.26), 30 * Math.sin(a + 0.26)); } c.closePath(); c.moveTo(22, 0); c.arc(0, 0, 22, 0, TAU, true); c.fill('evenodd'); c.shadowColor = 'transparent';
+      c.strokeStyle = g; c.lineWidth = 5; for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(0, 0); c.lineTo(24 * Math.cos(i * TAU / 4), 24 * Math.sin(i * TAU / 4)); c.stroke(); } c.restore(); pinion(c, P_E[0], P_E[1], 12, thE); });
+    place('pallet', () => { const rock = run ? (n % 2 ? 1 : -1) * 0.13 * (ph < 0.12 ? lerp(-1, 1, E.outCubic(ph / 0.12)) : 1) : -0.13, base = Math.atan2(P_BAL[1] - P_E[1], P_BAL[0] - P_E[0]); c.save(); c.translate(P_PAL[0], P_PAL[1]); c.rotate(base + rock); c.strokeStyle = '#c9ced6'; c.lineCap = 'round'; c.lineWidth = 7; c.shadowColor = 'rgba(0,0,0,.4)'; c.shadowBlur = 6; c.shadowOffsetY = 3; c.beginPath(); c.moveTo(-10, 0); c.lineTo(58, 0); c.moveTo(-14, -30); c.lineTo(-14, 30); c.stroke(); c.shadowColor = 'transparent';
+      c.fillStyle = '#d2193c'; c.fillRect(-26, -34, 14, 9); c.fillRect(-26, 25, 14, 9); c.strokeStyle = '#c9ced6'; c.lineWidth = 4; c.beginPath(); c.moveTo(58, -9); c.lineTo(68, -9); c.moveTo(58, 9); c.lineTo(68, 9); c.stroke(); c.restore(); });
+    place('balance', () => { c.save(); c.translate(P_BAL[0], P_BAL[1]);
+      // hairspring breathes with the swing
+      c.strokeStyle = 'rgba(70,110,220,.9)'; c.lineWidth = 1.3; c.beginPath(); const turns = 7.5, br = 1 + 0.045 * balA / 2.2; for (let i = 0; i <= 300; i++) { const u = i / 300, a = u * turns * TAU + balA * (1 - u), rr = (8 + 44 * u) * (0.9 + 0.1 * br + 0.06 * (br - 1) * u * 6); const x = rr * Math.cos(a), y = rr * Math.sin(a); i ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke();
+      c.rotate(balA); const g = c.createLinearGradient(-100, -100, 100, 100); g.addColorStop(0, BRASS[0]); g.addColorStop(0.5, BRASS[1]); g.addColorStop(1, BRASS[2]); c.strokeStyle = g; c.lineWidth = 13; c.shadowColor = 'rgba(0,0,0,.45)'; c.shadowBlur = 8; c.shadowOffsetY = 4; c.beginPath(); c.arc(0, 0, 92, 0, TAU); c.stroke(); c.shadowColor = 'transparent'; c.lineWidth = 9; c.beginPath(); c.moveTo(-88, 0); c.lineTo(88, 0); c.stroke(); c.fillStyle = g; c.beginPath(); c.arc(0, 0, 13, 0, TAU); c.fill();
+      for (let i = 0; i < 8; i++) { const a = i * TAU / 8 + 0.39; c.fillStyle = '#f6e3ac'; c.beginPath(); c.arc(100 * Math.cos(a), 100 * Math.sin(a), 5, 0, TAU); c.fill(); } c.fillStyle = '#d2193c'; c.beginPath(); c.arc(0, -26, 4, 0, TAU); c.fill(); c.restore(); });
+    place('ratchet', () => { gear(c, P_B[0], P_B[1], 46, -thB * 3 + 0.2, { col: STEEL, solid: true }); screw(c, P_B[0], P_B[1], 13, 0.6); });
+    place('cock', () => { const foot = pol(P_BAL, 178, 0.5), g = c.createLinearGradient(P_BAL[0], P_BAL[1] - 30, foot[0], foot[1] + 30); g.addColorStop(0, STEEL[0]); g.addColorStop(0.6, STEEL[1]); g.addColorStop(1, STEEL[2]); c.strokeStyle = g; c.lineCap = 'round'; c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 10; c.shadowOffsetY = 5; c.lineWidth = 46; c.beginPath(); c.moveTo(P_BAL[0], P_BAL[1]); c.lineTo(lerp(P_BAL[0], foot[0], 0.72), lerp(P_BAL[1], foot[1], 0.72)); c.stroke(); c.lineWidth = 70; c.beginPath(); c.moveTo(lerp(P_BAL[0], foot[0], 0.8), lerp(P_BAL[1], foot[1], 0.8)); c.lineTo(foot[0], foot[1]); c.stroke(); c.shadowColor = 'transparent';
+      screw(c, lerp(P_BAL[0], foot[0], 0.9), lerp(P_BAL[1], foot[1], 0.9), 13, 1.1); c.strokeStyle = 'rgba(30,34,48,.7)'; c.lineWidth = 1.2; for (let i = -3; i <= 3; i++) { const a = -1.9 + i * 0.09; c.beginPath(); c.moveTo(P_BAL[0] + 30 * Math.cos(a), P_BAL[1] + 30 * Math.sin(a)); c.lineTo(P_BAL[0] + 36 * Math.cos(a), P_BAL[1] + 36 * Math.sin(a)); c.stroke(); } });
+    // jewels and blued screws pop in last
+    [P_C, P_3, P_4, P_E, P_PAL, P_BAL, [P_B[0] + 70, P_B[1] - 150]].forEach((p, k) => { const a = E.outBack(prog(t, 9.5 + k * 0.25 - 0.18, 0.3)); if (a > 0 && k < 6) jewel(c, p[0], p[1], (k === 5 ? 10 : 8) * a, Math.min(1, a)); });
+    for (let k = 0; k < 6; k++) { const a = E.outBack(prog(t, 10.6 + k * 0.14, 0.3)), ang = k * TAU / 6 + 0.35; if (a > 0) screw(c, 374 * Math.cos(ang), 374 * Math.sin(ang), 11 * a, 0.6 + k + (1 - Math.min(1, a)) * 4, Math.min(1, a)); }
+
+    // dial, hands and bezel slide over; the seconds hand takes its steps from the same escapement
+    const d = prog(t, T_DIAL, 1.3, E.outCubic);
+    if (d > 0) { const dx = 1700 * (1 - d), rot = 0.5 * (1 - d); c.save(); c.translate(dx, 0); c.rotate(rot); c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 40; c.shadowOffsetY = 20; c.drawImage(dialBuf.canvas, -500, -500, 1000, 1000); c.shadowColor = 'transparent';
+      const hand = (ang, len, w, col, tail = 40) => { c.save(); c.rotate(ang); c.fillStyle = col; c.shadowColor = 'rgba(0,0,0,.4)'; c.shadowBlur = 8; c.shadowOffsetY = 5; c.beginPath(); c.moveTo(0, tail); c.lineTo(w, 0); c.lineTo(0, -len); c.lineTo(-w, 0); c.closePath(); c.fill(); c.restore(); };
+      const hg = c.createLinearGradient(-10, 0, 10, 0); hg.addColorStop(0, '#f3d994'); hg.addColorStop(0.5, '#a67c2c'); hg.addColorStop(0.51, '#f0d48a'); hg.addColorStop(1, '#c79a45');
+      hand((10 + 10 / 60) / 12 * TAU, 210, 15, hg); hand(10 / 60 * TAU, 318, 12, hg);
+      const sec = (35 + (run ? step * 0.5 : 0)) / 60 * TAU; c.save(); c.rotate(sec); c.strokeStyle = '#c8321e'; c.lineWidth = 2.6; c.lineCap = 'round'; c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = 6; c.shadowOffsetY = 4; c.beginPath(); c.moveTo(0, 70); c.lineTo(0, -352); c.stroke(); c.fillStyle = '#c8321e'; c.beginPath(); c.arc(0, 52, 9, 0, TAU); c.fill(); c.restore();
+      c.fillStyle = '#d9b566'; c.beginPath(); c.arc(0, 0, 13, 0, TAU); c.fill(); c.fillStyle = '#3a2a0a'; c.beginPath(); c.arc(0, 0, 4, 0, TAU); c.fill(); c.restore(); }
+    c.restore();
+    // a small readout: the train's arithmetic
+    const on = prog(t, 3.2, 1.0) * (1 - prog(t, T_DIAL - 0.2, 0.8)); if (on > 0) { c.font = '500 13px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.textBaseline = 'alphabetic'; const lines = [['B A R R E L   8 4 : 1 2', 2.0], ['C E N T R E   6 4 : 8', 3.0], ['T H I R D   6 0 : 8', 4.0], ['F O U R T H   4 8 : 1 2', 5.0], ['E S C A P E   1 5   ·   7 2 0 0   B P H', 6.0]]; lines.forEach(([s, T], i) => { const a = prog(t, T, 0.5, E.outCubic); c.fillStyle = `rgba(190,205,240,${0.62 * on * a})`; c.fillText(s, W - 90, H - 180 + i * 22); }); }
+  }
+});
+</script>
+</body>
+</html>

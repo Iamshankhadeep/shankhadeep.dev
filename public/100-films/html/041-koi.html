@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 041 — Koi</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 041 — KOI
+ * Looking down into a pond as koi glide beneath lily pads. Each fish is a chain of points that follow where its
+ * head was a moment ago — so bodies bend through their own turns — drawn as a tapered form with fins, patches
+ * and a soft shadow on the pond floor. Seven bars at 70 bpm (3.43 s each): empty pond → fish arrive one by one →
+ * they circle together (bar 5) → disperse, one ripple left behind. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 70, SEG = 16;
+const FISH = [
+  { enter: 2.2, len: 1.0, body: '#f3ece0', patch: '#d6491f', a: 0.31, b: 0.47, p: 0.4, q: 1.9, r: 250, ph: 0 },
+  { enter: 4.4, len: 0.86, body: '#ee7a2b', patch: '#f6e7d2', a: 0.27, b: 0.39, p: 2.6, q: 0.3, r: 330, ph: 2.1 },
+  { enter: 6.3, len: 1.12, body: '#f1ead9', patch: '#1d1d22', a: 0.23, b: 0.43, p: 4.1, q: 3.3, r: 290, ph: 4.2 },
+  { enter: 8.2, len: 0.78, body: '#e9b23a', patch: '#f7efd9', a: 0.36, b: 0.33, p: 5.2, q: 5.0, r: 210, ph: 1.0 },
+  { enter: 9.9, len: 0.94, body: '#e2572a', patch: '#f3ece0', a: 0.29, b: 0.52, p: 1.3, q: 4.2, r: 370, ph: 3.2 },
+  { enter: 11.4, len: 0.7, body: '#f4efe6', patch: '#e2572a', a: 0.4, b: 0.36, p: 3.4, q: 2.4, r: 170, ph: 5.3 }
+];
+const PADS = [[330, 250, 150, 0.4, 1], [610, 150, 96, 2.1, 0], [1540, 230, 170, 4.0, 1], [1700, 620, 120, 1.2, 0], [1380, 880, 150, 5.2, 0], [300, 820, 180, 3.1, 1], [960, 70, 92, 0.2, 0], [1210, 190, 78, 2.8, 0]];
+let ctx, caust, ripples = [];
+
+function headAt(f, t) {
+  const tau = t - f.enter, circ = win(t, BAR * 3.7, BAR * 5.3, 2.2, 2.2, E.inOutSine);
+  const wx = 960 + 720 * Math.sin(f.a * tau + f.p) + 90 * Math.sin(f.a * 2.7 * tau + f.q), wy = 540 + 380 * Math.sin(f.b * tau + f.q) + 60 * Math.cos(f.b * 2.3 * tau + f.p);
+  const ca = 0.62 * t + f.ph, cx = 960 + f.r * Math.cos(ca), cy = 540 + f.r * 0.78 * Math.sin(ca);
+  const out = 1 - E.outSine(clamp01(tau / 5.0)), ox = Math.cos(f.ph * 1.7) * 1100 * out, oy = Math.sin(f.ph * 1.7) * 800 * out;
+  return [lerp(wx, cx, circ) + ox, lerp(wy, cy, circ) + oy];
+}
+
+Stage.create({
+  no: 41, title: 'Koi', subtitle: 'canvas 2d · 70 bpm',
+  duration: 24, background: '#0b1f1a', grain: 0.055, poster: 15.4, vignette: 0.4,
+  fade: { in: 1.4, out: 2.0 }, slate: { at: 0.9, hold: 3.0, pos: 'bc' },
+
+  music(S) {
+    const M = S.score({ bpm: 70, duration: 24, seed: 41 });
+    M.master({ reverb: { decay: 4.0, size: 1.2, damp: 0.45 }, fadeIn: 0.6, fadeOut: 2.8 });
+    const koto = M.track('koto', { reverb: 0.5, gain: 0.95, delay: { time: 1.5, fb: 0.25, mix: 0.18 } }), harp = M.track('harp', { reverb: 0.55, gain: 0.75 });
+    const pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.42 + 0.25 * smoothstep(6, 15, t) }), kal = M.track('kalimba', { reverb: 0.6, gain: 0.7, delay: { time: 0.75, fb: 0.35, mix: 0.25 } }), sub = M.track('sub', { reverb: 0.08, gain: 0.5 }), air = M.track('air', { reverb: 0.3, gain: 0.9 });
+    air.hit(0, 0.8, M.beats);
+    // E yo scale: E F# A B C#
+    const ch = [['E2', 'B2', 'F#3'], ['A2', 'E3', 'B3'], ['C#3', 'A3', 'E4'], ['B2', 'F#3', 'C#4'], ['E2', 'B2', 'F#3', 'A3'], ['A2', 'E3', 'C#4'], ['E2', 'B2', 'E3', 'F#3']], rt = ['E1', 'A1', 'C#2', 'B1', 'E1', 'A1', 'E1'];
+    ch.forEach((c, i) => { pad.chord(i * 4, c, 4, 0.55); if (i >= 1) sub.note(i * 4, rt[i], 3.7, i >= 4 ? 0.8 : 0.5); if (i >= 2 && i < 6) harp.arp(i * 4, c.map((n) => S.midi(n) + 12), 0.5, 4, { mode: 'updown', octaves: 2, vel: 0.3 }); });
+    koto.seq(2, 0.5, ['E4', null, 'F#4', 'A4', null, null, 'B4', null, 'C#5', null, null, 'B4', 'A4', null, null, null], { vel: 0.55, gate: 2.5 });
+    koto.seq(12, 0.5, ['B4', 'C#5', 'E5', null, 'F#5', null, 'E5', null, 'C#5', null, 'B4', null, 'A4', null, 'F#4', null, 'E5', null, 'F#5', 'A5', null, 'B5', null, null, 'A5', null, 'F#5', null, 'E5', null, null, null], { vel: 0.6, gate: 2.2 });
+    koto.seq(24, 1, ['E4', 'B4', 'F#5', null], { vel: 0.5, gate: 3 });
+    // drops: each one is a ripple on the surface
+    [3.5, 6.25, 9, 11.5, 13.75, 15.5, 17.25, 19, 21.5, 25.5].forEach((b, i) => kal.note(b, S.scale('E5', 'yo', 1)[(i * 2) % 5], 1.5, i === 9 ? 0.7 : 0.5));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 });
+    // caustic light: a tileable interference pattern, baked once
+    const S = 512; caust = Stage.buffer(S, S); const id = caust.createImageData(S, S);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { let v = 0; for (let k = 0; k < 5; k++) { const a = k * 1.256 + 0.3, fx = Math.round(Math.cos(a) * (3 + k)), fy = Math.round(Math.sin(a) * (3 + k)); v += Math.sin((x * fx + y * fy) / S * TAU + k * 2.1 + 1.7 * Math.sin((x * fy - y * fx) / S * TAU)); } const c = Math.pow(clamp01(1 - Math.abs(v) / 2.2), 5); const i = (y * S + x) * 4; id.data[i] = 190; id.data[i + 1] = 235; id.data[i + 2] = 205; id.data[i + 3] = 255 * c; }
+    caust.putImageData(id, 0, 0);
+    Stage.events('kalimba').forEach((e, i) => ripples.push({ t: e.t, i }));
+  },
+
+  frame(t) {
+    const c = ctx;
+    const g = c.createRadialGradient(1050, 480, 100, 960, 540, 1250); g.addColorStop(0, '#1d4a3c'); g.addColorStop(0.5, '#12332a'); g.addColorStop(1, '#081712'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // pond floor: faint pebbles
+    for (let i = 0; i < 140; i++) { c.fillStyle = `rgba(160,190,160,${0.03 + 0.04 * hash(i, 3)})`; c.beginPath(); c.ellipse(hash(i, 1) * W, hash(i, 2) * H, 10 + 30 * hash(i, 4), 7 + 20 * hash(i, 5), hash(i, 6) * 3, 0, TAU); c.fill(); }
+    // ── fish (shadow pass, then bodies)
+    const fish = FISH.map((f) => { const pts = []; for (let k = 0; k < SEG; k++) { const p = headAt(f, t - k * 0.062 * f.len); const sw = Math.sin(t * 5.2 - k * 0.55 + f.ph) * 2.4 * k * f.len; pts.push(p); p.sw = sw; } for (let k = 0; k < SEG; k++) { const a = pts[Math.max(0, k - 1)], b = pts[Math.min(SEG - 1, k + 1)], dx = a[0] - b[0], dy = a[1] - b[1], l = Math.hypot(dx, dy) || 1; pts[k].nx = -dy / l; pts[k].ny = dx / l; pts[k].x = pts[k][0] + pts[k].nx * pts[k].sw; pts[k].y = pts[k][1] + pts[k].ny * pts[k].sw; } return { f, pts }; });
+    const widthAt = (s) => Math.sin(Math.pow(s, 0.62) * Math.PI) * (1 - 0.25 * s) + 0.08 * (1 - s);
+    const bodyPath = (pts, sc, ox, oy) => { c.beginPath(); for (let k = 0; k < SEG; k++) { const w = widthAt(k / (SEG - 1)) * 34 * sc; c.lineTo(pts[k].x + pts[k].nx * w + ox, pts[k].y + pts[k].ny * w + oy); } for (let k = SEG - 1; k >= 0; k--) { const w = widthAt(k / (SEG - 1)) * 34 * sc; c.lineTo(pts[k].x - pts[k].nx * w + ox, pts[k].y - pts[k].ny * w + oy); } c.closePath(); };
+    c.filter = 'blur(14px)'; c.fillStyle = 'rgba(0,0,0,.42)'; for (const { f, pts } of fish) { bodyPath(pts, f.len * 1.1, 26, 34); c.fill(); } c.filter = 'none';
+    for (const { f, pts } of fish) {
+      const sc = f.len, tail = pts[SEG - 1], pre = pts[SEG - 3], tdx = tail.x - pre.x, tdy = tail.y - pre.y, tl = Math.hypot(tdx, tdy) || 1, ta = Math.atan2(tdy, tdx), fl = 0.55 * Math.sin(t * 5.2 - SEG * 0.55 + f.ph);
+      // tail fin and pectorals: translucent
+      c.fillStyle = Stage.color.alpha(f.body, 0.62);
+      c.save(); c.translate(tail.x, tail.y); c.rotate(ta + fl * 0.5); c.beginPath(); c.moveTo(-6, 0); c.bezierCurveTo(30 * sc, -34 * sc, 78 * sc, -40 * sc, 96 * sc, -30 * sc); c.bezierCurveTo(70 * sc, -6 * sc, 70 * sc, 6 * sc, 96 * sc, 30 * sc); c.bezierCurveTo(78 * sc, 40 * sc, 30 * sc, 34 * sc, -6, 0); c.fill(); c.restore();
+      const sh = pts[3], ha = Math.atan2(pts[2].y - pts[4].y, pts[2].x - pts[4].x), flap = 0.35 * Math.sin(t * 3.1 + f.ph);
+      for (const sd of [-1, 1]) { c.save(); c.translate(sh.x + sh.nx * 26 * sc * sd, sh.y + sh.ny * 26 * sc * sd); c.rotate(ha + Math.PI + sd * (0.9 + flap)); c.beginPath(); c.ellipse(26 * sc, 0, 30 * sc, 11 * sc, 0, 0, TAU); c.fill(); c.restore(); }
+      // body with patches clipped to it
+      bodyPath(pts, sc, 0, 0); c.fillStyle = f.body; c.fill();
+      c.save(); bodyPath(pts, sc, 0, 0); c.clip();
+      c.fillStyle = f.patch; for (let k = 0; k < 4; k++) { const q = pts[2 + k * 3 + ((hash(k, f.r) * 2) | 0)], hh = hash(k, f.r + 1); c.beginPath(); c.ellipse(q.x + q.nx * (hh - 0.5) * 30 * sc, q.y + q.ny * (hh - 0.5) * 30 * sc, (20 + 26 * hh) * sc, (14 + 16 * hash(k, f.r + 2)) * sc, hh * 3, 0, TAU); c.fill(); }
+      // soft shading along the back
+      c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = 7 * sc; c.lineCap = 'round'; c.beginPath(); for (let k = 1; k < SEG - 3; k++) k === 1 ? c.moveTo(pts[k].x, pts[k].y) : c.lineTo(pts[k].x, pts[k].y); c.stroke(); c.restore();
+      c.fillStyle = '#15120f'; for (const sd of [-1, 1]) { c.beginPath(); c.arc(pts[1].x + pts[1].nx * 13 * sc * sd, pts[1].y + pts[1].ny * 13 * sc * sd, 3.4 * sc, 0, TAU); c.fill(); }
+    }
+    // caustics over everything under the surface
+    c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.16; const cp = c.createPattern(caust.canvas, 'repeat');
+    c.save(); c.translate(Stage.mod(t * 14, 512), Stage.mod(t * 9, 512)); c.scale(1.6, 1.6); c.fillStyle = cp; c.fillRect(-700, -700, W + 1400, H + 1400); c.restore();
+    c.save(); c.translate(-Stage.mod(t * 11, 512), Stage.mod(t * 6, 512)); c.rotate(0.6); c.scale(2.3, 2.3); c.fillStyle = cp; c.globalAlpha = 0.10; c.fillRect(-900, -900, W + 1800, H + 1800); c.restore();
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+    // ── lily pads: shadow on the water below, then the pads and their flowers
+    PADS.forEach(([x0, y0, r, ph, fl], i) => {
+      const x = x0 + 16 * Math.sin(t * 0.21 + ph), y = y0 + 12 * Math.cos(t * 0.17 + ph * 2), rot = ph + 0.12 * Math.sin(t * 0.25 + i);
+      c.filter = 'blur(10px)'; c.fillStyle = 'rgba(0,0,0,.36)'; c.beginPath(); c.arc(x + 22, y + 30, r, 0, TAU); c.fill(); c.filter = 'none';
+      c.save(); c.translate(x, y); c.rotate(rot);
+      const pg = c.createRadialGradient(-r * 0.2, -r * 0.2, r * 0.1, 0, 0, r); pg.addColorStop(0, '#5f9a52'); pg.addColorStop(0.75, '#3d7a44'); pg.addColorStop(1, '#2a5b36'); c.fillStyle = pg;
+      c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, r, 0.14, TAU - 0.14); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(20,60,30,.35)'; c.lineWidth = 1.5; c.beginPath(); for (let k = 1; k < 14; k++) { const a = 0.14 + k / 14 * (TAU - 0.28); c.moveTo(0, 0); c.lineTo(Math.cos(a) * r * 0.93, Math.sin(a) * r * 0.93); } c.stroke();
+      c.strokeStyle = 'rgba(190,230,170,.25)'; c.lineWidth = 2; c.beginPath(); c.arc(0, 0, r - 2, 0.2, TAU - 0.2); c.stroke();
+      if (fl) { c.translate(r * 0.28, -r * 0.1); for (let ring = 0; ring < 3; ring++) for (let k = 0; k < 9; k++) { const a = k / 9 * TAU + ring * 0.35, L = r * (0.42 - ring * 0.1) * (0.9 + 0.1 * Math.sin(t * 0.6 + k)); c.save(); c.rotate(a); const lg = c.createLinearGradient(0, 0, L, 0); lg.addColorStop(0, '#fff3f0'); lg.addColorStop(1, ring ? '#f8b7c4' : '#ee8fa6'); c.fillStyle = lg; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(L * 0.5, -L * 0.3, L, 0); c.quadraticCurveTo(L * 0.5, L * 0.3, 0, 0); c.fill(); c.restore(); } c.fillStyle = '#f2c24a'; c.beginPath(); c.arc(0, 0, r * 0.07, 0, TAU); c.fill(); }
+      c.restore();
+    });
+    // surface ripples on the kalimba drops
+    for (const rp of ripples) { const age = t - rp.t; if (age < 0 || age > 4) continue; const x = 360 + hash(rp.i, 7) * 1200, y = 240 + hash(rp.i, 8) * 600; for (let k = 0; k < 3; k++) { const a = age - k * 0.35; if (a <= 0) continue; const u = a / 3.6; c.strokeStyle = `rgba(215,240,225,${0.5 * (1 - u) * (1 - u)})`; c.lineWidth = 2.2 - 1.4 * u; c.beginPath(); c.ellipse(x, y, 20 + 250 * E.outCubic(u), 20 + 250 * E.outCubic(u), 0, 0, TAU); c.stroke(); } }
+    // a soft sheen across the surface
+    const sg = c.createLinearGradient(0, 0, W, H); sg.addColorStop(0, 'rgba(200,230,215,.09)'); sg.addColorStop(0.5, 'rgba(200,230,215,0)'); c.fillStyle = sg; c.fillRect(0, 0, W, H);
+  }
+});
+</script>
+</body>
+</html>

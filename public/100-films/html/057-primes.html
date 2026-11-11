@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 057 — Primes</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 057 — PRIMES
+ * Write the integers in a square spiral (Ulam, 1963) and light the primes: diagonals appear from nowhere.
+ * Then unroll the same numbers onto an Archimedean spiral (Sacks, 1994) and the diagonals become curved streams.
+ * 1…70 are counted out one by one with their numerals (bars 1–2), the count accelerates to 40 000 while the
+ * view pulls back (bars 3–5), the layout morphs (6–7), and holds. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, N = 40000, CX = 960, CY = 540, N1 = 70, T_A = 0.6, T_B = 5.0, T_C = 11.4, T_M = 12.5, T_ME = 17.0;
+const IS = sieve(N), PI_N = (() => { const a = new Int32Array(N + 1); for (let n = 1; n <= N; n++) a[n] = a[n - 1] + IS[n]; return a; })();
+const UX = new Float32Array(N + 1), UY = new Float32Array(N + 1), QX = new Float32Array(N + 1), QY = new Float32Array(N + 1);
+(() => { let x = 0, y = 0, dx = 1, dy = 0, run = 1, done = 0, turns = 0; for (let n = 1; n <= N; n++) { UX[n] = x; UY[n] = y; const r = Math.sqrt(n), a = TAU * r; QX[n] = r * Math.cos(a) * 0.5; QY[n] = -r * Math.sin(a) * 0.5; x += dx; y += dy; if (++done === run) { done = 0; const t = dx; dx = dy; dy = -t; if (++turns % 2 === 0) run++; } } })();
+function sieve(n) { const s = new Uint8Array(n + 1).fill(1); s[0] = s[1] = 0; for (let i = 2; i * i <= n; i++) if (s[i]) for (let j = i * i; j <= n; j += i) s[j] = 0; return s; }
+// when does the integer n appear?
+const tOf = (n) => n <= N1 ? T_A + (T_B - T_A) * Math.cbrt((n - 1) / (N1 - 1)) : T_B + (T_C - T_B) * Math.log(n / N1) / Math.log(N / N1);
+const nAt = (t) => t < T_A ? 0 : t < T_B ? 1 + Math.floor((N1 - 1) * Math.pow((t - T_A) / (T_B - T_A), 3) + 1e-6) : t < T_C ? Math.floor(N1 * Math.pow(N / N1, (t - T_B) / (T_C - T_B))) : N;
+let ctx, glow, bg;
+
+Stage.create({
+  no: 57, title: 'Primes', subtitle: 'ulam · sacks · 96 bpm',
+  duration: 20, background: '#0b0a22', grain: 0.045, poster: 11.9,
+  fonts: ['500 16px "JetBrains Mono Variable"', '600 30px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.3 },
+  slate: { at: 0.7, hold: 2.8, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 57 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.42 }, fadeOut: 1.6 });
+    const tk = M.track('tick', { reverb: 0.25, gain: 0.5, humanize: 0, params: { tone: 2200 } }), bell = M.track('bell', { reverb: 0.55, gain: 0.5, humanize: 0 }), chime = M.track('chime', { reverb: 0.5, gain: 0.34, delay: { time: 0.75, fb: 0.35, mix: 0.25 } });
+    const pad = M.track('pad', { reverb: 0.6, gain: 0.55, lowpass: (t) => 700 + 2200 * smoothstep(4, 13, t) }), arp = M.track('arp', { reverb: 0.35, gain: 0.6, pan: 0.2, delay: { time: 0.75, fb: 0.4, mix: 0.25 }, lowpass: (t) => 900 + 3000 * smoothstep(5, 12, t) });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.42 }), gp = M.track('glasspad', { reverb: 0.7, gain: 0.4 }), ris = M.track('riser', { reverb: 0.4, gain: 0.22 }), imp = M.track('impact', { reverb: 0.6, gain: 0.35 }), kick = M.track('softkick', { reverb: 0.06, gain: 0.5 });
+    const sc = S.scale('D4', 'minor', 2);
+    // counting: a tick for every integer, a bell for every prime
+    let pc = 0;
+    for (let n = 1; n <= N1; n++) { const b = M.b(tOf(n)), fade = n < 40 ? 1 : 1 - (n - 40) / 45; tk.hit(b, (0.5 - 0.2 * (n / N1)) * fade, 0.04, { pan: ((n % 5) - 2) / 4 }); if (IS[n]) { bell.note(b, sc[(pc * 2) % 12], 1.4, 0.55 - 0.2 * (n / N1)); pc++; } }
+    // …then the count becomes a pulse: sixteenth k is the integer 71 + k, and only primes sound
+    const prog4 = [['D2', 'Dm9'], ['Bb1', 'Bbmaj7'], ['G1', 'Gm9'], ['A1', 'Am7'], ['D2', 'Dm9'], ['Bb1', 'Bbmaj7']];
+    for (let s = 0; s < 96; s++) { const n = 71 + s, b = 8 + s * 0.25; if (IS[n]) arp.note(b, sc[(n * 3) % 12], 0.4, 0.5); else if (s % 2 === 0) tk.hit(b, 0.16); }
+    pad.chord(0, ['D2', 'A2', 'E3'], 8, 0.4);
+    prog4.forEach((c, i) => { const b = 8 + i * 4; pad.chord(b, c[1], 4, 0.5, { octave: 3 }); sub.note(b, c[0], 3.6, 0.7); if (i >= 1) kick.pattern(b, 1, 'x.x.', { vel: 0.6 }); });
+    ris.hit(16.5, 0.6, 3.5); imp.hit(20, 0.7, 4); gp.chord(20, ['D4', 'A4', 'E5', 'F5'], 6, 0.4); gp.chord(26, ['D4', 'A4', 'D5', 'F5', 'A5'], 6, 0.45);
+    [0, 2, 4, 7, 9, 11].forEach((d, i) => chime.note(27.2 + i * 0.5, sc[d], 2, 0.45 - 0.04 * i));
+    sub.note(28, 'D1', 4, 0.6);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); glow = Stage.buffer(W / 2, H / 2);
+    const g = bg.createRadialGradient(CX, CY, 80, CX, CY, 1150); g.addColorStop(0, '#1a1848'); g.addColorStop(0.55, '#100f30'); g.addColorStop(1, '#07061a'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx, gl = glow; c.clearRect(0, 0, W, H); gl.clearRect(0, 0, W / 2, H / 2);
+    const nv = nAt(t); if (nv < 1) return;
+    // the view: cell size shrinks so the spiral so far always fits; then a slow drift in
+    const nf = t < T_B ? 1 + (N1 - 1) * Math.pow(clamp01((t - T_A) / (T_B - T_A)), 3) : t < T_C ? N1 * Math.pow(N / N1, (t - T_B) / (T_C - T_B)) : N;
+    const s = Math.min(92, 1010 / (Math.sqrt(nf) + 3)) * (1 + 0.03 * prog(t, T_C, 8.6, E.inOutSine));
+    const numA = smoothstep(20, 40, s), m = prog(t, T_M, T_ME - T_M), morphing = m > 0, rot = 0.10 * prog(t, T_M, 7.5, E.inOutSine), cr = Math.cos(rot), sr = Math.sin(rot);
+    const pos = (n) => { if (!morphing) return [CX + UX[n] * s, CY - UY[n] * s]; const mm = E.inOutCubic(clamp01(m * 1.5 - 0.5 * Math.sqrt(n / N))), x = lerp(UX[n], QX[n] * 0.97, mm), y = lerp(UY[n], -QY[n] * 0.97, mm); return [CX + (x * cr - y * sr) * s, CY - (x * sr + y * cr) * s]; };
+    // the thread the numbers are written along (early only)
+    if (numA > 0.01) { c.strokeStyle = `rgba(150,160,240,${0.16 * numA})`; c.lineWidth = 1.2; c.beginPath(); for (let n = 1; n <= nv; n++) { const p = pos(n); n === 1 ? c.moveTo(p[0], p[1]) : c.lineTo(p[0], p[1]); } c.stroke(); }
+    // composites: small dim dots
+    const rc = Math.max(0.6, s * 0.055), ca = lerp(0.3, 0.5, numA);
+    c.fillStyle = `rgba(132,142,226,${ca * (1 - numA * 0.75)})`;
+    if (s < 14) { for (let n = 1; n <= nv; n++) if (!IS[n]) { const p = pos(n); c.fillRect(p[0] - rc, p[1] - rc, rc * 2, rc * 2); } }
+    else { c.beginPath(); for (let n = 1; n <= nv; n++) if (!IS[n]) { const p = pos(n); c.moveTo(p[0] + rc, p[1]); c.arc(p[0], p[1], rc, 0, TAU); } c.fill(); }
+    // primes: gold, with a flash as each is found
+    const rp = Math.max(1.15, s * lerp(0.21, 0.40, numA));
+    for (let n = 2; n <= nv; n++) if (IS[n]) {
+      const p = pos(n), age = t - tOf(n), fl = Math.exp(-Math.max(0, age) * (numA > 0.3 ? 3 : 7)), pop = numA > 0.3 ? E.outBack(clamp01(age / 0.22)) : 1;
+      if (numA > 0.02) { c.fillStyle = `rgba(255,196,96,${(0.16 + 0.3 * fl) * numA})`; c.beginPath(); c.arc(p[0], p[1], rp * pop, 0, TAU); c.fill(); c.strokeStyle = `rgba(255,208,120,${0.7 * numA})`; c.lineWidth = 1.4; c.beginPath(); c.arc(p[0], p[1], rp * pop, 0, TAU); c.stroke(); }
+      if (numA < 0.98) { const r2 = Math.max(1.5, s * 0.24) * (1 + 0.7 * fl); c.fillStyle = `rgba(${255},${Math.round(206 + 40 * fl)},${Math.round(116 + 110 * fl)},${(1 - numA)})`; if (r2 < 2.2) c.fillRect(p[0] - r2, p[1] - r2, r2 * 2, r2 * 2); else { c.beginPath(); c.arc(p[0], p[1], r2, 0, TAU); c.fill(); } }
+      const gr = Math.max(1.2, rp * 0.5) * (1 + 1.2 * fl); gl.fillStyle = `rgba(255,190,90,${0.55 + 0.45 * fl})`; gl.fillRect(p[0] / 2 - gr / 2, p[1] / 2 - gr / 2, gr, gr);
+    }
+    // numerals while they are legible
+    if (numA > 0.01) {
+      const fs = Math.max(8, s * 0.3); c.font = `600 ${fs}px "JetBrains Mono Variable"`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      for (let n = 1; n <= nv; n++) { const p = pos(n), a = clamp01((t - tOf(n)) / 0.14) * numA; c.fillStyle = IS[n] ? `rgba(255,232,180,${a})` : `rgba(168,178,246,${0.7 * a})`; c.fillText(String(n), p[0], p[1] + fs * 0.04); }
+      // the head of the count
+      const p = pos(nv), pa = numA * 0.8; c.strokeStyle = `rgba(255,255,255,${pa})`; c.lineWidth = 1.6; c.beginPath(); c.arc(p[0], p[1], s * 0.46, 0, TAU); c.stroke();
+    }
+    // bloom
+    c.save(); c.globalCompositeOperation = 'lighter'; c.filter = `blur(${lerp(7, 14, numA)}px)`; c.globalAlpha = lerp(0.9, 0.6, numA); c.drawImage(gl.canvas, 0, 0, W, H); c.restore();
+    // readout
+    const on = prog(t, 0.8, 0.8) * (1 - prog(t, 18.6, 1.0)); c.textAlign = 'right'; c.textBaseline = 'alphabetic'; c.font = '500 16px "JetBrains Mono Variable"';
+    const fmt = (v) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    c.fillStyle = `rgba(160,170,240,${0.75 * on})`; c.fillText('n  ≤  ' + fmt(nv).padStart(6, ' '), W - 96, H - 106);
+    c.fillStyle = `rgba(255,214,140,${0.9 * on})`; c.fillText('primes  ' + fmt(PI_N[nv]).padStart(5, ' '), W - 96, H - 80);
+    const lab = t < T_M + 1.2 ? 'ULAM SPIRAL' : 'SACKS SPIRAL', la = on * (t < T_M + 1.2 ? prog(t, 5.5, 1) * (1 - prog(t, T_M + 0.4, 0.8)) : prog(t, T_M + 2.2, 1));
+    c.fillStyle = `rgba(160,170,240,${0.6 * la})`; c.textAlign = 'left'; c.fillText(lab.split('').join(' '), 96, 110);
+  }
+});
+</script>
+</body>
+</html>

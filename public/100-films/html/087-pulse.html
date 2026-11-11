@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 087 — Pulse</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 087 — PULSE
+ * One dot with a heartbeat grows into a whole rhythm. A vermilion disc beats lub-dub at sixty to the minute;
+ * each beat sends a ring outward and writes one complex on an ECG trace at the horizon. When the tempo
+ * doubles the disc divides — two, four, then a ring of sixteen that plays the sixteenth-note pattern of the
+ * groove, each dot lit by its own step — and at the end they fold back into one dot, one beat.
+ * The picture reads the score: every pulse is a note on the kick track. Eight bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, CX = 960, CY = 500, RED = '#e2412b', INK = '#2a2420', BEAT = 0.5;
+const PAT = 'x..x..x.x..x.x..';                    // the sixteen dots, bars 5–7
+let ctx;
+const kicks = () => Stage.events('softkick') || [];
+
+Stage.create({
+  no: 87, title: 'Pulse', subtitle: 'one beat becomes a rhythm · 60 → 120 bpm',
+  duration: 16, background: '#f3eee4', grain: 0.04, poster: 9.25,
+  fonts: ['300 150px "Fraunces Variable"', '500 14px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.0, color: '#f3eee4' },
+  slate: { at: 0.4, hold: 2.4, pos: 'bl', color: 'rgba(42,36,32,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 87 });
+    M.master({ reverb: { decay: 1.6, size: 0.8, damp: 0.5 }, fadeOut: 0.8 });
+    const k = M.track('softkick', { reverb: 0.1, gain: 0.74, humanize: 0 }), sub = M.track('sub', { reverb: 0.04, gain: 0.24 }), clap = M.track('clap', { reverb: 0.3, gain: 0.5 }), plk = M.track('pluck', { reverb: 0.35, gain: 1.2, delay: { time: 0.75, fb: 0.3, mix: 0.2 }, humanize: 0 }), hat = M.track('hat', { reverb: 0.06, gain: 0.26 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.55 });
+    // bars 1–3: a heart at 60 — lub on the beat, dub a third of a second later
+    for (let b = 0; b < 12; b += 2) { k.hit(b, 0.9); k.hit(b + 0.62, 0.55); }
+    // bar 4: the beat doubles (two discs), then bars 5–7: four on the floor plus the sixteen-step pattern
+    for (let b = 12; b < 16; b++) { k.hit(b, 0.9); if (b % 2) k.hit(b + 0.5, 0.5); }
+    for (let bar = 4; bar < 7; bar++) { const b = bar * 4; PAT.split('').forEach((ch, i) => { if (ch === 'x') k.hit(b + i * 0.25, i % 4 === 0 ? 0.95 : 0.6); else if (i % 4 === 0) k.hit(b + i * 0.25, 0.9); }); clap.pattern(b, 1, '.x.x', { vel: 0.7 }); hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.5 }); sub.note(b, 'A1', 1.5, 0.7); sub.note(b + 2.5, 'A1', 0.5, 0.5); sub.note(b + 3, 'G1', 1, 0.6); pad.chord(b, ['A3', 'C4', 'E4', 'B4'], 4, 0.4);
+      [[0.75, 'E5'], [1.5, 'A5'], [2.75, 'E5'], [3.5, 'C5']].forEach(([o, n]) => plk.note(b + o, n, 0.4, 0.5)); }
+    sub.note(12, 'A1', 3.5, 0.5); plk.note(14.5, 'E5', 0.4, 0.4); plk.note(15.5, 'A5', 0.4, 0.45);
+    // bar 8: back to the heart
+    for (let b = 28; b < 32; b += 2) { k.hit(b, 0.9); k.hit(b + 0.62, 0.55); } pad.chord(28, ['A3', 'E4', 'A4'], 4, 0.3);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const ev = kicks(), beat = t / BEAT, hit = Stage.hit('softkick', t, 0.16);
+    // how many dots: 1 → 2 (bar 4) → 4 (second half of bar 4) → 16 (bars 5–7) → 1 (bar 8)
+    const s2 = E.outBack(prog(t, 6.0, 0.5)) * (1 - prog(t, 14.0, 0.45, E.inOutCubic)), s4 = E.outBack(prog(t, 7.0, 0.5)) * (1 - prog(t, 14.0, 0.45, E.inOutCubic)), s16 = E.outCubic(prog(t, 8.0, 0.6)) * (1 - prog(t, 13.75, 0.4, E.inOutCubic));
+    // tempo numerals
+    const fast = smoothstep(5.9, 6.3, t) * (1 - smoothstep(13.9, 14.3, t)); c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.font = '300 150px "Fraunces Variable"';
+    c.fillStyle = `rgba(42,36,32,${0.1 * (1 - fast) * prog(t, 0.5, 1)})`; c.fillText('60', CX, 212 - 14 * fast); c.fillStyle = `rgba(42,36,32,${0.1 * fast})`; c.fillText('120', CX, 212 + 14 * (1 - fast));
+    c.font = '500 14px "JetBrains Mono Variable"'; c.fillStyle = `rgba(42,36,32,${0.42 * prog(t, 0.5, 1)})`; c.fillText('B E A T S   P E R   M I N U T E', CX, 250);
+    // rings: every kick sends one out from the centre
+    for (const e of ev) { const a = t - e.t; if (a < 0 || a > 1.6) continue; const u = a / 1.6, r = 70 + 620 * E.outCubic(u); c.strokeStyle = Stage.color.alpha(RED, 0.3 * e.vel * (1 - u) * (1 - u)); c.lineWidth = 2 + 6 * (1 - u) * e.vel; c.beginPath(); c.arc(CX, CY, r, 0, TAU); c.stroke(); }
+    // ECG at the horizon: one complex per kick, scrolling
+    const y0 = 868, x1 = W - 200, pxs = 190; c.strokeStyle = Stage.color.alpha(INK, 0.7 * prog(t, 0.6, 0.8)); c.lineWidth = 2; c.lineJoin = 'round'; c.beginPath();
+    for (let x = 200; x <= x1; x += 3) { const tt = t - (x1 - x) / pxs; let y = 0; for (const e of ev) { const d = tt - e.t; if (d < -0.1 || d > 0.4) continue; const q = d * 1000, v = e.vel; y += v * (-10 * Math.exp(-Math.pow((q + 40) / 22, 2)) + 9 * Math.exp(-Math.pow((q - 0) / 6, 2)) * -7 + 16 * Math.exp(-Math.pow((q - 14) / 7, 2)) - 12 * Math.exp(-Math.pow((q - 190) / 45, 2))); } x === 200 ? c.moveTo(x, y0 + y) : c.lineTo(x, y0 + y); } c.stroke();
+    c.fillStyle = RED; c.beginPath(); c.arc(x1, y0, 4.5 + 3 * hit, 0, TAU); c.fill();
+    c.strokeStyle = Stage.color.alpha(INK, 0.12); c.lineWidth = 1; c.beginPath(); c.moveTo(200, y0 + 44); c.lineTo(x1, y0 + 44); c.stroke();
+    // the dots
+    const dots = [];
+    if (s16 < 1) { // one, two, four
+      const R = 92, n = s4 > 0.02 ? 4 : s2 > 0.02 ? 2 : 1;
+      if (n === 1 || s2 < 1) dots.push([CX, CY, R * (1 - 0.3 * clamp01(s2)), 0, 1 - s16]);
+      if (s2 > 0.02) for (let i = 0; i < 2; i++) { const d = 118 * s2 * (i ? 1 : -1); if (s4 > 0.02) { for (let j = 0; j < 2; j++) dots.push([CX + d, CY + 118 * s4 * (j ? 1 : -1), lerp(66, 50, clamp01(s4)), i * 2 + j, 1 - s16]); } else dots.push([CX + d, CY, 66, i, 1 - s16]); }
+      if (s2 > 0.02 && s2 < 1 && n === 1) dots.shift();
+    }
+    if (s16 > 0) for (let i = 0; i < 16; i++) { const a = -TAU / 4 + i * TAU / 16, rr = lerp(140, 270, s16), bar = Math.floor(beat / 4), step = Math.floor((beat % 4) * 4), on = PAT[i] === 'x' || i % 4 === 0, since = ((beat % 4) * 4 - i + 16) % 16 / 4 * BEAT, lit = on && t >= 8 && t < 14 ? Math.exp(-since * 7) : 0; dots.push([CX + Math.cos(a) * rr, CY + Math.sin(a) * rr, (on ? 26 : 13) * (1 + 0.5 * lit), i, s16, lit, on]); }
+    for (const [x, y, r, i, al, lit, on] of dots) { const pulse = lit == null ? hit * (i % 2 && t > 6 && t < 8 ? 0.6 : 1) : 0, rad = r * (1 + 0.16 * pulse); c.globalAlpha = al; c.fillStyle = lit == null || on ? RED : Stage.color.alpha(INK, 0.3); if (lit) { c.shadowColor = RED; c.shadowBlur = 30 * lit; } c.beginPath(); c.arc(x, y, rad, 0, TAU); c.fill(); c.shadowBlur = 0; if (lit == null || on) { c.fillStyle = `rgba(255,255,255,${0.16 + 0.2 * (lit || pulse)})`; c.beginPath(); c.arc(x - rad * 0.3, y - rad * 0.32, rad * 0.3, 0, TAU); c.fill(); } }
+    c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

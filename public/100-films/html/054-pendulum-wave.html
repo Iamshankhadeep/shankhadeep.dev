@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 054 — Pendulum Wave</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 054 — PENDULUM WAVE
+ * Twelve pendulums of graded length. Pendulum k makes exactly 16 + k swings in the 24 seconds of the film, so
+ * they start in line, drift out of phase into travelling waves and apparent chaos, and fall back into unison on
+ * the last beat. Each one plays a note every time it passes centre (left to right): the score is the physics.
+ * Seen end-on, the nearest pendulum longest; below, the same motion as a row of dots. Six bars at 60 bpm. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, NP = 12, DUR = 24, BASE = 16, AMP = 0.42, CX = 960, TOP = 120;
+const P = Array.from({ length: NP }, (_, k) => { const T = DUR / (BASE + k), L = Math.pow(T / (DUR / BASE), 2); return { k, T, L, z: k }; });
+const theta = (p, t) => AMP * Math.cos(TAU * t / p.T);
+let bg, ctx;
+
+Stage.create({
+  no: 54, title: 'Pendulum Wave', subtitle: 'music from periods · 60 bpm',
+  duration: DUR, background: '#b9b2a8', grain: 0.05, poster: 6.2,
+  fonts: ['500 16px "JetBrains Mono Variable"'],
+  fade: { in: 1.0, out: 0.9, color: '#a59e94' },
+  slate: { at: 0.8, hold: 2.8, color: 'rgba(52,42,34,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: DUR, seed: 54 });
+    M.master({ reverb: { decay: 2.8, size: 1.1, damp: 0.4 }, fadeOut: 0.8, fadeIn: 0.02 });
+    const vib = M.track('vibes', { reverb: 0.45, gain: 0.55, pan: -0.25 }), mar = M.track('marimba', { reverb: 0.4, gain: 0.7, pan: 0.25 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.5 }), sub = M.track('sub', { reverb: 0.06, gain: 0.4 });
+    const sc = S.scale('C3', 'pentatonic', 3);     // longest pendulum lowest
+    for (const p of P) { const n = BASE + p.k; for (let j = 0; j <= n; j++) { const t = (j + 0.75) * p.T; if (t > DUR - 0.02) break; (p.k % 2 ? mar : vib).note(t, sc[p.k], 0.6, 0.3 + 0.012 * p.k); } }
+    // the release and the return, in unison
+    P.forEach((p) => { vib.note(0, sc[p.k], 2, 0.3); });
+    pad.chord(0, ['C2', 'G2', 'D3', 'E3'], 12, 0.5); pad.chord(12, ['A1', 'E2', 'C3', 'G3'], 6, 0.5); pad.chord(18, ['C2', 'G2', 'E3', 'A3'], 6, 0.55); sub.note(0, 'C1', 12, 0.6); sub.note(12, 'A0', 6, 0.6); sub.note(18, 'C1', 6, 0.7);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const c = bg, g = c.createRadialGradient(CX, 380, 100, CX, 520, 1250); g.addColorStop(0, '#d2ccc2'); g.addColorStop(0.6, '#b4ada3'); g.addColorStop(1, '#8a8379'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const fl = c.createLinearGradient(0, 760, 0, H); fl.addColorStop(0, 'rgba(60,50,40,0)'); fl.addColorStop(1, 'rgba(60,50,40,.22)'); c.fillStyle = fl; c.fillRect(0, 760, W, H - 760);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // a small 3-D camera: yaw to see along the row, pitch to look down a little
+    const yaw = -0.52 + 0.05 * Math.sin(t * 0.13), pit = 0.24, cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pit), sp = Math.sin(pit), F = 15, SCL = 106;
+    const proj = (x, y, z) => { const x1 = x * cyw - z * syw, z1 = x * syw + z * cyw, y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp, s = F / (F + z2); return [CX + 10 + x1 * SCL * s, 318 - y1 * SCL * s, s, z2]; };
+    const LEN = 4.3, FLOOR = -5.15, xk = (k) => (k - (NP - 1) / 2) * 0.92;
+    // floor: a soft pool of light; the shadows on it draw the wave as seen from above
+    const f0 = proj(0, FLOOR, 0); const fg = c.createRadialGradient(f0[0], f0[1], 40, f0[0], f0[1], 900); fg.addColorStop(0, 'rgba(255,248,236,.34)'); fg.addColorStop(1, 'rgba(255,248,236,0)'); c.fillStyle = fg; c.fillRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(52,42,34,.16)'; c.lineWidth = 1; c.beginPath(); const a0 = proj(xk(0) - 0.5, FLOOR, 0), a1 = proj(xk(NP - 1) + 0.5, FLOOR, 0); c.moveTo(a0[0], a0[1]); c.lineTo(a1[0], a1[1]); c.stroke();
+    const bobs = P.map((p) => { const th = theta(p, t), L = p.L * LEN; return { p, th, x: xk(p.k), y: -L * Math.cos(th), z: L * Math.sin(th) }; });
+    for (const b of bobs) { const q = proj(b.x, FLOOR, b.z), r = 26 * q[2]; c.fillStyle = 'rgba(46,36,28,.20)'; c.beginPath(); c.ellipse(q[0], q[1], r * 1.5, r * 0.5, yaw * 0.4, 0, TAU); c.fill(); }
+    // the beam and its two trestles
+    const B0 = proj(xk(0) - 0.7, 0, 0), B1 = proj(xk(NP - 1) + 0.7, 0, 0);
+    for (const ex of [xk(0) - 0.55, xk(NP - 1) + 0.55]) { const t0 = proj(ex, 0, 0), l1 = proj(ex, FLOOR, -1.3), l2 = proj(ex, FLOOR, 1.3); c.strokeStyle = '#3a281c'; c.lineWidth = 9 * t0[2]; c.lineCap = 'round'; c.beginPath(); c.moveTo(l1[0], l1[1]); c.lineTo(t0[0], t0[1]); c.lineTo(l2[0], l2[1]); c.stroke(); }
+    c.strokeStyle = '#3d2a1e'; c.lineWidth = 26; c.lineCap = 'butt'; c.beginPath(); c.moveTo(B0[0], B0[1]); c.lineTo(B1[0], B1[1]); c.stroke();
+    c.strokeStyle = 'rgba(255,214,170,.20)'; c.lineWidth = 3; c.beginPath(); c.moveTo(B0[0], B0[1] - 11); c.lineTo(B1[0], B1[1] - 11); c.stroke();
+    // bobs, far to near
+    bobs.map((b) => Object.assign(b, { q: proj(b.x, b.y, b.z) })).sort((m, n) => n.q[3] - m.q[3]).forEach((b) => {
+      const q = b.q, r = 30 * q[2], h1 = proj(b.x, 0, -0.28), h2 = proj(b.x, 0, 0.28);
+      for (let g = 5; g >= 1; g--) { const th = theta(b.p, t - g * 0.024), L = b.p.L * LEN, gq = proj(b.x, -L * Math.cos(th), L * Math.sin(th)); c.fillStyle = `rgba(214,168,96,${0.07 * (6 - g) / 5})`; c.beginPath(); c.arc(gq[0], gq[1], r, 0, TAU); c.fill(); }
+      c.strokeStyle = 'rgba(36,28,22,.62)'; c.lineWidth = 1.4; c.beginPath(); c.moveTo(h1[0], h1[1]); c.lineTo(q[0], q[1] - r * 0.7); c.moveTo(h2[0], h2[1]); c.lineTo(q[0], q[1] - r * 0.7); c.stroke();
+      const hit = Math.exp(-Stage.mod(t - 0.75 * b.p.T, b.p.T) * 6) * (t > 0.5 ? 1 : 0);
+      const g = c.createRadialGradient(q[0] - r * 0.36, q[1] - r * 0.4, r * 0.08, q[0], q[1], r); g.addColorStop(0, '#fff2cf'); g.addColorStop(0.35, Stage.color.mix('#e2b25e', '#fff3c8', 0.6 * hit)); g.addColorStop(1, '#8a5a22');
+      c.fillStyle = g; c.beginPath(); c.arc(q[0], q[1], r, 0, TAU); c.fill();
+      c.fillStyle = 'rgba(255,255,255,.55)'; c.beginPath(); c.ellipse(q[0] - r * 0.38, q[1] - r * 0.42, r * 0.2, r * 0.12, -0.6, 0, TAU); c.fill();
+    });
+    // a quiet readout
+    const on = prog(t, 0.8, 1.0) * (1 - prog(t, 23.3, 0.6)); c.fillStyle = `rgba(52,42,34,${0.6 * on})`; c.font = '500 16px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.textBaseline = 'alphabetic';
+    c.fillText(String(BASE) + ' … ' + String(BASE + NP - 1) + '  S W I N G S   I N   ' + DUR + ' s', W - 130, 118); c.fillText(t.toFixed(1).padStart(4, '0') + ' s', W - 130, 146);
+  }
+});
+</script>
+</body>
+</html>

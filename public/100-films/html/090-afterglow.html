@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 090 — Afterglow</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 090 — AFTERGLOW
+ * A colour-field meditation: three soft bands breathing into one another. Nothing is drawn but three fields
+ * with feathered, slightly wandering boundaries, mottled like stained canvas, glowing a little where they
+ * meet. The palette moves from dusk (maroon / orange / violet) through ember (rose / amber / plum) to night
+ * (indigo / ultramarine / near-black) while the middle field swells and then closes to a single line of
+ * light. Dithered at the last step so the gradients hold. Five bars at 60 bpm (4 s each), a drone in D. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+let sh;
+
+const FRAG = `
+uniform float uP, uMid, uIn, uLine, uC;
+const vec3 TOP[3] = vec3[3](vec3(0.38, 0.07, 0.10), vec3(0.78, 0.31, 0.40), vec3(0.11, 0.10, 0.36));
+const vec3 MID[3] = vec3[3](vec3(0.95, 0.46, 0.12), vec3(0.97, 0.68, 0.22), vec3(0.10, 0.22, 0.66));
+const vec3 BOT[3] = vec3[3](vec3(0.21, 0.09, 0.34), vec3(0.36, 0.12, 0.30), vec3(0.025, 0.028, 0.07));
+vec3 pal(vec3 c[3], float p) { return p < 1.0 ? mix(c[0], c[1], smoothstep(0.0, 1.0, p)) : mix(c[1], c[2], smoothstep(0.0, 1.0, p - 1.0)); }
+void main() {
+  vec2 uv = vUv; float asp = uRes.x / uRes.y; vec2 q = vec2(uv.x * asp, uv.y);
+  // boundaries wander a little along their length
+  float w1 = 0.022 * (fbm(vec2(q.x * 1.3, uTime * 0.05)) - 0.5), w2 = 0.022 * (fbm(vec2(q.x * 1.1 + 9.0, uTime * 0.05 + 4.0)) - 0.5);
+  float b1 = uC + uMid * 0.5 + w1, b2 = uC - uMid * 0.5 + w2;                 // upper and lower edge of the middle field
+  float f1 = 0.055 + 0.03 * fbm(vec2(q.x * 2.0, 3.0)), f2 = 0.055 + 0.03 * fbm(vec2(q.x * 2.0, 7.0));
+  float up = smoothstep(b1 - f1, b1 + f1, uv.y), dn = 1.0 - smoothstep(b2 - f2, b2 + f2, uv.y), md = clamp(1.0 - up - dn, 0.0, 1.0);
+  vec3 ct = pal(TOP, uP), cm = pal(MID, uP), cb = pal(BOT, uP);
+  // each field has its own slow mottling, like thin paint soaked into cloth
+  ct *= 0.86 + 0.28 * fbm(q * 2.2 + vec2(0.0, uTime * 0.012)); cm *= 0.9 + 0.2 * fbm(q * 1.8 + 5.0 - vec2(uTime * 0.01, 0.0)); cb *= 0.84 + 0.32 * fbm(q * 2.4 + 11.0);
+  vec3 col = ct * up + cm * md + cb * dn;
+  // glow where fields meet; at the end the middle field is only this line
+  float g1 = exp(-pow((uv.y - b1) / 0.045, 2.0)), g2 = exp(-pow((uv.y - b2) / 0.045, 2.0));
+  col += (cm * 0.5 + ct * 0.3) * g1 * 0.5 + (cm * 0.5 + cb * 0.4) * g2 * 0.5;
+  float ln = 0.7 * exp(-pow((uv.y - uC - w1 * 0.3) / 0.011, 2.0)) + 0.4 * exp(-pow((uv.y - uC) / 0.06, 2.0)); col += vec3(0.86, 0.84, 1.0) * ln * uLine;
+  // the fields stop short of the frame, with soft uneven edges
+  float ex = min(uv.x, 1.0 - uv.x) * asp, ey = min(uv.y, 1.0 - uv.y), n = 0.03 * (fbm(q * 3.0 + 20.0) - 0.5);
+  float inset = smoothstep(0.045, 0.16, ex + n) * smoothstep(0.035, 0.13, ey + n);
+  vec3 ground = vec3(0.036, 0.03, 0.036);
+  col = mix(ground, col, inset * uIn);
+  col *= 0.97 + 0.06 * vnoise(gl_FragCoord.xy * 0.9);                      // weave
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)) * 1.5, 1.0);
+}`;
+
+Stage.create({
+  no: 90, title: 'Afterglow', subtitle: 'three fields, one horizon · 60 bpm',
+  duration: 20, background: '#090809', grain: 0.07, poster: 9.5,
+  fade: { in: 1.0, out: 1.6 },
+  slate: { at: 1.2, hold: 2.8, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 20, seed: 90 });
+    M.master({ reverb: { decay: 6.0, size: 1.5, damp: 0.35 }, fadeIn: 1.5, fadeOut: 3.0 });
+    const pad = M.track('warmpad', { reverb: 0.7, gain: 0.6, lowpass: (t) => 400 + 2200 * Math.sin(Math.PI * clamp01(t / 20)) }), str = M.track('strings', { reverb: 0.7, gain: (t) => 0.1 + 0.26 * Math.sin(Math.PI * clamp01(t / 18)), lowpass: (t) => 700 + 2600 * Math.sin(Math.PI * clamp01(t / 19)) }), org = M.track('organ', { reverb: 0.7, gain: 0.1, lowpass: 900 }), sub = M.track('sub', { reverb: 0.1, gain: 0.34 }), bell = M.track('bell', { reverb: 0.8, gain: 0.5 }), gp = M.track('glasspad', { reverb: 0.8, gain: 0.26 });
+    pad.chord(0, ['D2', 'A2', 'D3'], 20, 0.6); sub.note(0, 'D1', 19, 0.6); org.chord(2, ['D3', 'A3'], 16, 0.5);
+    str.chord(0, ['A3', 'D4'], 8, 0.5); str.chord(6, ['A3', 'D4', 'A4'], 8, 0.55); str.chord(12, ['D4', 'A4', 'D5'], 8, 0.5);
+    gp.chord(8, ['A4', 'E5'], 6, 0.4); gp.chord(14, ['D5', 'A5'], 6, 0.36);
+    bell.note(10, 'D3', 8, 0.7);
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const swell = 0.2 + 0.24 * Math.sin(Math.PI * clamp01((t - 2) / 14)) + 0.015 * Math.sin(t * 0.7), close = E.inOutSine(prog(t, 14.6, 4.2));
+    sh.draw(t, { uP: 0.9 * smoothstep(4.5, 9.5, t) + 0.1 * smoothstep(9.5, 11, t) + 1.0 * smoothstep(11, 16.5, t), uMid: lerp(swell, 0.0, close), uIn: E.inOutSine(prog(t, 0.2, 4.2)) * (1 - 0.0), uLine: smoothstep(0.55, 1, close) * (1 - smoothstep(18.6, 20, t)) * 0.9, uC: 0.5 + 0.03 * Math.sin(t * 0.21) });
+  }
+});
+</script>
+</body>
+</html>

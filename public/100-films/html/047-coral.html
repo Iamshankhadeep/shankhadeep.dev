@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 047 — Coral</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 047 — CORAL
+ * Two chemicals and a rule grow a reef. A Gray–Scott reaction–diffusion field (feedback shader, stateful) is seeded
+ * with a budded ring; every kalimba note of the opening drops one more seed into the water. The colonies advance as
+ * fronts, fold and branch, and the labyrinth closes over the frame on the downbeat of bar 5 (11.43 s). Then the
+ * feed/kill rates slide — a wave that starts where the ring was — and the ridges pearl into polyps that breathe with
+ * the kalimba (bar 6). In bar 7 the water turns against them from the outside in, until what is left is what we
+ * started with: a ring and a few points.
+ * 7 bars at 84 bpm (bar = 2.857 s), F# minor. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const BEAT = 60 / 84, BAR = 4 * BEAT, PEAK = 4 * BAR, PEARL = 12.6, BAR6 = 5 * BAR, EBB = 15.9, BAR7 = 6 * BAR;
+
+// seeds dropped by the kalimba: [beat, x, y] in field coordinates (0..1, y up)
+const DROPS = [
+  [2.0, 0.668, 0.285], [4.0, 0.235, 0.700], [5.5, 0.705, 0.745], [7.0, 0.215, 0.300],
+  [8.5, 0.800, 0.500], [10.0, 0.530, 0.905], [11.5, 0.400, 0.085], [13.0, 0.930, 0.140], [14.0, 0.060, 0.880]
+];
+const KEPT = [0, 2, 4, 3];                     // the four that are still there at the end
+const RING = [0.445, 0.520, 0.165];            // centre x, y, radius (in field heights)
+const KEEP = new Float32Array(8); KEPT.forEach((k, i) => { KEEP[i * 2] = DROPS[k][1]; KEEP[i * 2 + 1] = DROPS[k][2]; });
+
+// ───────────────────────── simulation: state = (1-u, v, slow average of v, memory of where the reef has been)
+const SIM = `
+uniform float uPearl, uEbb;
+uniform vec4 uDrop; uniform vec3 uRing; uniform float uKeep[8];
+void main(){
+  vec2 px = 1. / uRes;
+  vec4 c = texture(uPrev, vUv);
+  vec4 l = (texture(uPrev, vUv + vec2(px.x, 0.)) + texture(uPrev, vUv - vec2(px.x, 0.)) + texture(uPrev, vUv + vec2(0., px.y)) + texture(uPrev, vUv - vec2(0., px.y))) * .2
+         + (texture(uPrev, vUv + px) + texture(uPrev, vUv - px) + texture(uPrev, vUv + vec2(px.x, -px.y)) + texture(uPrev, vUv + vec2(-px.x, px.y))) * .05 - c;
+  float a = c.x, v = c.y, u = 1. - a;
+  // regional variety: m selects a place along the pattern band (spots … labyrinth … cells)
+  vec2 asp = vec2(uRes.x / uRes.y, 1.), q = vUv * asp;
+  float m = smoothstep(.12, .88, .5 + .5 * snoise(vec3(q * 1.15 + vec2(2.3, 6.1), .4)));
+  float n2 = snoise(vec3(q * 2.7 + vec2(4.7, 1.9), 2.2));
+  float Fg = mix(.0275, .0535, m), Kg = .0605 + .083 * (Fg - .025);
+  float Fs = mix(.0230, .0290, m), Ks = .0605 + .083 * (Fs - .025) + .0019;
+  // the pearling wave leaves from the centre of the first ring
+  float dc = length(q - uRing.xy * asp);
+  float pearl = smoothstep(0., .26, uPearl - dc - .09 * n2);
+  float F = mix(Fg, Fs, pearl), K = mix(Kg, Ks, pearl);
+  // the ebb: everything dies except a band on the first ring and four of the dropped seeds
+  float D = abs(dc - uRing.z) - .016;
+  for (int i = 0; i < 4; i++) D = min(D, length(q - vec2(uKeep[2 * i], uKeep[2 * i + 1]) * asp) - .012);
+  K += .0085 * smoothstep(0., .05, D + .03 * n2 * clamp(uEbb * 4., .3, 1.) - uEbb);
+  float r = u * v * v;
+  a += l.x + r - F * a;
+  v += .5 * l.y + r - (F + K) * v;
+  if (uStep == 0 && uDrop.w > .5) {
+    float d = length((vUv - uDrop.xy) * uRes);
+    float s = smoothstep(uDrop.z, uDrop.z * .35, d);
+    v = max(v, s * .55); a = max(a, s * .5);
+  }
+  float z = c.z, w = c.w;
+  if (uStep == 0) { z = mix(z, v, .022); w = max(w * .988 - .0006, smoothstep(.10, .26, v)); }
+  fragColor = vec4(clamp(a, 0., 1.), clamp(v, 0., 1.), z, clamp(w, 0., 1.));
+}`;
+const INIT = `
+uniform vec3 uRing;
+void main(){
+  vec2 p = (vUv - uRing.xy) * uRes;
+  float d = length(p), an = atan(p.y, p.x), R = uRing.z * uRes.y;
+  float w = 2.5 + .45 * sin(an * 5. + 1.3) + .3 * sin(an * 9. - .6);
+  float s = smoothstep(w + 1.2, w - .6, abs(d - R));
+  // seven buds, alternately inside and outside, give the ring somewhere to begin
+  for (int i = 0; i < 7; i++) {
+    float fi = float(i), ba = fi * .8976 + .35 + .3 * sin(fi * 2.4);
+    float sgn = mod(fi, 2.) < .5 ? 1. : -1.;
+    vec2 dir = vec2(cos(ba), sin(ba));
+    s = max(s, smoothstep(3.6, 1.6, sdSeg(p, dir * R, dir * (R + sgn * (6.5 + 2. * sin(fi * 1.7))))));
+  }
+  fragColor = vec4(s * .5, s * .55, 0., 0.);
+}`;
+
+// ───────────────────────── display: the field as a lit relief under water
+const SHOW = `
+uniform vec2 uCam; uniform float uZoom, uPulse, uSwell, uSweep, uBreath, uDusk;
+uniform float uRip[30];
+const vec3 L = vec3(-.5494, .6193, .5609);
+const vec3 NAVY = vec3(.008, .050, .078), TEAL = vec3(.026, .190, .235), HALO = vec3(.040, .300, .330), SCAR = vec3(.105, .300, .315);
+const vec3 PLUM = vec3(.300, .060, .160), ROSE = vec3(.700, .160, .280), CORAL = vec3(1.02, .430, .390), APRICOT = vec3(1.06, .610, .420), HOT = vec3(1.15, .30, .27), CREAM = vec3(1.14, .985, .830);
+vec4 cubic(float v){ vec4 n = vec4(1., 2., 3., 4.) - v; vec4 s = n * n * n; float x = s.x, y = s.y - 4. * s.x, z = s.z - 4. * s.y + 6. * s.x; return vec4(x, y, z, 6. - x - y - z) / 6.; }
+vec4 bic(vec2 uv){
+  vec2 ts = vec2(textureSize(uState, 0)), it = 1. / ts;
+  uv = uv * ts - .5; vec2 f = fract(uv); uv -= f;
+  vec4 xc = cubic(f.x), yc = cubic(f.y);
+  vec4 c = uv.xxyy + vec2(-.5, 1.5).xyxy;
+  vec4 s = vec4(xc.xz + xc.yw, yc.xz + yc.yw);
+  vec4 o = (c + vec4(xc.yw, yc.yw) / s) * it.xxyy;
+  float sx = s.x / (s.x + s.y), sy = s.z / (s.z + s.w);
+  return mix(mix(texture(uState, o.yw), texture(uState, o.xw), sx), mix(texture(uState, o.yz), texture(uState, o.xz), sx), sy);
+}
+float hmap(float v){ return smoothstep(.02, .40, v * uSwell); }
+void main(){
+  vec2 ts = vec2(textureSize(uState, 0)), e = 1. / ts;
+  vec2 sc = vUv - .5, p = sc * vec2(uRes.x / uRes.y, 1.);
+  vec2 suv = uCam + sc / uZoom, fq = suv * vec2(ts.x / ts.y, 1.);
+  vec4 s = bic(suv);
+  float v = s.y, a = s.x, h = hmap(v);
+  float hl = hmap(bic(suv - vec2(e.x, 0.)).y), hr = hmap(bic(suv + vec2(e.x, 0.)).y);
+  float hd = hmap(bic(suv - vec2(0., e.y)).y), hu = hmap(bic(suv + vec2(0., e.y)).y);
+  vec3 n = normalize(vec3((hl - hr) * 2.3, (hd - hu) * 2.3, 1.));
+  float ndl = dot(n, L);
+  // soft cast shadow toward lower-right, and a wide blur of the field for the subsurface glow
+  vec2 ld = normalize(L.xy) * e; float occ = 0.;
+  for (int i = 1; i <= 5; i++) { float fi = float(i); occ = max(occ, hmap(texture(uState, suv + ld * fi * 1.6).y) - h - fi * .09); }
+  float sh = 1. - .66 * smoothstep(0., .6, occ);
+  float g = 0.;
+  for (int i = 0; i < 8; i++) { float an = float(i) * .7854; vec2 d = vec2(cos(an), sin(an)); g += texture(uState, suv + d * e * 4.5).y + texture(uState, suv + vec2(d.x * .924 - d.y * .383, d.x * .383 + d.y * .924) * e * 10.).y; }
+  g = clamp(g / 16. / .16, 0., 1.5);
+
+  // water: lit from the upper-left, slow caustics, a halo where the reef has drawn on the water, scars where it has been
+  vec2 cq = fq * 4.2;
+  vec2 cw = vec2(snoise(vec3(cq * .55, uTime * .09)), snoise(vec3(cq * .55 + 7.3, uTime * .09)));
+  float ca = smoothstep(-.35, .95, snoise(vec3(cq + .7 * cw, uTime * .14)));
+  float fall = smoothstep(1.5, -.1, length(p - vec2(-.70, .44)));
+  vec3 water = mix(NAVY, TEAL, fall * .74 + .17 * ca * fall);
+  water = mix(water, HALO, smoothstep(.02, .6, a) * .5);
+  water = mix(water, SCAR * (.55 + .6 * fall), s.w * .55);
+  water += vec3(.75, .14, .20) * g * .075 * (1. + .6 * uPulse);
+  water *= mix(1., sh, .78);
+
+  // reef: plum in the creases, rose flanks, coral body, cream on the crests; new growth runs hot
+  float fresh = smoothstep(.02, .2, v - s.z);
+  float hue = .5 + .5 * snoise(vec3(fq * 1.5 + 11., .3)), hue2 = .5 + .5 * snoise(vec3(fq * .8 + vec2(3.1, 8.4), 1.7));
+  float pale = smoothstep(.30, .05, hue2), deep = smoothstep(.62, .95, hue2);                       // bleached zones, rose zones
+  vec3 mid = mix(CORAL, APRICOT, smoothstep(.35, .85, hue) * .7);
+  mid = mix(mid, ROSE * 1.3, deep * .6);
+  vec3 body = mix(ROSE, mid, smoothstep(.10, .60, h));
+  body = mix(body, HOT, fresh * .5 * smoothstep(.2, .7, h));
+  body = mix(body, CREAM, smoothstep(mix(.62, .40, pale), mix(.98, .86, pale), h) * mix(.86, .4, fresh) * (1. - .45 * deep));
+  float key = max(ndl, 0.), wrap = clamp(ndl * .5 + .5, 0., 1.);
+  vec3 reef = body * (vec3(1.05, .98, .90) * key * 1.02 * mix(sh, 1., .3) + vec3(.30, .23, .30) * (.6 + .4 * wrap) + .07 * ca);
+  reef = mix(reef, PLUM * (.5 + .5 * wrap), (1. - smoothstep(0., .34, h)) * .55);                     // creases
+  reef += vec3(1., .26, .20) * h * (1. - h) * 4. * .15 * (1. + uPulse) * (1. - .6 * key);        // thin flanks let light through
+  float spec = pow(max(dot(n, normalize(L + vec3(0., 0., 1.))), 0.), 30.);
+  reef += CREAM * spec * .34 * smoothstep(.4, .9, h);
+  reef += CREAM * smoothstep(.6, 1., h) * (.16 * uPulse + .05 * uBreath);
+  reef *= mix(.60, 1.10, fall);
+  reef = mix(reef, reef * vec3(.62, .86, .96), (1. - fall) * .5);                                    // the far water is bluer
+  vec3 col = mix(water, reef, smoothstep(.03, .24, h));
+
+  // a band of light crosses the reef at the peak
+  float sw = exp(-pow((dot(p, vec2(.78, -.62)) - uSweep) / .36, 2.));
+  col *= 1. + .50 * sw * (.3 + .7 * h);
+  col += vec3(.08, .15, .14) * sw * .25 * (1. - h);
+
+  // each kalimba drop: a flash and two rings on the surface
+  for (int i = 0; i < 10; i++) {
+    float age = uRip[i * 3 + 2]; if (age < 0. || age > 2.2) continue;
+    float d = length((suv - vec2(uRip[i * 3], uRip[i * 3 + 1])) * ts);
+    float k = age / 2.2, ek = 1. - pow(1. - k, 3.);
+    float r1 = 4. + 58. * ek, r2 = 2. + 34. * (1. - pow(1. - clamp(k - .12, 0., 1.), 3.));
+    float fade = (1. - k) * (1. - k);
+    float ring = smoothstep(1.7, 0., abs(d - r1)) * .55 + smoothstep(1.3, 0., abs(d - r2)) * .30 * step(.12, k);
+    col += CREAM * ring * fade * .5 * (1. - .7 * h);
+    col += vec3(1., .80, .66) * exp(-d * d / 60.) * exp(-age * 5.) * .9;
+  }
+
+  // marine snow drifting in front
+  vec3 snow = vec3(0.);
+  for (int k = 0; k < 2; k++) {
+    float fk = float(k), cell = 150. - 50. * fk, par = 1. + .35 * (fk + 1.) * (uZoom - 1.);
+    vec2 sp = (gl_FragCoord.xy - .5 * uRes) * par + vec2(uTime * (9. + 5. * fk), uTime * (5. + 3. * fk)) + fk * 311.;
+    vec2 id = floor(sp / cell), f = fract(sp / cell) - .5;
+    vec2 o = (hash22(id + fk * 17.) - .5) * .7; float rnd = hash21(id + 4.7 + fk);
+    o += .06 * vec2(sin(uTime * .7 + rnd * 40.), cos(uTime * .5 + rnd * 23.));
+    float rad = (1.3 + 1.6 * rnd) / cell;
+    snow += vec3(.80, .92, .88) * smoothstep(rad, rad * .25, length(f - o)) * step(.45, rnd) * (.10 + .14 * rnd);
+  }
+  col += snow * (1. - .5 * h);
+
+  col *= 1. - .32 * smoothstep(.35, 1.15, length(p * vec2(.92, 1.08)));
+  col *= 1. - uDusk * .45 * smoothstep(.15, .95, length(p * vec2(.8, 1.)));
+  // soft shoulder that keeps the coral saturated
+  float mx = max(col.r, max(col.g, col.b));
+  vec3 tm = col * ((1. - exp(-mx * 1.45)) / max(mx, 1e-4));
+  col = mix(tm, 1. - exp(-col * 1.45), .4);
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.);
+}`;
+
+let sim, drops = [];
+const rip = new Float32Array(30);
+const zoomAt = (t) => t < PEAK + 0.4
+  ? Math.exp(lerp(Math.log(1.9), Math.log(1.06), E.inOutSine(prog(t, 0.2, PEAK + 0.2))))
+  : lerp(1.06, 1.4, E.inOutSine(prog(t, PEAK + 0.4, 19.4 - PEAK - 0.4)));
+const GROW = 25;
+const stepsAt = (t) => Math.round(t < PEAK ? lerp(8, GROW, smoothstep(0.4, 4.5, t)) : t < EBB + 1.6 ? lerp(GROW, 30, smoothstep(PEAK, PEARL, t)) : lerp(30, 5, smoothstep(EBB + 1.6, 19.4, t)));
+
+Stage.create({
+  no: 47, title: 'Coral', subtitle: 'reaction–diffusion · 84 bpm',
+  duration: 20, background: '#03141c', grain: 0.06, stateful: true, poster: 12.4,
+  fade: { in: 1.2, out: 1.1, color: '#020d13' },
+  slate: { at: 0.8, hold: 3.0, pos: 'bl', color: 'rgba(255,238,220,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 84, duration: 20, seed: 47 });
+    M.master({ reverb: { decay: 4.6, size: 1.3, damp: 0.55 }, fadeIn: 0.5, fadeOut: 2.4 });
+    const air = M.track('air', { gain: 0.9, lowpass: 700, reverb: 0.3 });
+    const pad = M.track('pad', { inst: 'glasspad', reverb: 0.6, gain: 0.7 });
+    const drop = M.track('drop', { inst: 'kalimba', reverb: 0.6, gain: 0.8, delay: { time: 0.75, fb: 0.4, mix: 0.3, ping: true } });
+    const pulse = M.track('pulse', { inst: 'kalimba', reverb: 0.5, gain: 0.6 });
+    air.hit(0, 0.8, M.beats);
+    ['F#m9', 'Dmaj7', 'Aadd9', 'C#m7', 'Dmaj9', 'Bm9', 'F#m9'].forEach((c, i) => pad.chord(i * 4, c, 4, 0.5));
+    const notes = ['C#6', 'A5', 'E6', 'F#5', 'B5', 'C#6', 'A5', 'F#6', 'E6'];
+    DROPS.forEach(([b], i) => drop.note(b, notes[i], 1, 0.6));
+    pulse.pattern(20, 0.5, 'x.x.x.x.x.x.x...', { pitch: 'F#5' });
+    return M;
+  },
+
+  setup() {
+    sim = Stage.shader({ frag: SIM, init: INIT, display: SHOW, feedback: true, scale: 0.4, z: 1, uniforms: { uRing: RING, uKeep: KEEP } });
+    drops = Stage.events('drop').map((ev, i) => ({ t: ev.t, f: Math.round(ev.t * 60), x: DROPS[i][1], y: DROPS[i][2] }));
+  },
+  reset() { sim.reset(); },
+
+  frame(t, i) {
+    let dr = [0, 0, 0, 0];
+    rip.fill(-1);
+    drops.forEach((d, k) => { if (d.f === i) dr = [d.x, d.y, 3.4, 1]; rip[k * 3] = d.x; rip[k * 3 + 1] = d.y; rip[k * 3 + 2] = t >= d.t ? t - d.t : -1; });
+    const z = zoomAt(t), e = E.inOutSine(prog(t, 0.2, PEAK + 0.2));
+    const half = 0.5 / z;
+    let cx = lerp(0.470, 0.5, e), cy = lerp(0.515, 0.5, e);
+    if (t > PEAK + 0.4) { const q = E.inOutSine(prog(t, PEAK + 0.4, 19.4 - PEAK - 0.4)); cx = lerp(0.5, 0.5, q); cy = lerp(0.5, 0.515, q); }
+    cx = Stage.clamp(cx, half, 1 - half); cy = Stage.clamp(cy, half, 1 - half);
+    const pulse = Stage.hit('pulse', t, 0.3);
+    sim.draw(t, {
+      steps: stepsAt(t), uDrop: dr,
+      uPearl: t < PEARL ? -1 : lerp(-0.12, 1.75, prog(t, PEARL, 2.5, E.inOutSine)),
+      uEbb: lerp(1.25, -0.03, prog(t, EBB, 2.0, E.outCubic)),
+      uCam: [cx, cy], uZoom: z, uRip: rip,
+      uPulse: pulse, uSwell: 1 + 0.2 * pulse, uBreath: Stage.hit('pad', t, 1.4),
+      uSweep: lerp(-1.6, 1.6, prog(t, PEAK - 0.9, 3.4, E.inOutSine)),
+      uDusk: smoothstep(EBB, 19, t)
+    });
+  }
+});
+</script>
+</body>
+</html>

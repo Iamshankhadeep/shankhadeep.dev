@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 036 — Orrery</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 036 — ORRERY
+ * A brass orrery whose planets each ring a note as they cross a meridian line. The crossing times are computed
+ * from the orbital periods, and the score is written from them — so the music is the mechanism.
+ * Phases are chosen so that four planets cross together on the downbeat of bar 5 (13.33 s).
+ * Six bars at 72 bpm (3.33 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 72, ALIGN = BAR * 4, CX = 960, CY = 548, TILT = 0.52;
+const BRASS = '214,170,98', IVORY = '240,230,208';
+const PL = [
+  { r: 96, T: 2.5, col: ['#f6ecd6', '#b9a888'], s: 9, note: 'A5', inAlign: true },
+  { r: 150, T: 3.6, col: ['#e7b96a', '#8a5e24'], s: 12, note: 'F#5' },
+  { r: 208, T: 5.0, col: ['#8fc4b0', '#2f6b5c'], s: 15, note: 'E5', inAlign: true },
+  { r: 270, T: 6.9, col: ['#d9744a', '#7a2e16'], s: 13, note: 'C#5' },
+  { r: 336, T: 9.4, col: ['#f0dfb6', '#a3854a'], s: 22, note: 'A4', inAlign: true, ring: true },
+  { r: 404, T: 12.5, col: ['#9fb6c8', '#3d566b'], s: 17, note: 'E4' },
+  { r: 470, T: 16.5, col: ['#c9b08a', '#6b5230'], s: 14, note: 'D4', inAlign: true }
+];
+PL.forEach((p, k) => {
+  p.appear = 0.6 + k * 1.35;
+  // angle(t) = w·t + ph, crossing the meridian (angle ≡ 0) — aligned planets cross exactly at ALIGN
+  p.w = TAU / p.T; p.ph = p.inAlign ? -p.w * ALIGN : -p.w * (ALIGN + (k === 1 ? 1.1 : k === 3 ? 2.2 : 3.6));
+  p.cross = []; for (let n = -40; n < 60; n++) { const t = (n * TAU - p.ph) / p.w; if (t > p.appear + 0.4 && t < 19.2) p.cross.push(t); }
+});
+let ctx, chart;
+
+Stage.create({
+  no: 36, title: 'Orrery', subtitle: 'music from orbital periods · 72 bpm',
+  duration: 20, background: '#0a1126', grain: 0.055, poster: 13.6, vignette: 0.4,
+  fonts: ['500 18px "JetBrains Mono Variable"', 'italic 400 30px "Fraunces Variable"'],
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(214,170,98,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 36 });
+    M.master({ reverb: { decay: 4.4, size: 1.3, damp: 0.4 }, fadeIn: 0.6, fadeOut: 2.6 });
+    const vib = M.track('vibes', { reverb: 0.6, gain: 1.0, delay: { time: 1.5, fb: 0.25, mix: 0.2 } }), ch = M.track('chime', { reverb: 0.75, gain: 0.5 });
+    const pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.45 + 0.25 * smoothstep(6, ALIGN, t) }), sub = M.track('sub', { reverb: 0.08, gain: 0.55 }), str = M.track('strings', { reverb: 0.6, gain: 0.5, params: { cutoff: 2600, A: 1.2, R: 2 } });
+    pad.chord(0, ['D2', 'A2', 'E3', 'F#3'], 16, 0.55); pad.chord(16, ['D2', 'A2', 'E3', 'G#3', 'C#4'], 8, 0.65); sub.note(4, 'D1', 12, 0.6); sub.note(16, 'D1', 8, 0.85); str.chord(16, ['A3', 'E4', 'G#4', 'C#5'], 8, 0.5);
+    PL.forEach((p, k) => p.cross.forEach((t) => { const al = Math.abs(t - ALIGN) < 0.01; vib.note(M.b(t), p.note, 2.5, al ? 0.85 : 0.42 + 0.06 * k); if (k >= 4) ch.note(M.b(t), S.midi(p.note) + 12, 3, al ? 0.6 : 0.35); }));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    // engraved star chart, drawn once
+    chart = Stage.canvas2d({ z: 1 }); const c = chart, r = Stage.rng(36);
+    const bg = c.createRadialGradient(CX, CY, 60, CX, CY, 1100); bg.addColorStop(0, '#14204a'); bg.addColorStop(0.55, '#0c1532'); bg.addColorStop(1, '#070b1c'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    c.strokeStyle = `rgba(${BRASS},.07)`; c.lineWidth = 1;
+    for (let k = 1; k <= 9; k++) { c.beginPath(); c.arc(CX, CY, k * 118, 0, TAU); c.stroke(); }
+    for (let k = 0; k < 24; k++) { const a = k / 24 * TAU; c.beginPath(); c.moveTo(CX + Math.cos(a) * 118, CY + Math.sin(a) * 118); c.lineTo(CX + Math.cos(a) * 1300, CY + Math.sin(a) * 1300); c.stroke(); }
+    for (let i = 0; i < 520; i++) { const x = r() * W, y = r() * H, m = r(); c.fillStyle = `rgba(${IVORY},${0.12 + 0.5 * m * m})`; c.beginPath(); c.arc(x, y, 0.5 + 1.3 * m * m, 0, TAU); c.fill(); }
+    c.strokeStyle = `rgba(${BRASS},.16)`; for (let k = 0; k < 7; k++) { let x = 150 + r() * 1620, y = 120 + r() * 840; c.beginPath(); c.moveTo(x, y); for (let j = 0; j < 4; j++) { x += (r() - 0.5) * 220; y += (r() - 0.5) * 160; c.lineTo(x, y); c.fillStyle = `rgba(${IVORY},.5)`; c.fillRect(x - 1.5, y - 1.5, 3, 3); } c.stroke(); }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const zoom = lerp(1.78, 1.36, prog(t, 0, 20, E.inOutSine)), prec = -0.32 + 0.1 * prog(t, 0, 20, E.inOutSine);
+    const P = (r, a) => { const x = r * Math.cos(a + prec), y = r * Math.sin(a + prec); return [CX + x * zoom, CY + y * zoom * TILT, y]; };
+    const alignGlow = Math.exp(-Math.pow((t - ALIGN) / 0.9, 2)) * (t >= ALIGN ? 1 : 0.25);
+    // orbits (far half dimmer), the meridian ray, ticks
+    c.lineWidth = 1.3;
+    PL.forEach((p) => { const a = prog(t, p.appear - 0.4, 1.4, E.outCubic); if (a <= 0) return; c.strokeStyle = `rgba(${BRASS},${0.34 * a})`; c.beginPath(); c.ellipse(CX, CY, p.r * zoom, p.r * zoom * TILT, 0, 0, TAU * a); c.stroke(); });
+    const m0 = P(60, 0), m1 = P(520, 0), ma = prog(t, 0.3, 1.5, E.outCubic);
+    c.strokeStyle = `rgba(${IVORY},${(0.5 + 0.5 * alignGlow) * ma})`; c.lineWidth = 1.6 + 2 * alignGlow; c.beginPath(); c.moveTo(m0[0], m0[1]); c.lineTo(lerp(m0[0], m1[0], ma), lerp(m0[1], m1[1], ma)); c.stroke();
+    c.fillStyle = `rgba(${IVORY},${0.7 * ma})`; c.font = '500 18px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.textBaseline = 'middle'; if (ma > 0.9) c.fillText('M E R I D I A N', m1[0] + 16, m1[1]);
+    // ripples from each crossing
+    PL.forEach((p, k) => p.cross.forEach((tc) => { const age = t - tc; if (age < 0 || age > 2.4) return; const u = age / 2.4, q = P(p.r, 0), al = Math.abs(tc - ALIGN) < 0.01; c.strokeStyle = `rgba(${IVORY},${(al ? 0.8 : 0.5) * (1 - u) * (1 - u)})`; c.lineWidth = al ? 2.2 : 1.4; c.beginPath(); c.ellipse(q[0], q[1], (10 + (al ? 260 : 120) * E.outCubic(u)) * zoom, (10 + (al ? 260 : 120) * E.outCubic(u)) * zoom * TILT, 0, 0, TAU); c.stroke(); }));
+    // bodies, back to front
+    const items = [{ y: 0, sun: true }];
+    PL.forEach((p, k) => { const a = prog(t, p.appear, 1.2, E.outBack); if (a <= 0) return; const q = P(p.r, p.w * t + p.ph); items.push({ y: q[2], p, q, a, k }); });
+    items.sort((a, b) => a.y - b.y);
+    for (const it of items) {
+      if (it.sun) {
+        // the hub: a toothed brass wheel and the sun
+        const sp = t * 0.5; c.save(); c.translate(CX, CY); c.scale(zoom, zoom * TILT);
+        c.strokeStyle = `rgba(${BRASS},.75)`; c.lineWidth = 2; c.beginPath(); c.arc(0, 0, 52, 0, TAU); c.stroke(); c.lineWidth = 4; c.beginPath(); for (let g = 0; g < 36; g++) { const a = sp + g / 36 * TAU; c.moveTo(Math.cos(a) * 52, Math.sin(a) * 52); c.lineTo(Math.cos(a) * 60, Math.sin(a) * 60); } c.stroke();
+        c.lineWidth = 1.5; c.beginPath(); for (let g = 0; g < 6; g++) { const a = -sp * 0.7 + g / 6 * TAU; c.moveTo(0, 0); c.lineTo(Math.cos(a) * 52, Math.sin(a) * 52); } c.stroke(); c.restore();
+        const sg = c.createRadialGradient(CX, CY - 6, 2, CX, CY - 6, 150 * zoom); sg.addColorStop(0, `rgba(255,224,160,${0.5 + 0.3 * alignGlow})`); sg.addColorStop(0.3, 'rgba(255,200,120,.12)'); sg.addColorStop(1, 'rgba(255,200,120,0)'); c.fillStyle = sg; c.fillRect(CX - 300, CY - 300, 600, 600);
+        const bd = c.createRadialGradient(CX - 8, CY - 14, 2, CX, CY - 6, 26 * zoom); bd.addColorStop(0, '#fff3d0'); bd.addColorStop(1, '#d59a3c'); c.fillStyle = bd; c.beginPath(); c.arc(CX, CY - 6, 24 * zoom, 0, TAU); c.fill();
+        continue;
+      }
+      const { p, q, a, k } = it, hit = Math.max(0, ...p.cross.map((tc) => t >= tc ? Math.exp(-(t - tc) * 3.2) : 0));
+      // the arm from the hub
+      c.strokeStyle = `rgba(${BRASS},${0.28 * a})`; c.lineWidth = 1.2; c.beginPath(); c.moveTo(CX, CY); c.lineTo(q[0], q[1]); c.stroke();
+      const s = p.s * zoom * a * (1 + 0.5 * hit) * (1 + 0.12 * q[2] / 470);
+      if (hit > 0.02) { const hg = c.createRadialGradient(q[0], q[1], 0, q[0], q[1], s * 5); hg.addColorStop(0, `rgba(255,236,190,${0.6 * hit})`); hg.addColorStop(1, 'rgba(255,236,190,0)'); c.fillStyle = hg; c.fillRect(q[0] - s * 5, q[1] - s * 5, s * 10, s * 10); }
+      if (p.ring) { c.strokeStyle = `rgba(${IVORY},.55)`; c.lineWidth = 2.5; c.beginPath(); c.ellipse(q[0], q[1], s * 1.9, s * 0.5, -0.3, Math.PI * 0.05, Math.PI * 0.95, true); c.stroke(); }
+      const g = c.createRadialGradient(q[0] - s * 0.35, q[1] - s * 0.4, s * 0.1, q[0], q[1], s); g.addColorStop(0, p.col[0]); g.addColorStop(1, p.col[1]); c.fillStyle = g; c.beginPath(); c.arc(q[0], q[1], s, 0, TAU); c.fill();
+      if (p.ring) { c.strokeStyle = `rgba(${IVORY},.8)`; c.lineWidth = 2.5; c.beginPath(); c.ellipse(q[0], q[1], s * 1.9, s * 0.5, -0.3, Math.PI * 0.05, Math.PI * 0.95); c.stroke(); }
+    }
+    // caption at the alignment
+    const ca = win(t, ALIGN + 0.2, ALIGN + 4.6, 0.8, 1.0); if (ca > 0) { c.textAlign = 'right'; c.textBaseline = 'alphabetic'; c.fillStyle = `rgba(${IVORY},${0.8 * ca})`; c.font = 'italic 400 30px "Fraunces Variable"'; c.fillText('four in a line', W - 150, 962); c.fillStyle = `rgba(${BRASS},${0.7 * ca})`; c.font = '500 18px "JetBrains Mono Variable"'; c.fillText('C O N J U N C T I O N', W - 150, 996); }
+  }
+});
+</script>
+</body>
+</html>

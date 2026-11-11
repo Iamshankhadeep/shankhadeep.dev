@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 045 — Six-Fold</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 045 — SIX-FOLD
+ * Snow crystals grow, each one different, each one six-fold. One arm is grown by rule — a spine, side branches at
+ * sixty degrees whose lengths follow a seeded profile, and plates between them — then mirrored twelve times.
+ * Six bars at 72 bpm (3.33 s each): a hexagonal seed → the hero crystal grows (bars 1–3) → it turns, complete
+ * (bar 4) → and falls back into a field of drifting flakes. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 72;
+let ctx, hb, flakes = [], sprites = [];
+
+// one crystal: a list of side branches along the arm (position 0..1, length, sub-branching), from a seed
+function recipe(seed) {
+  const r = Stage.rng(seed), n = 5 + ((r() * 4) | 0), br = [], env = 0.5 + r() * 0.5, belly = 0.25 + 0.4 * r();
+  for (let i = 0; i < n; i++) { const p = 0.16 + 0.78 * (i + 0.3 + 0.4 * r()) / n; br.push({ p, len: (0.12 + 0.34 * Math.exp(-Math.pow((p - belly) / 0.34, 2)) * env) * (0.75 + 0.5 * r()), sub: r() < 0.6 ? 1 + ((r() * 2) | 0) : 0 }); }
+  return { br, plate: 0.10 + 0.16 * r(), tip: r() < 0.5, web: 0.3 + 0.5 * r() };
+}
+// draw a crystal of radius R at growth g (0..1). Lines are stroked in the current style.
+function crystal(c, rec, R, g, detail) {
+  for (let k = 0; k < 6; k++) {
+    c.save(); c.rotate(k * TAU / 6);
+    for (const m of [1, -1]) {
+      c.save(); c.scale(1, m);
+      const L = R * E.outCubic(clamp01(g * 1.15));
+      // spine
+      c.lineWidth = detail * (2.6 - 1.4 * g); c.beginPath(); c.moveTo(0, 0); c.lineTo(L, 0); c.stroke();
+      for (const b of rec.br) {
+        const x = b.p * R; if (x > L) continue; const bg = clamp01((g - b.p * 0.75) / 0.42), bl = b.len * R * E.outCubic(bg); if (bl < 1) continue;
+        const ex = x + bl * 0.5, ey = bl * 0.866;
+        c.lineWidth = detail * 1.6; c.beginPath(); c.moveTo(x, 0); c.lineTo(ex, ey); c.stroke();
+        // sub-branches, parallel to the spine and to the next arm
+        for (let s = 1; s <= b.sub; s++) { const u = s / (b.sub + 1), sx = x + bl * 0.5 * u, sy = bl * 0.866 * u, sl = bl * 0.42 * (1 - u * 0.5) * clamp01(bg * 2 - 0.6); if (sl < 1) continue; c.lineWidth = detail * 1.0; c.beginPath(); c.moveTo(sx, sy); c.lineTo(sx + sl, sy); c.moveTo(sx, sy); c.lineTo(sx - sl * 0.5, sy + sl * 0.866); c.stroke(); }
+        // a translucent plate webbing the fork
+        if (bg > 0.5) { c.globalAlpha *= 0.16 * rec.web * (bg - 0.5) * 2; c.beginPath(); c.moveTo(x, 0); c.lineTo(ex, ey); c.lineTo(x + bl * 0.75, 0); c.closePath(); c.fill(); c.globalAlpha /= 0.16 * rec.web * (bg - 0.5) * 2; }
+      }
+      if (rec.tip && g > 0.8) { const tl = R * 0.1 * (g - 0.8) * 5; c.lineWidth = detail * 1.2; c.beginPath(); c.moveTo(L - tl, 0); c.lineTo(L - tl * 0.4, tl * 0.5); c.stroke(); }
+      c.restore();
+    }
+    c.restore();
+  }
+  // central hexagonal plate with ridges
+  const pr = R * rec.plate * (0.35 + 0.65 * clamp01(g * 3));
+  c.save(); c.globalAlpha *= 0.22; c.beginPath(); for (let k = 0; k < 6; k++) { const a = k * TAU / 6 + TAU / 12; k ? c.lineTo(Math.cos(a) * pr, Math.sin(a) * pr) : c.moveTo(Math.cos(a) * pr, Math.sin(a) * pr); } c.closePath(); c.fill(); c.restore();
+  c.lineWidth = detail * 1.3; c.beginPath(); for (let k = 0; k <= 6; k++) { const a = k * TAU / 6 + TAU / 12; k ? c.lineTo(Math.cos(a) * pr, Math.sin(a) * pr) : c.moveTo(Math.cos(a) * pr, Math.sin(a) * pr); } c.stroke();
+}
+const HERO = recipe(4507);
+
+Stage.create({
+  no: 45, title: 'Six-Fold', subtitle: 'snow crystals · 72 bpm',
+  duration: 20, background: '#06101f', grain: 0.055, poster: 11.6, vignette: 0.4,
+  fade: { in: 1.2, out: 1.8 }, slate: { at: 0.9, hold: 3.0 },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 45 });
+    M.master({ reverb: { decay: 4.6, size: 1.3, damp: 0.3 }, fadeIn: 0.5, fadeOut: 2.8 });
+    const cel = M.track('celesta', { reverb: 0.6, gain: 0.95, delay: { time: 0.75, fb: 0.35, mix: 0.25 } }), mb = M.track('musicbox', { reverb: 0.6, gain: 0.7, pan: 0.2 });
+    const pad = M.track('glasspad', { reverb: 0.7, gain: (t) => 0.28 + 0.25 * smoothstep(3, 11, t), params: { A: 2, R: 3 } }), sub = M.track('sub', { reverb: 0.08, gain: 0.45 }), ch = M.track('chime', { reverb: 0.85, gain: 0.4, delay: { time: 0.5, fb: 0.45, mix: 0.35 } }), str = M.track('strings', { reverb: 0.6, gain: 0.45, params: { cutoff: 3000, A: 1.2, R: 2 } });
+    const prog = ['Bm9', 'Gmaj9', 'Dmaj9', 'A6', 'Bm9', 'Gmaj7'], rt = ['B1', 'G1', 'D1', 'A1', 'B1', 'G1'];
+    prog.forEach((c, i) => { const b = i * 4, n = S.chord(c, 4); pad.chord(b, c, 4, 0.5, { octave: 3 }); if (i >= 1) sub.note(b, rt[i], 3.7, i === 3 ? 0.8 : 0.5); if (i >= 2) str.chord(b, c, 4, i === 3 ? 0.55 : 0.4, { octave: 4 }); if (i < 4) cel.seq(b, 0.5, i === 0 ? [n[2], null, n[1] + 12, null, n[0] + 12, null, n[2] + 12, null] : [n[0] + 12, n[2] + 12, n[1] + 12, n[2] + 12, n[0] + 24, n[2] + 12, n[1] + 12, n[2] + 12], { vel: 0.4 + 0.05 * i, gate: 1.6 }); else mb.seq(b, 1, [n[2] + 12, n[1] + 12, n[0] + 12, n[1]], { vel: 0.5, gate: 2 }); });
+    ch.note(12, 'F#6', 4, 0.7); ch.note(12.5, 'B6', 4, 0.5);
+    const r = S.rng(9), sc = S.scale('B5', 'minorPent', 2); for (let b = 13; b < 23; b += 0.5) if (r() < 0.5) ch.note(b, sc[(r() * sc.length) | 0], 1, 0.15 + 0.2 * r());
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    // eight pre-drawn flakes for the drifting field (three blur levels each are made at draw time)
+    for (let v = 0; v < 8; v++) { const b = Stage.buffer(360, 360); b.translate(180, 180); b.strokeStyle = 'rgba(232,244,255,.95)'; b.fillStyle = 'rgba(210,232,255,1)'; b.lineCap = 'round'; crystal(b, recipe(100 + v * 37), 160, 1, 1.5);
+      // blurred copies are baked once (filters at frame time are slow): [sharp, soft, softer, far out of focus]
+      sprites.push([0, 2, 6, 13].map((px) => { if (!px) return b.canvas; const q = Stage.buffer(360, 360); q.filter = `blur(${px}px)`; q.drawImage(b.canvas, 0, 0); return q.canvas; })); }
+    hb = Stage.buffer(1700, 1700);
+    for (let i = 0; i < 64; i++) flakes.push({ v: i % 8, x: hash(i, 1), y: hash(i, 2), depth: Math.pow(hash(i, 3), 1.6), rot: hash(i, 4) * TAU, vr: (hash(i, 5) - 0.5) * 0.9, ph: hash(i, 6) * TAU });
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const g0 = c.createRadialGradient(960, 480, 60, 960, 540, 1150); g0.addColorStop(0, '#16335c'); g0.addColorStop(0.5, '#0b1c38'); g0.addColorStop(1, '#050b17'); c.fillStyle = g0; c.fillRect(0, 0, W, H);
+    const field = prog(t, BAR * 3.6, 3.4, E.inOutSine), g = prog(t, 0.5, BAR * 3 - 0.3, E.inOutSine);
+    // ── the drifting field (arrives as the hero falls back)
+    const drawFlakes = (front) => { for (const f of flakes) { if ((f.depth > 0.62) !== front) continue; const sz = 26 + 250 * f.depth * f.depth, sp = 26 + 120 * f.depth, y = Stage.mod(f.y * (H + 500) + t * sp, H + 500) - 250, x = f.x * (W + 300) - 150 + 40 * Math.sin(t * 0.5 + f.ph) + t * 8 * f.depth; const a = field * (front ? 0.5 : 0.25 + 0.6 * f.depth); if (a <= 0.003) continue; c.save(); c.translate(x, y); c.rotate(f.rot + f.vr * t); c.globalAlpha = a; const lv = front ? (f.depth > 0.82 ? 3 : 2) : f.depth < 0.2 ? 1 : 0; c.drawImage(sprites[f.v][lv], -sz / 2, -sz / 2, sz, sz); c.restore(); } c.globalAlpha = 1; };
+    drawFlakes(false);
+    // ── the hero crystal
+    const R = 372, fall = field, hs = lerp(1, 0.4, fall), hx = lerp(960, 1240, fall), hy = lerp(520, 640, fall) + 30 * fall * Math.sin(t * 0.6), rot = 0.1 + 0.07 * t + 0.5 * prog(t, BAR * 3, 8, E.inOutSine);
+    const glow = c.createRadialGradient(hx, hy, 10, hx, hy, R * 1.5 * hs); glow.addColorStop(0, `rgba(120,180,255,${0.26 * (0.3 + 0.7 * g)})`); glow.addColorStop(1, 'rgba(120,180,255,0)'); c.fillStyle = glow; c.fillRect(0, 0, W, H);
+    // drawn once into a buffer, then composited twice: a blurred halo and the sharp crystal
+    const h = hb; h.setTransform(1, 0, 0, 1, 0, 0); h.clearRect(0, 0, 1700, 1700); h.translate(850, 850); h.scale(2, 2); h.lineCap = 'round'; h.lineJoin = 'round';
+    h.strokeStyle = 'rgba(236,246,255,1)'; h.fillStyle = 'rgba(190,220,255,1)'; h.globalAlpha = 1; crystal(h, HERO, R, g, 1.7);
+    const spark = 0.75 + 0.25 * Stage.hit('chime', t, 0.8);
+    c.save(); c.translate(hx, hy); c.rotate(rot); c.scale(hs * 0.5, hs * 0.5);
+    c.globalAlpha = 0.5; c.filter = 'blur(9px)'; c.drawImage(h.canvas, -850, -850); c.filter = 'none';
+    c.globalAlpha = spark; c.drawImage(h.canvas, -850, -850);
+    c.restore(); c.globalAlpha = 1;
+    drawFlakes(true);
+  }
+});
+</script>
+</body>
+</html>

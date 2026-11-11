@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 003 — Tidal</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 003 — TIDAL
+ * Straight down on a shoreline: three waves arrive and withdraw. One fragment shader, a pure function of t.
+ * Seven bars at 84 bpm (one beat = 0.714 s). Each wave is a bore that enters from the left, runs up the sand,
+ * crests on a strong beat and drains back:
+ *   wave 1 crests on beat 6  (4.29 s)  — a third of the frame
+ *   wave 2 crests on beat 12 (8.57 s, bar 4) — past the middle, then a long drawback
+ *   wave 3 crests on beat 20 (14.29 s, bar 6) — almost to the right edge; it leaves a slowly evaporating sheen.
+ * The retreat of every wave is a cosine ease, so the moment each grain of sand was uncovered can be solved
+ * exactly in the shader — that drives stranded foam, wet darkening and the drying film without any simulation. */
+const { ease: E, prog, clamp01, lerp } = Stage;
+const BEAT = 60 / 84;
+const WAVES = [   // ts: bore enters · tp: crest · R: reach · L: level it drains to · F: drain time   (units: frame heights / seconds)
+  { ts: 2.0,  tp: 6 * BEAT,  R: 0.70, L: 0.37, F: 3.4 },
+  { ts: 6.0,  tp: 12 * BEAT, R: 1.10, L: 0.30, F: 4.0 },
+  { ts: 11.4, tp: 20 * BEAT, R: 1.64, L: 0.40, F: 5.2 }
+];
+const arr = (k) => `float[3](${WAVES.map((w) => w[k].toFixed(4)).join(', ')})`;
+
+const FRAG = `
+uniform vec3 uCam; uniform float uGlint;
+const float TS[3] = ${arr('ts')}; const float TP[3] = ${arr('tp')};
+const float RR[3] = ${arr('R')};  const float LL[3] = ${arr('L')}; const float FF[3] = ${arr('F')};
+const float S0 = -.45, E0 = .40, EDEEP = .22;
+const vec3 DRY = vec3(.872,.786,.642), WET = vec3(.600,.492,.360), UNDER = vec3(.800,.715,.560);
+const vec3 TURQ = vec3(.25,.77,.72), TEAL = vec3(.06,.48,.53), DEEP = vec3(.03,.27,.33), SKY = vec3(.84,.92,.93), FOAM = vec3(.975,.99,.985);
+const int NP = 8;
+const vec4 PB[8] = vec4[8](            // x, y, radius, rotation
+  vec4(1.030,.360,.034, .5), vec4(.830,.705,.022,-.4), vec4(.905,.640,.012, 1.1), vec4(1.365,.585,.026, .2),
+  vec4(1.440,.250,.015,-.9), vec4(.615,.215,.017, .8), vec4(1.245,.830,.011, .3), vec4(1.590,.700,.013,-.2));
+const vec4 PC[8] = vec4[8](            // colour, aspect
+  vec4(.44,.47,.48,1.32), vec4(.56,.43,.33,1.22), vec4(.80,.75,.68,1.12), vec4(.27,.28,.30,1.40),
+  vec4(.62,.52,.42,1.20), vec4(.40,.42,.42,1.26), vec4(.76,.70,.62,1.10), vec4(.50,.40,.34,1.30));
+
+float lobe(float y, float k){
+  float a = vnoise(vec2(y * 1.9 + k * 17.3, k * 5.1)) - .5, b = vnoise(vec2(y * 5.3 + k * 9.7, k * 3.3 + 2.)) - .5;
+  return (a * .12 + b * .045) * (.5 + .24 * k);
+}
+float wc(int k, float t){                                    // centre-line position of wave k's front
+  float u = clamp((t - TS[k]) / (TP[k] - TS[k]), 0., 1.);
+  float v = clamp((t - TP[k]) / FF[k], 0., 1.);
+  return t < TP[k] ? mix(S0, RR[k], 1. - (1. - u) * (1. - u)) : RR[k] - (RR[k] - LL[k]) * (.5 - .5 * cos(PI * v));
+}
+float voro(vec2 x, float tt){
+  vec2 n = floor(x), f = fract(x); float d1 = 8., d2 = 8.;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 g = vec2(float(i), float(j)), o = hash22(n + g);
+    o = .5 + .36 * sin(tt + TAU * o);
+    vec2 r = g + o - f; float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return sqrt(d2) - sqrt(d1);
+}
+float lace(vec2 q, float tt){                                // 1 on cell walls → 0 in the open cells
+  vec2 w = q + .45 * vec2(vnoise(q * .9 + 3.1), vnoise(q * .9 + 11.7));
+  float a = voro(w, tt), b = voro(w * 2.6 + 5.3, tt * 1.2 + 2.);
+  return max(1. - a * 2.1, .84 - b * 2.0);
+}
+float foamCov(vec2 q, float A, float tt, float soft){
+  float h = lace(q, tt) - .32 * (vnoise(q * 1.7 + 20.) - .5);
+  return smoothstep(1. - A - soft, 1. - A + soft, h) * smoothstep(.02, .16, A);
+}
+vec3 sand(vec2 p, float s, vec3 base, float wet){
+  float blot = fbm(p * 4.2 + 1.7), grain = vnoise(p * 540.) - .5, grain2 = vnoise(p * 170. + 9.) - .5;
+  float rip = sin(s * 150. + 5. * fbm(p * 3.1 + 7.));
+  vec3 c = base * (1. + (blot - .5) * .12 + grain * mix(.10, .05, wet) + grain2 * .05 + rip * .012);
+  c *= 1. - .16 * smoothstep(.80, .90, vnoise(p * 210. + 40.));
+  c = mix(c, vec3(.93, .90, .84), smoothstep(.93, .97, vnoise(p * 95. + 80.)) * .5);
+  return c;
+}
+void main(){
+  vec2 p = gl_FragCoord.xy / uRes.y, ctr = vec2(.889, .5);
+  p = (p - ctr) / uCam.z + ctr + uCam.xy;
+  float t = uTime, y = p.y;
+  float s = p.x + .14 * (y - .5) + .03 * sin(y * 2.6 + .4);  // distance up the beach (shoreline leans a little)
+  float nz = fbm(p * 5. + 2.3);
+
+  // ── where is the water, when was this sand last under it, how much foam is here
+  float lap = .007 * sin(t * 1.25 + y * 3.1) + .004 * sin(t * 2.3 - y * 6.3 + 1.);
+  float edge = E0 + lobe(y, 0.) + lap;
+  float wetD = 0., sheen = 0., ageLast = 99.;
+  float dB = edge - s;
+  float A = smoothstep(0., .003, dB) * smoothstep(.024, .004, dB) * .8 * (.55 + .45 * vnoise(vec2(y * 9., t * .4))) * (1. - step(TP[0], t));
+  float adv = 0.;
+  for (int k = 0; k < 3; k++) {
+    if (t < TS[k]) break;
+    float fk = float(k), lb = lobe(y, fk + 1.), c = wc(k, t);
+    float u = clamp((t - TS[k]) / (TP[k] - TS[k]), 0., 1.);
+    bool rising = t < TP[k];
+    float xk = c + lb * (rising ? mix(.25, 1., u * u * (3. - 2. * u)) : 1.) + lap * smoothstep(0., 1.5, t - TP[k]);
+    if (rising) edge = max(edge, xk); else edge = xk;
+    float d = xk - s, wb = .09 + .05 * fk;
+    float along = .75 + .5 * vnoise(vec2(y * 4.3 + fk * 7., t * .25 + fk));
+    float inw = smoothstep(0., .003, d);
+    A *= 1. - inw;                                           // a new front wipes the old foam
+    float Ak, advk;
+    if (rising) {
+      float grow = smoothstep(S0, E0 + .1, c);               // the bore foams up as it nears the beach
+      Ak = inw * ((1.3 * exp(-d / wb) + .3 * exp(-d / (wb * 4.))) * along * mix(.45, 1., grow) + smoothstep(.016, .0, d) * 1.2);
+      advk = .85 * (c - RR[k]);
+    } else {
+      float tau = t - TP[k], sp = s - lb;
+      float q = clamp((RR[k] - sp) / (RR[k] - LL[k]), 0., 1.);
+      float tu = min(TP[k] + FF[k] * acos(1. - 2. * q) / PI, t);   // when this point was uncovered
+      float reach = smoothstep(.005, -.005, sp - RR[k]);
+      float age = t - tu, tauU = tu - TP[k];
+      float wet = (1.3 * exp(-d / (wb * (1. + .35 * tau))) + .3 * exp(-d / (wb * 4.))) * along * exp(-tau / 2.2) + smoothstep(.014, .0, d) * (.35 + .85 * exp(-tau / 1.2));
+      float dry = reach * ((1.3 * along * exp(-tauU / 2.2) + .35 + .85 * exp(-tauU / 1.2)) * exp(-age / 1.0)
+                + .95 * exp(-pow((RR[k] - sp) / .014, 2.)) * exp(-tau / 3.2));
+      Ak = mix(dry, wet, inw);
+      advk = .35 * (mix(sp, c, inw) - RR[k]);
+      wetD = max(wetD, reach * exp(-age / 30.));
+      sheen = max(sheen, reach * (1. - smoothstep(.55, 1., age / (2.0 + 1.3 * fk) + (nz - .5) * .5)));
+      ageLast = mix(ageLast, age, reach);
+    }
+    if (Ak > A) { A = Ak; adv = advk; }
+  }
+  float wm = smoothstep(-.0015, .0015, edge - s), d = max(edge - s, 0.);
+  // loose foam drifting on the standing water
+  float wetp = .36 * smoothstep(.48, .78, fbm(vec2(s * 2.6 - t * .05, y * 2.2 + 4.))) * smoothstep(.0, .14, E0 - .05 - s);
+  if (wetp > A) { A = wetp; adv = t * .02; }
+
+  // ── sand, pebbles, drying film
+  vec2 pr = p + wm * .0035 * vec2(snoise(vec3(p * 13., t * .45)), snoise(vec3(p * 13. + 31., t * .45)));
+  float damp = .62 * smoothstep(E0 + .42, E0 + .08, s + .10 * (nz - .5));
+  float wetA = max(max(wetD, damp), wm);
+  vec3 col = sand(pr, s, mix(mix(DRY, WET, wetA), UNDER, wm), wetA);
+  float tail = 0., pm = 0.;
+  for (int i = 0; i < NP; i++) {
+    vec4 P = PB[i]; vec2 r = pr - P.xy; float R = P.z;
+    float tx = -r.x / R;                                     // seaward of the pebble: the backwash leaves a wet tail
+    tail = max(tail, step(0., tx) * (1. - smoothstep(0., 9., tx)) * smoothstep(1.05, .35, abs(r.y) / R + tx * .09));
+    vec2 qs = rot(P.w) * (r - vec2(.38, -.38) * R); qs.x /= PC[i].w;
+    col *= 1. - .40 * smoothstep(R * .5, -R * .35, length(qs) - R);
+    vec2 b = rot(P.w) * r; b.x /= PC[i].w;
+    float db = length(b) - R + .14 * R * (vnoise(b / R * 1.6 + float(i) * 7.) - .5);
+    float m = smoothstep(.0014, -.0014, db);
+    float shade = .80 + .36 * dot(r / R, vec2(-.6, .6)) - .25 * smoothstep(-.5 * R, 0., db);
+    vec3 pc = PC[i].rgb * shade * (.92 + .16 * vnoise(b * 240.)) * mix(1., .74, wetA);
+    pc += .22 * wetA * smoothstep(.42, .0, length(r / R - vec2(-.3, .32)));
+    col = mix(col, pc, m); pm = max(pm, m);
+  }
+  float hot = exp(-dot(p - vec2(.25, .95), p - vec2(.25, .95)) * 1.1);     // the sun side of the frame
+  sheen = max(sheen, tail * wetD * exp(-ageLast / 7.)) * (1. - wm) * (1. - pm);
+  col *= 1. - .07 * tail * wetD * (1. - wm);
+  col = mix(col, SKY, sheen * (.22 + .24 * hot));
+
+  // ── water
+  float D = .03 + .30 * (1. - exp(-d * 2.4)) + 6. * pow(max(0., EDEEP + lobe(y, 0.) * .5 - s), 1.35);
+  vec3 trans = exp(-D * vec3(5., 1.2, 1.0));
+  vec3 scat = mix(mix(TURQ, TEAL, smoothstep(.15, .7, D)), DEEP, smoothstep(.6, 1.5, D));
+  vec3 wcol = mix(col * trans, scat, 1. - exp(-D * 3.2));
+  float ca = voro(pr * 11. + vec2(t * .12, 0.) + .5 * vec2(vnoise(pr * 5.), vnoise(pr * 5. + 9.)), t * .9);
+  wcol += vec3(.9, 1., .95) * smoothstep(.16, .0, ca) * .10 * exp(-D * 2.2);
+  wcol += .035 * snoise(vec3(p * vec2(7., 4.) - vec2(edge * 2., 0.), t * .3)) + SKY * .05 * hot;
+  wcol *= 1. - .14 * smoothstep(.012, .0, d);
+  col = mix(col, wcol, wm);
+
+  // ── foam: lace that thins into open cells as its density decays
+  vec2 q = vec2(s - adv, y) * 15.;
+  float tt = t * .55;
+  float sh = foamCov(q + vec2(.20, .26), A * .92, tt, .16);
+  col *= 1. - sh * mix(.10, .24, wm);
+  float cov = foamCov(q, A, tt, .07);
+  col = mix(col, FOAM * (.93 + .07 * cov), cov * mix(.62, 1., clamp(A * 1.2, 0., 1.)));
+
+  // ── glints
+  float gl = smoothstep(.62, .95, snoise(vec3(p * vec2(95., 140.), t * 1.1))) * smoothstep(-.1, .6, snoise(vec3(p * vec2(22., 30.) + 5., t * .5)));
+  col += vec3(1., .98, .92) * gl * uGlint * (wm * (.30 + .9 * hot) + sheen * .45) * (1. - .7 * cov);
+
+  col = pow(clamp(col, 0., 1.), vec3(1.04, 1.02, 1.0)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(col, 1.);
+}`;
+
+let sea;
+
+Stage.create({
+  no: 3, title: 'Tidal', subtitle: 'fragment shader · 84 bpm',
+  duration: 20, background: '#08262b', grain: 0.05, vignette: 0.22, poster: 15.2,
+  fade: { in: 1.0, out: 1.5, color: '#08262b' },
+  slate: { at: 0.8, hold: 3.0, pos: 'br', color: 'rgba(66,48,32,.88)' },
+
+  music(S) {
+    const M = S.score({ bpm: 84, duration: 20, seed: 3 });
+    M.master({ reverb: { decay: 3.4, size: 1.15, damp: 0.5 }, fadeOut: 2.2, fadeIn: 0.5 });
+    const gtr = M.track('guitar', { reverb: 0.38, gain: 0.95, humanize: 0.35, delay: { time: 0.75, fb: 0.22, mix: 0.14 } });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.6, gain: (t) => 0.45 + 0.4 * Math.min(1, t / 14.3) - 0.25 * clamp01((t - 16) / 4) });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.5 });
+    const wind = M.track('wind', { reverb: 0.3, gain: 0.5 });
+    const wave = M.track('whoosh', { reverb: 0.45, gain: 1.0, params: { peak: 0.52, f0: 180, f1: 3800 } });
+    const fizz = M.track('fizz', { inst: 'fall', reverb: 0.4, gain: 0.4, highpass: 1800 });
+    wind.hit(0, 0.8, M.beats);
+
+    // harmony — D | Bm · G | A | G | Em · A7sus | D | G · D
+    const H = [[0, 'Dadd9', 4], [4, 'Bm7', 2], [6, 'Gmaj7', 2], [8, 'Asus4', 2], [10, 'A', 2], [12, 'Gmaj9', 4], [16, 'Em9', 2], [18, 'A7sus4', 2], [20, 'Dmaj9', 4], [24, 'Gmaj7', 2], [26, 'Dadd9', 2]];
+    H.forEach(([b, c, len]) => pad.chord(b, c, len + 0.3, b === 20 ? 0.75 : 0.55));
+    [[0, 'D2', 3.5, 0.4], [6, 'G1', 2, 0.6], [8, 'A1', 3.5, 0.45], [12, 'G1', 3.8, 0.7], [16, 'E1', 2, 0.5], [18, 'A1', 2, 0.6], [20, 'D1', 3.9, 0.9], [24, 'G1', 2, 0.55], [26, 'D2', 2, 0.5]]
+      .forEach(([b, n, len, v]) => sub.note(b, n, len, v));
+
+    // fingerpicked guitar: thumb on the beat, fingers answering; density follows the water
+    const _ = null;
+    gtr.seq(0, 0.5, ['D3', _, 'A3', _, 'E4', _, 'F#4', _], { vel: 0.5, gate: 2.5 });
+    gtr.seq(4, 0.5, ['B2', 'F#3', 'D4', 'F#3', 'G2', 'D3', 'B3', 'F#4'], { vel: 0.58, gate: 2 });
+    gtr.seq(8, 0.5, ['A2', 'E3', 'D4', 'E4', 'A2', 'E3', 'C#4', 'E4'], { vel: 0.56, gate: 2 });
+    gtr.seq(12, 0.25, ['G2', _, 'D3', 'A3', 'B3', 'D4', 'F#4', 'A4', 'G2', _, 'D3', 'B3', 'D4', 'F#4', 'B4', 'A4'], { vel: 0.64, gate: 3 });
+    gtr.seq(16, 0.25, ['E2', _, 'B2', 'G3', 'B3', 'D4', 'F#4', 'G4', 'A2', 'E3', 'G3', 'D4', 'E4', 'G4', 'A4', 'B4'], { vels: [0.6, 0, 0.5, 0.52, 0.54, 0.56, 0.58, 0.62, 0.66, 0.58, 0.6, 0.63, 0.66, 0.7, 0.74, 0.78], gate: 3 });
+    gtr.chord(20, ['D2', 'A2', 'D3', 'A3', 'C#4', 'F#4'], 4, 0.8, { strum: 0.035 });
+    gtr.seq(20.5, 0.25, ['D5', 'A4', 'F#5', 'A4', 'E5', 'A4', 'D5', 'F#4', 'C#5', 'A4', 'E5', 'A4', 'D5', 'F#4'], { vel: 0.62, gate: 3 });
+    gtr.seq(24, 0.5, ['G2', 'D3', 'B3', 'D4', _, _, _, _], { vel: 0.55, gate: 3 });
+    gtr.seq(25.5, 0.5, ['F#4'], { vel: 0.5, gate: 3 });
+    gtr.chord(26, ['D3', 'A3', 'D4', 'E4', 'F#4'], 2, 0.5, { strum: 0.07 });
+
+    // every wave: a swell that peaks as the front runs up the sand, then the foam fizzing out behind it
+    WAVES.forEach((w, i) => {
+      const len = [4.2, 5.0, 6.4][i], pk = w.tp - [0.45, 0.5, 0.6][i];
+      wave.hit(M.b(pk - 0.52 * len), [0.5, 0.7, 1.0][i], M.b(len));
+      fizz.hit(M.b(w.tp - 0.1), [0.35, 0.5, 0.7][i], M.b([2.6, 3.2, 4.2][i]));
+    });
+    return M;
+  },
+
+  setup() { sea = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    // the camera hangs over the waterline and eases back as the waves grow
+    const z = lerp(1.085, 1.0, E.inOutSine(clamp01(t / 14.3))) + 0.012 * E.inOutSine(clamp01((t - 14.3) / 5.7));
+    const ox = lerp(-0.052, 0, E.inOutSine(clamp01(t / 14.3))), oy = 0.012 * Math.sin(t * 0.21 + 0.4);
+    sea.draw(t, { uCam: [ox, oy, z], uGlint: 0.75 + 0.9 * Stage.hit('guitar', t, 0.45) });
+  }
+});
+</script>
+</body>
+</html>

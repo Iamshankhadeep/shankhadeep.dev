@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 084 — Phosphor</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 084 — PHOSPHOR
+ * An oscilloscope in X-Y mode draws living figures. The beam is simulated the honest way: every frame the
+ * current figure is sampled 2 600 times at equal time steps and each sample is one faint additive dot — so
+ * the trace is automatically brighter where the beam moves slowly (the turning points of a Lissajous, the
+ * corners of a cube). The last few frames are redrawn dimmer for persistence; a blurred copy is the glow.
+ * A dot, a line, then Lissajous figures whose frequency ratios are the just intervals of the bassline
+ * (octave 2:1, fifth 3:2, fourth 4:3, minor third 6:5 …), a wireframe cube, a rose, and a small "hi".
+ * Eight bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, CX = 800, CY = 540, RAD = 330, NS = 2600;
+// the bassline, one note per beat from beat 4: [x-ratio, y-ratio, name, midi]
+const RIFF = [[1, 1, 'UNISON', 33], [2, 1, 'OCTAVE', 45], [3, 2, 'FIFTH', 40], [4, 3, 'FOURTH', 38], [6, 5, 'MINOR THIRD', 36], [3, 2, 'FIFTH', 40], [9, 5, 'MINOR SEVENTH', 43], [2, 1, 'OCTAVE', 45], [8, 5, 'MINOR SIXTH', 41], [3, 2, 'FIFTH', 40], [4, 3, 'FOURTH', 38], [3, 2, 'FIFTH', 40]];
+const CUBE_PATH = [0, 1, 3, 2, 0, 4, 5, 1, 5, 7, 3, 7, 6, 2, 6, 4], HI = [[-0.86, 0.42], [-0.66, -0.1], [-0.52, -0.82], [-0.63, -0.5], [-0.62, 0.48], [-0.56, 0.12], [-0.34, -0.06], [-0.18, 0.14], [-0.14, 0.48], [0.02, 0.44], [0.2, 0.1], [0.27, -0.02], [0.3, 0.46], [0.46, 0.44], [0.62, 0.28]];
+const cr = (p, u) => { const n = p.length - 1, s = Math.min(n - 1e-6, u * n), i = Math.floor(s), f = s - i, g = (k) => p[Math.max(0, Math.min(n, k))], a = g(i - 1), b = g(i), c = g(i + 1), d = g(i + 2); return [0, 1].map((k) => 0.5 * (2 * b[k] + (c[k] - a[k]) * f + (2 * a[k] - 5 * b[k] + 4 * c[k] - d[k]) * f * f + (3 * b[k] - a[k] - 3 * c[k] + d[k]) * f * f * f)); };
+// one figure: where is the beam at phase u (0..1) of its cycle, at film time t?
+function beam(fig, u, t) {
+  if (fig.k === 'dot') { const r = 0.012; return [r * Math.cos(u * TAU * 7), r * Math.sin(u * TAU * 7)]; }
+  if (fig.k === 'line') { const a = 0.82 * E.outCubic(clamp01((t - 1) / 0.5)), open = smoothstep(1.5, 2.0, t); return [a * Math.sin(u * TAU), a * open * Math.sin(u * TAU + Math.PI / 2 * open) * 0.999]; }
+  if (fig.k === 'liss') { const th = u * TAU, ph = t * 0.9 + fig.i; return [0.84 * Math.sin(fig.a * th + ph), 0.84 * Math.sin(fig.b * th)]; }
+  if (fig.k === 'cube') { const n = CUBE_PATH.length, s = u * (n - 1), i = Math.min(n - 2, Math.floor(s)), f = E.inOutSine(s - i), ry = t * 0.9, rx = 0.5 + 0.3 * Math.sin(t * 0.7), P = (v) => { let x = v & 1 ? 1 : -1, y = v & 2 ? 1 : -1, z = v & 4 ? 1 : -1; const x1 = x * Math.cos(ry) + z * Math.sin(ry), z1 = -x * Math.sin(ry) + z * Math.cos(ry), y1 = y * Math.cos(rx) - z1 * Math.sin(rx), z2 = y * Math.sin(rx) + z1 * Math.cos(rx), k = 0.52 * 3.4 / (3.4 + z2); return [x1 * k, y1 * k]; }, a = P(CUBE_PATH[i]), b = P(CUBE_PATH[i + 1]); return [lerp(a[0], b[0], f), lerp(a[1], b[1], f)]; }
+  if (fig.k === 'rose') { const th = u * TAU * 3, R = 5, r = 3, d = 5 * (0.75 + 0.25 * Math.sin(t * 1.6)), k = 0.84 / (R - r + 5), ro = t * 0.5, x = ((R - r) * Math.cos(th) + d * Math.cos((R - r) / r * th)) * k, y = ((R - r) * Math.sin(th) - d * Math.sin((R - r) / r * th)) * k; return [x * Math.cos(ro) - y * Math.sin(ro), x * Math.sin(ro) + y * Math.cos(ro)]; }
+  if (fig.k === 'hi') { // out along the letters, hop to the dot of the i, back again
+    const wv = 0.11 * Math.sin(t * 5.2), sway = (p) => { const x = p[0] + 0.1, y = p[1]; return [x * Math.cos(wv) - (y - 0.5) * Math.sin(wv), 0.5 + x * Math.sin(wv) + (y - 0.5) * Math.cos(wv) - 0.06]; };
+    if (u < 0.44) return sway(cr(HI, u / 0.44)); if (u < 0.56) { const a = (u - 0.44) / 0.12 * TAU * 3; return sway([0.27 + 0.022 * Math.cos(a), -0.36 + 0.022 * Math.sin(a)]); } return sway(cr(HI, 1 - (u - 0.56) / 0.44)); }
+  return [0, 0];
+}
+function figAt(t) {
+  if (t < 1) return { k: 'dot', label: 'SPOT' }; if (t < 2) return { k: 'line', label: t < 1.5 ? 'LINE' : '1 : 1' };
+  if (t < 8) { const i = Math.min(11, Math.floor((t - 2) / 0.5)), r = RIFF[i]; return { k: 'liss', a: r[0], b: r[1], i, label: r[0] + ' : ' + r[1] + '   ' + r[2] }; }
+  if (t < 12) return { k: 'cube', label: 'CUBE · 12 EDGES' }; if (t < 14) return { k: 'rose', label: 'ROSE · 5 : 3' }; if (t < 15.3) return { k: 'hi', label: 'HI' }; return { k: 'dot', label: '' };
+}
+let bg, ctx, tr;
+
+Stage.create({
+  no: 84, title: 'Phosphor', subtitle: 'x-y mode · 120 bpm',
+  duration: 16, background: '#050706', grain: 0.05, poster: 6.3,
+  fonts: ['500 14px "JetBrains Mono Variable"', '500 26px "JetBrains Mono Variable"'],
+  fade: { in: 0.5, out: 0.7 },
+  slate: { at: 0.4, hold: 2.2, pos: 'bl', color: 'rgba(190,255,214,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 84 });
+    M.master({ reverb: { decay: 1.0, size: 0.6, damp: 0.55 }, fadeOut: 0.5 });
+    const acid = M.track('acid', { reverb: 0.1, gain: 0.56, humanize: 0 }), arp = M.track('arp', { reverb: 0.25, gain: 0.8, pan: 0.25, delay: { time: 0.75, fb: 0.35, mix: 0.22 }, lowpass: (t) => 1500 + 4000 * smoothstep(7, 12, t) }), kick = M.track('kick', { reverb: 0.02, gain: 0.52 }), hat = M.track('hat', { reverb: 0.04, gain: 0.44 }), tk = M.track('tick', { reverb: 0.2, gain: 0.5, humanize: 0 }), sine = M.track('sine', { reverb: 0.3, gain: 0.3 }), fall = M.track('fall', { reverb: 0.3, gain: 0.3 }), sq = M.track('square', { reverb: 0.3, gain: 0.2 });
+    tk.hit(0, 0.6, 0.05, { tone: 900 }); sine.note(2, 57, 2, 0.5, { attack: 0.3 });
+    // one bass note per beat; its interval above A is the figure's ratio
+    RIFF.forEach((r, i) => { const b = 4 + i; [0, 0.25, 0.5, 0.75].forEach((o, k) => acid.note(b + o, r[3] + (k === 2 ? 12 : 0), 0.2, k === 0 ? 0.85 : 0.55)); });
+    const am = ['A3', 'C4', 'E4', 'A4', 'G4', 'E4', 'C4', 'E4'];
+    for (let bar = 2; bar < 7; bar++) { const b = bar * 4; kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); hat.pattern(b, 0.25, '..x...x...x...xx', { vel: 0.5 }); if (bar >= 4) { const tp = [0, 0, 5, 7][bar - 4 > 2 ? 0 : bar - 4] || 0; for (let k = 0; k < 16; k++) arp.note(b + k * 0.25, S.midi(am[k % 8]) + (bar === 6 ? 12 : 0), 0.2, k % 4 ? 0.36 : 0.5); [0, 1, 2, 3].forEach((q) => acid.note(b + q, [33, 33, 36, 40][q] + (bar === 5 ? 5 : 0), 0.4, 0.8)); [0.5, 1.5, 2.5, 3.5].forEach((q) => acid.note(b + q, 45 + (bar === 5 ? 5 : 0), 0.2, 0.5)); } }
+    for (let k = 0; k < 4; k++) kick.hit(4 + k, 0.6);
+    // "hi": two notes, then the beam switches off
+    sq.note(28, 76, 0.5, 0.5); sq.note(28.75, 81, 1.2, 0.5); fall.hit(30.6, 0.7, 0.9); tk.hit(30.6, 0.8, 0.05, { tone: 700 });
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 }); tr = Stage.buffer(W, H);
+    const c = bg, g = c.createRadialGradient(CX, CY, 100, CX, CY, 1300); g.addColorStop(0, '#111614'); g.addColorStop(1, '#040605'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // bezel and tube face
+    c.fillStyle = '#1b201e'; c.beginPath(); c.roundRect(CX - 450, CY - 450, 900, 900, 70); c.fill(); c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 2; c.stroke();
+    const fg = c.createRadialGradient(CX - 60, CY - 90, 40, CX, CY, 520); fg.addColorStop(0, '#0d1512'); fg.addColorStop(1, '#040807'); c.fillStyle = fg; c.beginPath(); c.roundRect(CX - 400, CY - 400, 800, 800, 54); c.fill();
+    // graticule: 10 × 10 divisions, finer ticks on the axes
+    c.save(); c.beginPath(); c.roundRect(CX - 400, CY - 400, 800, 800, 54); c.clip(); c.strokeStyle = 'rgba(120,220,160,.13)'; c.lineWidth = 1;
+    for (let i = -5; i <= 5; i++) { c.beginPath(); c.moveTo(CX + i * 72, CY - 400); c.lineTo(CX + i * 72, CY + 400); c.moveTo(CX - 400, CY + i * 72); c.lineTo(CX + 400, CY + i * 72); c.stroke(); }
+    c.strokeStyle = 'rgba(120,220,160,.3)'; for (let i = -25; i <= 25; i++) { c.beginPath(); c.moveTo(CX + i * 14.4, CY - 5); c.lineTo(CX + i * 14.4, CY + 5); c.moveTo(CX - 5, CY + i * 14.4); c.lineTo(CX + 5, CY + i * 14.4); c.stroke(); }
+    const gl = c.createLinearGradient(CX - 400, CY - 400, CX + 200, CY + 200); gl.addColorStop(0, 'rgba(255,255,255,.07)'); gl.addColorStop(0.45, 'rgba(255,255,255,0)'); c.fillStyle = gl; c.fillRect(CX - 400, CY - 400, 800, 800); c.restore();
+    // panel legends
+    c.fillStyle = 'rgba(190,255,214,.42)'; c.font = '500 14px "JetBrains Mono Variable"'; c.textAlign = 'left';
+    ['M O D E          X – Y', 'C H 1   ( X )    0 . 5  V / d i v', 'C H 2   ( Y )    0 . 5  V / d i v', 'I N T E N S I T Y   ▮▮▮▮▮▮▯▯', 'F O C U S           ▮▮▮▮▮▯▯▯'].forEach((s, i) => c.fillText(s, 1340, 330 + i * 34));
+    for (const [x, y] of [[1392, 640], [1512, 640], [1632, 640]]) { const kg = c.createRadialGradient(x - 8, y - 10, 2, x, y, 40); kg.addColorStop(0, '#3a403d'); kg.addColorStop(1, '#131615'); c.fillStyle = kg; c.beginPath(); c.arc(x, y, 38, 0, TAU); c.fill(); c.strokeStyle = 'rgba(190,255,214,.5)'; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 26 * Math.cos(-1.1 + x * 0.01), y + 26 * Math.sin(-1.1 + x * 0.01)); c.stroke(); }
+  },
+
+  frame(t) {
+    const b = tr; b.globalCompositeOperation = 'source-over'; b.clearRect(0, 0, W, H); b.globalCompositeOperation = 'lighter';
+    const on = t < 15.3 ? 1 : Math.max(0, 1 - (t - 15.3) / 0.5), col = Math.pow(clamp01(1 - (t - 15.3) / 0.14), 2);
+    // this frame and five before it, dimmer: the phosphor's memory
+    for (let k = 5; k >= 0; k--) { const tt = t - k / 60; if (tt < 0) continue; const f = figAt(tt), f0 = figAt(tt - 0.11), mix = f.k === f0.k && f.a === f0.a && f.b === f0.b ? 1 : 0.5, al = [0.2, 0.1, 0.06, 0.035, 0.02, 0.012][k] * on, n = k ? NS / 2 : NS; b.fillStyle = `rgba(150,255,190,${al})`;
+      for (let i = 0; i < n; i++) { const u = (i + hash(i, k) * 0.9) / n; let p = beam(f, u, tt); if (t >= 15.3) p = [p[0] * (1 + 60 * (1 - col)) * col, p[1] * col]; const x = CX + p[0] * RAD, y = CY + p[1] * RAD; b.fillRect(x - 1.2, y - 1.2, 2.4, 2.4); } }
+    if (t >= 15.3 && on > 0) { b.fillStyle = `rgba(200,255,220,${on})`; b.beginPath(); b.arc(CX, CY, 3 + 5 * on, 0, TAU); b.fill(); }
+    const c = ctx; c.clearRect(0, 0, W, H); c.save(); c.beginPath(); c.roundRect(CX - 400, CY - 400, 800, 800, 54); c.clip(); c.globalCompositeOperation = 'lighter'; c.drawImage(b.canvas, 0, 0); c.filter = 'blur(5px)'; c.drawImage(b.canvas, 0, 0); c.filter = 'blur(22px)'; c.globalAlpha = 0.8; c.drawImage(b.canvas, 0, 0); c.filter = 'none'; c.globalAlpha = 1; c.restore();
+    // readout
+    const f = figAt(t), ra = prog(t, 0.3, 0.5) * on; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.font = '500 14px "JetBrains Mono Variable"'; c.fillStyle = `rgba(190,255,214,${0.5 * ra})`; c.fillText('F I G U R E', 1340, 232); c.font = '500 26px "JetBrains Mono Variable"'; c.fillStyle = `rgba(210,255,226,${0.95 * ra})`; c.shadowColor = 'rgba(120,255,170,.7)'; c.shadowBlur = 12; c.fillText(f.label.split('').join(' '), 1340, 272); c.shadowBlur = 0;
+  }
+});
+</script>
+</body>
+</html>

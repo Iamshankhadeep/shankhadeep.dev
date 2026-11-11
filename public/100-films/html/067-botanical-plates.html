@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 067 — Botanical Plates</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/067-fern.js"></script>
+<script src="../assets/img/067-poppy.js"></script>
+<script src="../assets/img/067-iris.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 067 — BOTANICAL PLATES
+ * Three generated cut-outs — a fern, a poppy, an iris, in the manner of hand-coloured engravings — arrange
+ * themselves into a herbarium page. Each is laid down like cut paper (its shadow shrinking as it lands), then
+ * keeps a little life: the image is drawn in thin horizontal strips, sheared a few pixels more the higher up
+ * the plant, so stems sway from the root. Ink leader lines draw out to hand-set labels; a ruled border and a
+ * pressed-flower stamp finish the plate. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5, SH = 740, SW = SH * 1024 / 1536, TOP = 138;
+const SPEC = [
+  { name: '067-fern', cx: 436, land: 2.5, from: [-520, 90, -0.26], rest: -0.018, fig: 'Fig. 1', common: 'Male Fern', latin: 'Dryopteris filix-mas', sway: 1.0,
+    labels: [[0.32, 0.60, -118, 24, 'fiddlehead'], [0.69, 0.42, 96, -44, 'pinna'], [0.45, 0.83, -150, 44, 'rhizome']] },
+  { name: '067-poppy', cx: 960, land: 6.25, from: [60, -760, 0.2], rest: 0.012, fig: 'Fig. 2', common: 'Field Poppy', latin: 'Papaver rhoeas', sway: 1.5,
+    labels: [[0.46, 0.14, 150, -46, 'petal'], [0.19, 0.40, -92, 44, 'bud'], [0.70, 0.31, 104, -30, 'capsule']] },
+  { name: '067-iris', cx: 1520, land: 10.0, from: [560, 120, 0.3], rest: 0.02, fig: 'Fig. 3', common: 'Bearded Iris', latin: 'Iris germanica', sway: 0.8,
+    labels: [[0.44, 0.07, -128, -18, 'standard'], [0.20, 0.30, -84, 56, 'fall'], [0.75, 0.31, 84, -36, 'bud'], [0.35, 0.875, 180, 46, 'rhizome']] }
+];
+let bg, ctx;
+
+Stage.create({
+  no: 67, title: 'Botanical Plates', subtitle: 'a herbarium page assembles · 96 bpm',
+  duration: 20, background: '#e9dfc6', grain: 0.05, poster: 17.2,
+  fonts: ['italic 500 28px "Cormorant Garamond Variable"', '600 20px "Cormorant Garamond Variable"', 'italic 400 42px "Cormorant Garamond Variable"'],
+  fade: { in: 0.8, out: 1.3, color: '#e9dfc6' },
+  slate: { at: 0.6, hold: 1.7, pos: 'bl', color: 'rgba(58,44,30,.84)', margin: 96 },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 67 });
+    M.master({ reverb: { decay: 2.2, size: 0.9, damp: 0.42 }, fadeOut: 1.6 });
+    const harp = M.track('harp', { reverb: 0.4, gain: 0.8, pan: -0.2, humanize: 0.01 }), cel = M.track('celesta', { reverb: 0.5, gain: 0.5, pan: 0.2 }), bass = M.track('pluck', { reverb: 0.2, gain: 0.7, params: { decay: 0.8, bright: 0.3 } }), wb = M.track('woodblock', { reverb: 0.3, gain: 0.6 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.26 });
+    const bars = [['F2', ['F3', 'A3', 'C4', 'F4']], ['D2', ['D3', 'F3', 'A3', 'D4']], ['Bb1', ['Bb2', 'D3', 'F3', 'Bb3']], ['C2', ['C3', 'E3', 'G3', 'Bb3']], ['F2', ['F3', 'A3', 'C4', 'E4']], ['D2', ['D3', 'F3', 'A3', 'C4']], ['Bb1', ['Bb2', 'D3', 'F3', 'A3']], ['F2', ['F3', 'A3', 'C4', 'F4']]];
+    const mel = [[], [[0, 'A5', 1], [1, 'F5', 0.5], [1.5, 'G5', 0.5], [2, 'A5', 1], [3, 'D5', 1]], [[0, 'F5', 1.5], [1.5, 'D5', 0.5], [2, 'Bb4', 1], [3, 'D5', 1]], [[0, 'E5', 1], [1, 'G5', 1], [2, 'Bb5', 1], [3, 'G5', 0.5], [3.5, 'E5', 0.5]],
+      [[0, 'C6', 1], [1, 'A5', 0.5], [1.5, 'G5', 0.5], [2, 'F5', 1], [3, 'E5', 1]], [[0, 'F5', 1.5], [1.5, 'A5', 0.5], [2, 'C6', 1], [3, 'A5', 1]], [[0, 'D6', 1], [1, 'Bb5', 0.5], [1.5, 'A5', 0.5], [2, 'G5', 1], [3, 'E5', 1]], [[0, 'F5', 2], [2, 'C6', 1], [3, 'F6', 1]]];
+    bars.forEach(([r, ch], i) => {
+      const b = i * 4; pad.chord(b, ch, 4, 0.4); bass.note(b, r, 1.6, 0.6); if (i < 7) bass.note(b + 2, S.midi(r) + (i % 2 ? 7 : 12), 1.2, 0.45);
+      if (i < 7) [0, 1, 2, 3, 2, 1, 2, 3].forEach((k, s) => harp.note(b + s * 0.5, ch[k], 0.9, s === 0 ? 0.5 : 0.36)); else ch.concat(['A4', 'C5', 'F5']).forEach((n, s) => harp.note(b + s * 0.11, n, 4, 0.45));
+      mel[i].forEach(([o, n, d]) => cel.note(b + o, n, d + 0.3, 0.5));
+    });
+    // each specimen is set down with a little flourish; the stamp is a knock
+    [4, 10, 16].forEach((b, k) => ['C6', 'F6', 'A6'].forEach((n, j) => cel.note(b + j * 0.08, S.midi(n) - k * 0, 1.2, 0.34)));
+    wb.hit(22, 0.9); wb.hit(22.12, 0.35);
+    return M;
+  },
+
+  async setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 1.5 });
+    for (const s of SPEC) {
+      s.img = await Stage.image(s.name);
+      // a soft shadow cut from the specimen's own alpha
+      const sb = Stage.buffer(256, 384); sb.filter = 'blur(5px)'; sb.drawImage(s.img, 0, 0, 256, 384); sb.filter = 'none'; sb.globalCompositeOperation = 'source-in'; sb.fillStyle = '#3a2814'; sb.fillRect(0, 0, 256, 384); s.shadow = sb.canvas;
+    }
+    // aged paper: warm gradient, fibres, foxing, darker edges
+    const c = bg, g = c.createRadialGradient(900, 480, 200, 960, 540, 1250); g.addColorStop(0, '#f1e8d2'); g.addColorStop(0.7, '#e8dcc2'); g.addColorStop(1, '#d6c5a2'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const r = Stage.rng(67);
+    for (let i = 0; i < 14000; i++) { c.fillStyle = `rgba(${r() < 0.5 ? '120,96,60' : '255,250,236'},${0.03 + 0.05 * r()})`; c.fillRect(r() * W, r() * H, 1 + r() * 4, 1); }
+    for (let i = 0; i < 70; i++) { const x = r() * W, y = r() * H, rad = 3 + 16 * r() * r(), f = c.createRadialGradient(x, y, 0, x, y, rad); f.addColorStop(0, `rgba(150,104,52,${0.10 + 0.14 * r()})`); f.addColorStop(1, 'rgba(150,104,52,0)'); c.fillStyle = f; c.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+    const st = c.createRadialGradient(1560, 180, 0, 1560, 180, 260); st.addColorStop(0, 'rgba(160,120,70,.10)'); st.addColorStop(0.8, 'rgba(160,120,70,.05)'); st.addColorStop(1, 'rgba(160,120,70,0)'); c.fillStyle = st; c.fillRect(1300, 0, 520, 440);
+  },
+
+  frame(t) {
+    const c = ctx; c.setTransform(1.5, 0, 0, 1.5, 0, 0); c.clearRect(0, 0, W, H);
+    const push = 1 + 0.034 * prog(t, 12.5, 7.5, E.inOutSine); c.translate(W / 2, H / 2 - 10); c.scale(push, push); c.translate(-W / 2, -H / 2 + 10);
+    const INK = (a) => `rgba(62,46,30,${a})`;
+    // ruled border draws itself; heading sets
+    const bp = prog(t, 0.5, 2.2, E.inOutCubic);
+    if (bp > 0) {
+      const rect = (ins, lw, a) => { const x0 = ins, y0 = ins, x1 = W - ins, y1 = H - ins, per = 2 * (x1 - x0 + y1 - y0); c.strokeStyle = INK(a); c.lineWidth = lw; c.setLineDash([per * bp, per]); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y0); c.lineTo(x1, y1); c.lineTo(x0, y1); c.closePath(); c.stroke(); c.setLineDash([]); };
+      rect(52, 2.2, 0.7); rect(62, 0.9, 0.55);
+    }
+    const hp = prog(t, 1.6, 1.2, E.outCubic);
+    if (hp > 0) { c.font = '600 20px "Cormorant Garamond Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = INK(0.78 * hp); c.fillText('H O R T U S   S I C C U S     ·     P L A T E   L X V I I', W / 2, 106 + 6 * (1 - hp)); c.strokeStyle = INK(0.4 * hp); c.lineWidth = 0.9; c.beginPath(); c.moveTo(W / 2 - 150 * hp, 120); c.lineTo(W / 2 + 150 * hp, 120); c.stroke(); }
+
+    for (const s of SPEC) {
+      const a = prog(t, s.land - 0.95, 0.95, E.outCubic); if (a <= 0) continue;
+      const lift = 1 - a, settle = Math.exp(-Math.max(0, t - s.land) * 5) * Math.sin(Math.max(0, t - s.land) * 16) * 0.012;
+      const ox = s.from[0] * lift, oy = s.from[1] * lift, rot = lerp(s.from[2], s.rest, a) + settle, x0 = s.cx - SW / 2, baseY = TOP + SH;
+      c.save(); c.translate(s.cx + ox, baseY + oy); c.rotate(rot); c.translate(-s.cx, -baseY);
+      // shadow: far and soft while the paper is still in the air
+      c.globalAlpha = lerp(0.2, 0.34, a); const so = lerp(46, 7, a); c.drawImage(s.shadow, x0 + so * 0.7 - lift * 20, TOP + so - lift * 20, SW + lift * 40, SH + lift * 40); c.globalAlpha = 1;
+      // the plant, in strips: each strip leans a little further than the one below
+      const N = 148, sh = 1536 / N, dh = SH / N, live = smoothstep(s.land, s.land + 1.5, t);
+      for (let k = 0; k < N; k++) { const v = 1 - (k + 0.5) / N, dx = live * s.sway * (5.5 * Math.pow(v, 1.7) * Math.sin(t * 0.9 + s.cx * 0.01) + 1.6 * Math.pow(v, 2.4) * Math.sin(t * 2.3 + s.cx * 0.02 + v * 3)); c.drawImage(s.img, 0, k * sh, 1024, sh + 0.6, x0 + dx, TOP + k * dh, SW, dh + 0.5); }
+      c.restore();
+      // caption
+      const cp = prog(t, s.land + 0.5, 1.0, E.outCubic);
+      if (cp > 0) { c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.font = '600 20px "Cormorant Garamond Variable"'; c.fillStyle = INK(0.7 * cp); c.fillText(s.fig.toUpperCase().split('').join(' '), s.cx, 914 + 6 * (1 - cp)); c.font = 'italic 400 42px "Cormorant Garamond Variable"'; c.fillStyle = INK(0.9 * cp); c.fillText(s.common, s.cx, 958 + 6 * (1 - cp)); c.font = 'italic 500 25px "Cormorant Garamond Variable"'; c.fillStyle = INK(0.55 * cp); c.fillText(s.latin, s.cx, 989 + 6 * (1 - cp)); }
+      // leader lines and their labels
+      s.labels.forEach((L, i) => {
+        const lp = prog(t, s.land + 1.0 + i * 0.5, 0.7, E.inOutCubic); if (lp <= 0) return;
+        const v = 1 - L[1], swx = s.sway * (5.5 * Math.pow(v, 1.7) * Math.sin(t * 0.9 + s.cx * 0.01)), px = x0 + L[0] * SW + swx, py = TOP + L[1] * SH, ex = px + L[2], ey = py + L[3], kx = px + L[2] * 0.72;
+        c.strokeStyle = INK(0.75); c.lineWidth = 1; c.beginPath(); c.moveTo(px, py); const u1 = Math.min(1, lp / 0.75), u2 = clamp01((lp - 0.75) / 0.25); c.lineTo(lerp(px, kx, u1), lerp(py, ey, u1)); if (u2 > 0) c.lineTo(lerp(kx, ex, u2), ey); c.stroke();
+        c.fillStyle = INK(0.85); c.beginPath(); c.arc(px, py, 2.4 * Math.min(1, lp * 3), 0, TAU); c.fill();
+        const tp = prog(t, s.land + 1.0 + i * 0.5 + 0.5, 0.6, E.outCubic); if (tp > 0) { c.font = 'italic 500 28px "Cormorant Garamond Variable"'; c.textBaseline = 'middle'; c.textAlign = L[2] < 0 ? 'right' : 'left'; c.fillStyle = INK(0.86 * tp); c.fillText(L[4], ex + (L[2] < 0 ? -8 : 8), ey - 1); }
+      });
+    }
+    // the stamp: a pressed flower in a ring, knocked down on beat 22
+    const sp = prog(t, 13.75 - 0.07, 0.2, E.outCubic);
+    if (sp > 0) {
+      c.save(); c.translate(1752, 936); c.rotate(-0.21); const k = lerp(1.9, 1, sp); c.scale(k, k); const col = (a) => `rgba(150,52,40,${a * sp})`;
+      c.strokeStyle = col(0.72); c.lineWidth = 2.6; c.beginPath(); c.arc(0, 0, 56, 0, TAU); c.stroke(); c.lineWidth = 1; c.beginPath(); c.arc(0, 0, 49, 0, TAU); c.stroke(); c.beginPath(); c.arc(0, 0, 30, 0, TAU); c.stroke();
+      c.fillStyle = col(0.7); for (let p = 0; p < 6; p++) { c.save(); c.rotate(p * TAU / 6); c.beginPath(); c.ellipse(0, -15, 5.2, 11, 0, 0, TAU); c.fill(); c.restore(); } c.fillStyle = '#e9dfc6'; c.beginPath(); c.arc(0, 0, 4.4, 0, TAU); c.fill(); c.fillStyle = col(0.8); c.beginPath(); c.arc(0, 0, 2.2, 0, TAU); c.fill();
+      c.font = '600 11px "Cormorant Garamond Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; const txt = 'PRESSED · AND · MOUNTED · MDCCCLXVII · '; for (let i = 0; i < txt.length; i++) { c.save(); c.rotate(i / txt.length * TAU); c.fillStyle = col(0.75); c.fillText(txt[i], 0, -39.5); c.restore(); }
+      c.restore();
+    }
+  }
+});
+</script>
+</body>
+</html>

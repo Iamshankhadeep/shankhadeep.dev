@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 034 — Murmuration</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 034 — MURMURATION
+ * Twelve thousand starlings folding and pouring through a dusk sky. No simulation: every bird is a pure function
+ * of time — a seat in a soft cloud that follows the flock's centre with its own delay, so that when the centre
+ * turns the cloud stretches, folds and thickens into dark bands, the way real flocks do. Eight bars at 80 bpm
+ * (3 s each): gather → low sweep over the reeds → a twisting funnel (bar 6) → pour down into the tree. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, N = 12000, HOR = 946;
+const TREE = { x: 1420, y: HOR + 6 };
+let sky, ctx, birds = [], perches = [], N2 = Stage.makeNoise(34);
+
+// the flock's centre: a wandering path in a box (x: across, y: up, z: depth), units ≈ px at depth 0
+function centre(t, k) {
+  const s = t * 0.58 + k * 0.9;
+  return [960 + 620 * Math.sin(s * 1.0 + 0.4) + 160 * Math.sin(s * 2.3 + k), 430 + 190 * Math.sin(s * 1.7 + 1.0 + k * 2) - 150 * Math.exp(-Math.pow((t - 8.6) / 2.2, 2)) * -1 * 0 + 230 * Math.exp(-Math.pow((t - 8.2) / 2.0, 2)), 210 * Math.sin(s * 0.8 + 2.0 + k)];
+}
+
+Stage.create({
+  no: 34, title: 'Murmuration', subtitle: 'twelve thousand starlings · 80 bpm',
+  duration: 24, background: '#8793a6', grain: 0.06, poster: 15.8,
+  fade: { in: 1.4, out: 2.0, color: '#2a2630' },
+  slate: { at: 0.9, hold: 3.0, pos: 'tl', color: 'rgba(40,36,48,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 80, duration: 24, seed: 34 });
+    M.master({ reverb: { decay: 4.6, size: 1.3, damp: 0.45 }, fadeIn: 0.8, fadeOut: 3.0 });
+    const pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.5 + 0.3 * smoothstep(4, 16, t) }), lead = M.track('softlead', { reverb: 0.65, gain: 0.6, delay: { time: 1.5, fb: 0.3, mix: 0.25 } });
+    const pulse = M.track('kalimba', { reverb: 0.5, gain: 0.55, delay: { time: 0.75, fb: 0.3, mix: 0.2 } }), sub = M.track('sub', { reverb: 0.08, gain: 0.55 }), wh = M.track('whoosh', { reverb: 0.5, gain: 0.5, params: { f0: 300, f1: 3200 } });
+    const str = M.track('strings', { reverb: 0.6, gain: 0.6, params: { cutoff: 2600, A: 0.8, R: 1.6 } }), air = M.track('wind', { reverb: 0.4, gain: 0.5 });
+    air.hit(0, 0.8, M.beats);
+    const prog = [['Em9', 'E1'], ['Cmaj9', 'C1'], ['Am9', 'A0'], ['Bm7', 'B0'], ['Em9', 'E1'], ['Cmaj9', 'C1'], ['Am9', 'A0'], ['Em(add9)', 'E1']];
+    prog.forEach(([c, r], i) => { const b = i * 4, ch = c === 'Em(add9)' ? ['E3', 'B3', 'F#4', 'G4'] : c; pad.chord(b, ch, 4, 0.55, { octave: 3 }); if (i >= 1) sub.note(b, r, 3.7, i >= 4 ? 0.8 : 0.5); if (i >= 3) str.chord(b, ch, 4, i === 5 ? 0.65 : 0.45, { octave: 4 }); if (i >= 1 && i < 7) pulse.seq(b, 0.5, ['B4', null, 'E5', null, 'B4', 'G5', null, 'F#5'], { vel: 0.35 }); });
+    lead.seq(4, 1, ['B4', '-', 'D5', 'E5', 'G5', '-', '-', 'F#5', 'E5', '-', '-', 'D5', 'B4', '-', '-', '-'], { vel: 0.5 });
+    lead.seq(20, 1, ['E5', 'G5', 'B5', '-', 'A5', '-', 'G5', 'F#5', 'E5', '-', '-', '-'], { vel: 0.6 });
+    wh.hit(M.b(7.2), 0.6, 3); wh.hit(M.b(14.2), 0.9, 4.5); wh.hit(M.b(19.4), 0.7, 4);
+    return M;
+  },
+
+  setup() {
+    // ── static dusk: sky, sun glow, hills, reeds and the bare tree are painted once
+    sky = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 });
+    const c = sky, g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#6f7f9a'); g.addColorStop(0.42, '#b4a0a8'); g.addColorStop(0.68, '#e3ae9a'); g.addColorStop(0.83, '#f4b988'); g.addColorStop(1, '#f0a476'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const sg = c.createRadialGradient(520, HOR, 20, 520, HOR, 760); sg.addColorStop(0, 'rgba(255,214,160,.65)'); sg.addColorStop(0.4, 'rgba(255,190,140,.22)'); sg.addColorStop(1, 'rgba(255,190,140,0)'); c.fillStyle = sg; c.fillRect(0, 0, W, H);
+    // thin cloud streaks
+    for (let k = 0; k < 9; k++) { const y = 380 + k * 52 + 30 * hash(k, 1), x = hash(k, 2) * W, w = 500 + 700 * hash(k, 3); const cg = c.createLinearGradient(x - w / 2, 0, x + w / 2, 0); cg.addColorStop(0, 'rgba(120,96,116,0)'); cg.addColorStop(0.5, `rgba(120,96,116,${0.10 + 0.1 * hash(k, 4)})`); cg.addColorStop(1, 'rgba(120,96,116,0)'); c.fillStyle = cg; c.fillRect(x - w / 2, y, w, 5 + 9 * hash(k, 5)); }
+    // far hills
+    c.fillStyle = '#5b4a58'; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 8) c.lineTo(x, HOR - 22 - 26 * N2.fbm2(x * 0.0016, 1, 3)); c.lineTo(W, H); c.fill();
+    c.fillStyle = '#1c1820'; c.fillRect(0, HOR + 4, W, H);
+    // the tree: recursive branches; twig ends and branch points become perches
+    c.strokeStyle = '#1c1820'; c.lineCap = 'round';
+    const branch = (x, y, a, len, w, d) => { const x2 = x + Math.cos(a) * len, y2 = y + Math.sin(a) * len; c.lineWidth = w; c.beginPath(); c.moveTo(x, y); c.lineTo(x2, y2); c.stroke(); for (let q = 0.35; q <= 1; q += 0.22) if (d >= 2) perches.push([lerp(x, x2, q), lerp(y, y2, q) - 3]); if (d > 5) return; const n = d < 2 ? 3 : 2; for (let k = 0; k < n; k++) { const sp = (k - (n - 1) / 2) * (0.62 - d * 0.03) + (hash(d * 31 + k + Math.round(x), 7) - 0.5) * 0.4; branch(x2, y2, a + sp, len * (0.68 + 0.1 * hash(Math.round(x2 + y2), 8)), Math.max(1.2, w * 0.62), d + 1); } };
+    branch(TREE.x, TREE.y, -Math.PI / 2 - 0.05, 132, 15, 0);
+    // reeds along the bottom
+    for (let i = 0; i < 520; i++) { const x = hash(i, 11) * W, h = 40 + 120 * hash(i, 12) * hash(i, 13), lean = (hash(i, 14) - 0.5) * 40; c.lineWidth = 1 + 2 * hash(i, 15); c.beginPath(); c.moveTo(x, H); c.quadraticCurveTo(x + lean * 0.3, H - (H - HOR) - h * 0.5, x + lean, HOR + 10 - h); c.stroke(); if (hash(i, 16) > 0.7) { c.lineWidth = 4.5; c.beginPath(); c.moveTo(x + lean, HOR + 10 - h); c.lineTo(x + lean * 0.9, HOR + 28 - h); c.stroke(); } }
+    // birds: a seat in the cloud (gaussian), a delay, a sub-flock, and a perch for the end
+    const r = Stage.rng(340), gs = () => (r() + r() + r() + r() - 2) / 1.15;
+    for (let i = 0; i < N; i++) birds.push({ ox: gs() * 120, oy: gs() * 62, oz: gs() * 120, lag: 0.1 + 3.0 * Math.pow(r(), 1.5), sub: r() < 0.38 ? 1 : 0, ph: r() * TAU, perch: perches[(r() * perches.length) | 0], land: r() });
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const gather = prog(t, 0.4, 5.5, E.outCubic), split = win(t, 8.6, 14.2, 2.2, 2.2, E.inOutSine), funnel = win(t, 13.6, 19.2, 2.0, 1.6, E.inOutSine), pour = prog(t, 19.0, 4.6);
+    const buckets = [new Path2D(), new Path2D(), new Path2D()];
+    for (let i = 0; i < N; i++) {
+      const b = birds[i], tl = t - b.lag * (0.55 + 0.9 * funnel + 0.5 * (1 - gather));
+      const c1 = centre(tl, 0), c2 = centre(tl, 1.7), w2 = b.sub * split;
+      let cx = lerp(c1[0], c2[0], w2), cy = lerp(c1[1], c2[1], w2), cz = lerp(c1[2], c2[2], w2);
+      // the cloud breathes and, in the funnel, is wrung into a twisting column
+      const sc = (2.6 - 1.6 * gather) * (1 + 0.25 * Math.sin(tl * 0.9 + b.ph * 0.2)), tw = funnel * (b.oy / 70) * 2.6 + tl * 0.5;
+      const cs = Math.cos(tw), sn = Math.sin(tw), fx = 1 - 0.55 * funnel, fy = 1 + 2.3 * funnel;
+      let x = cx + (b.ox * cs - b.oz * sn) * sc * fx, y = cy + b.oy * sc * fy + 40 * funnel * Math.sin(tl * 1.3 + b.oy * 0.02), z = cz + (b.ox * sn + b.oz * cs) * sc * fx;
+      // fine turbulence so edges fray
+      x += 26 * N2.noise3(b.ox * 0.01, b.oy * 0.01, tl * 0.5 + b.ph); y += 18 * N2.noise3(b.oz * 0.01, b.ox * 0.01, tl * 0.5 + 9);
+      // perspective
+      const p = 900 / (900 + z); let sx = 960 + (x - 960) * p, sy = 470 + (y - 470) * p + 60 * (1 - p);
+      // the pour: each bird leaves the cloud for its perch
+      let wing = 1;
+      if (pour > 0) { const e = E.inOutCubic(clamp01((pour - b.land * 0.62) / 0.38)); if (e > 0) { const px = b.perch[0], py = b.perch[1], arc = Math.sin(e * Math.PI) * 120; sx = lerp(sx, px, e) + arc * 0.3; sy = lerp(sy, py, e) - arc * (0.4 - 0.9 * e); wing = 1 - e; } }
+      if (sy > HOR + 4 && wing > 0.1) sy = HOR + 4 - (sy - HOR - 4) * 0.2;
+      const flap = Math.sin(t * 17 + b.ph), s = (1.6 + 2.2 * p * p) * (0.8 + 0.2 * wing), k = p > 1.08 ? 2 : p > 0.86 ? 1 : 0, P = buckets[k];
+      // a bird is two short strokes: wings up or down
+      P.moveTo(sx - s * 1.5, sy - s * 0.55 * flap * wing); P.lineTo(sx, sy); P.lineTo(sx + s * 1.5, sy - s * 0.55 * flap * wing);
+    }
+    c.lineJoin = 'round'; c.lineCap = 'round';
+    c.strokeStyle = 'rgba(30,24,34,.5)'; c.lineWidth = 1.0; c.stroke(buckets[0]);
+    c.strokeStyle = 'rgba(26,21,30,.66)'; c.lineWidth = 1.3; c.stroke(buckets[1]);
+    c.strokeStyle = 'rgba(20,17,24,.82)'; c.lineWidth = 1.7; c.stroke(buckets[2]);
+    // dusk deepens toward the end
+    const dk = prog(t, 16, 8, E.inOutSine); if (dk > 0) { c.fillStyle = `rgba(42,36,58,${0.28 * dk})`; c.fillRect(0, 0, W, H); }
+  }
+});
+</script>
+</body>
+</html>

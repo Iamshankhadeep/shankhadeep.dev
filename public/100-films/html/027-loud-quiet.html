@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 027 — Loud / Quiet</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 027 — LOUD / QUIET
+ * Two words perform their meaning. Two colours only, swapping figure and ground; scale contrast is the whole design.
+ * Six bars at 90 bpm (2.67 s each): quiet · LOUD · quiet · LOUD LOUD (two bars) · a last, long quiet. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, BAR = 240 / 90, PAPER = '#f1ece0', BLUE = '#1a2ccc';
+const LOUD = [[BAR, BAR * 2], [BAR * 3, BAR * 5]];
+let ctx, word;
+
+Stage.create({
+  no: 27, title: 'Loud / Quiet', subtitle: 'two words · 90 bpm',
+  duration: 16, background: PAPER, grain: 0.05, poster: 3.4,
+  fonts: ['400 600px "Anton"', 'italic 400 58px "Instrument Serif"'],
+  fade: { in: 0.8, out: 1.6, color: PAPER },
+  slate: { at: 0.5, hold: 1.9, color: 'rgba(26,44,204,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 16, seed: 27 });
+    M.master({ reverb: { decay: 2.4, size: 1.0, damp: 0.45 }, fadeOut: 2.6, saturate: 0.35 });
+    const felt = M.track('felt', { reverb: 0.6, gain: 0.8 }), air = M.track('air', { reverb: 0.2, gain: 0.5 });
+    const kick = M.track('kick', { inst: 'kick808', reverb: 0.06, gain: 0.7, params: { decay: 0.4 } }), sn = M.track('snare', { reverb: 0.3, gain: 0.8 }), hat = M.track('hat', { reverb: 0.05, gain: 0.4 });
+    const bass = M.track('reese', { reverb: 0.05, gain: 0.45, duck: { by: 'kick', depth: 0.5 } }), stab = M.track('stab', { reverb: 0.4, gain: 1.7, params: { cutoff: 1900 } }), crash = M.track('crash', { reverb: 0.4, gain: 0.5 });
+    air.hit(0, 0.8, M.beats);
+    // quiet: one note, and the room
+    felt.note(1, 'G4', 3, 0.5); felt.note(8.5, 'Eb4', 1.5, 0.45); felt.note(10, 'G4', 2, 0.42); felt.note(20.5, 'C5', 2, 0.42); felt.note(22, 'G4', 2, 0.32);
+    // loud: the full kit, but still a tune — Cm, Ab, Bb
+    const loud = (b, bars) => {
+      crash.hit(b, 0.9);
+      for (let i = 0; i < bars; i++) {
+        const o = b + i * 4, r = ['C1', 'Ab0', 'Bb0'][i % 3], ch = [['C4', 'Eb4', 'G4', 'Bb4'], ['Ab3', 'C4', 'Eb4', 'G4'], ['Bb3', 'D4', 'F4', 'A4']][i % 3];
+        kick.pattern(o, 0.5, 'x..x..x.', { vel: 1 }); sn.pattern(o, 0.5, '..x...x.', { vel: 0.9 }); hat.pattern(o, 0.25, 'x.x.x.x.x.x.x.xx', { vel: 0.6 });
+        bass.note(o, r, 1.4, 0.9); bass.note(o + 1.5, r, 1.4, 0.8); bass.note(o + 3, r, 0.9, 0.8);
+        stab.chord(o, ch, 0.4, 0.8); stab.chord(o + 1.5, ch, 0.4, 0.7); stab.chord(o + 3, ch, 0.3, 0.7); stab.chord(o + 3.5, ch, 0.3, 0.6);
+      }
+    };
+    loud(4, 1); loud(12, 2);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    // rasterise the big word once, in both colourways
+    const m = Stage.buffer(10, 10); m.font = '400 600px "Anton"'; const tm = m.measureText('LOUD'), ww = Math.ceil(tm.width) + 40, hh = Math.ceil(tm.actualBoundingBoxAscent + tm.actualBoundingBoxDescent) + 40;
+    const mk = (col) => { const b = Stage.buffer(ww * 2, hh * 2); b.scale(2, 2); b.font = '400 600px "Anton"'; b.fillStyle = col; b.textBaseline = 'alphabetic'; b.fillText('LOUD', 20, 20 + tm.actualBoundingBoxAscent); return b.canvas; };
+    word = { w: ww, h: hh, paper: mk(PAPER), blue: mk(BLUE) };
+  },
+
+  frame(t, i) {
+    const c = ctx; c.setTransform(2, 0, 0, 2, 0, 0);
+    let L = null; for (const s of LOUD) if (t >= s[0] && t < s[1]) L = s;
+    if (!L) {
+      // ── quiet: a huge calm field, one small italic word
+      c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
+      const since = Math.max(...[0, BAR * 2, BAR * 5].filter((x) => t >= x)), a = prog(t, since + 0.25, 1.0, E.outCubic) * (t >= BAR * 5 ? 1 - prog(t, BAR * 5 + 1.6, 3.2, E.inOutSine) * 0.94 : 1);
+      const note = Stage.hit('felt', t, 1.6);
+      c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.font = 'italic 400 58px "Instrument Serif"'; c.fillStyle = BLUE; c.globalAlpha = a * (0.78 + 0.22 * note);
+      c.fillText('quiet', W / 2, H / 2 + 14 + (1 - a) * 6);
+      c.globalAlpha = a * 0.35 * note; c.fillRect(W / 2 - 13, H / 2 + 44, 26, 1.5); c.globalAlpha = 1;
+    } else {
+      // ── LOUD: the word fills the frame and takes every hit
+      const u = t - L[0], two = L[1] - L[0] > BAR * 1.5, slam = prog(u, 0, 0.14, E.outExpo);
+      const k = Stage.hit('kick', t, 0.16), sn = Stage.hit('snare', t, 0.14);
+      const jx = (hash(i, 1) - 0.5) * 26 * k, jy = (hash(i, 2) - 0.5) * 18 * k;
+      const inv = two && u >= BAR;                                   // second loud bar: colours swap
+      c.fillStyle = inv ? PAPER : BLUE; c.fillRect(0, 0, W, H);
+      const img = inv ? word.blue : word.paper;
+      const rows = two ? 3 : 1;
+      for (let r = 0; r < rows; r++) {
+        const target = two ? (H - 60) / 3 : H - 190, sc = target / (word.h - 40) * (1 + 0.07 * k + (1.6 - 1.6 * slam)) * (two ? 1 : 1), dw = word.w * sc, dh = word.h * sc;
+        const cy = two ? 30 + (r + 0.5) * (H - 60) / 3 : H / 2;
+        if (!two) { const sx = Math.min(1, (W - 120) / (dw - 40 * sc)); c.save(); c.translate(W / 2 + jx, cy + jy); c.rotate((hash(i, 3) - 0.5) * 0.012 * k); c.scale(sx * (1 + 0.03 * sn), 1); c.drawImage(img, -dw / 2, -dh / 2, dw, dh); c.restore(); }
+        else {
+          // three stacked rows, sliding against each other; the row that is hit jumps
+          const dir = r % 2 ? -1 : 1, off = dir * (u * 150) + (r === 1 ? sn * 40 : k * -30), step = dw - 40 * sc + 70, hitScale = 1 + (r === 1 ? 0.10 * sn : 0.07 * k);
+          for (let q = -2; q <= 3; q++) { const x = W / 2 + Stage.mod(off, step) + q * step - step; c.save(); c.translate(x + jx * 0.5, cy + jy * 0.5); c.scale(hitScale, hitScale); c.drawImage(img, -dw / 2, -dh / 2, dw, dh); c.restore(); }
+        }
+      }
+      if (two) { c.fillStyle = inv ? BLUE : PAPER; for (let r = 1; r < 3; r++) c.fillRect(0, 30 + r * (H - 60) / 3 - 3, W, 6); }
+    }
+  }
+});
+</script>
+</body>
+</html>

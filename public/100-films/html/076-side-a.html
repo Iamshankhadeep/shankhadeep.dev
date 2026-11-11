@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 076 — Side A</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 076 — SIDE A
+ * A cassette plays; its meters dance to the very groove you hear. The needles and LED ladders read the
+ * analysed mix (Stage.level / low / mid / high), so the breakdown in the middle really does let them fall.
+ * The reels obey tape: the supply pack shrinks, the take-up pack grows, the area of tape is conserved, and
+ * each reel's angle is the integral of (tape speed ÷ its radius) — the full one turns slowly, the empty one
+ * fast. Play is pressed on beat 4; stop on beat 28. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, T_IN = 1.0, T_PLAY = 2.5, T_STOP = 17.5;
+const CREAM = '#eadfc4', MUSTARD = '#d9a12b', ORANGE = '#c9552a', BROWN = '#3a2318', DARK = '#1c120d';
+const CW = 820, CH = 520, CX = 960, CY0 = 62;
+let bg, ctx;
+// tape time: ramps up after play, ramps down after stop
+const tape = (t) => { const a = clamp01((t - T_PLAY) / 0.35), up = t < T_PLAY ? 0 : (t - T_PLAY) - 0.35 / 2 * Math.min(1, a) * (2 - Math.min(1, a)) + (a < 1 ? 0.35 * a * a / 2 - 0.35 * a / 2 * 0 : 0); const run = Math.max(0, Math.min(t, T_STOP) - T_PLAY - 0.17 * Math.min(1, a)); const coast = t > T_STOP ? 0.3 * (1 - Math.pow(1 - clamp01((t - T_STOP) / 0.6), 2)) : 0; return run + coast; };
+const RL0 = 100, RR0 = 44, KT = 300;                      // radii (px) and tape "area" moved per second
+const rL = (s) => Math.sqrt(Math.max(34 * 34, RL0 * RL0 - KT * s)), rR = (s) => Math.sqrt(RR0 * RR0 + KT * s);
+function angles(t) { const s1 = tape(t), n = 80; let aL = 0, aR = 0; for (let i = 0; i < n; i++) { const s = (i + 0.5) / n * s1; aL += s1 / n * 150 / rL(s); aR += s1 / n * 150 / rR(s); } return [aL, aR, s1]; }
+
+function screw(c, x, y, a) { c.fillStyle = '#b9ae95'; c.beginPath(); c.arc(x, y, 8, 0, TAU); c.fill(); c.strokeStyle = 'rgba(40,24,12,.55)'; c.lineWidth = 1.2; c.stroke(); c.lineWidth = 2; c.beginPath(); c.moveTo(x - 5 * Math.cos(a), y - 5 * Math.sin(a)); c.lineTo(x + 5 * Math.cos(a), y + 5 * Math.sin(a)); c.moveTo(x + 5 * Math.sin(a), y - 5 * Math.cos(a)); c.lineTo(x - 5 * Math.sin(a), y + 5 * Math.cos(a)); c.stroke(); }
+function cassette(c, t) {
+  const x0 = CX - CW / 2, y0 = CY0, x1 = x0 + CW, [aL, aR, s] = angles(t);
+  c.save(); c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 40; c.shadowOffsetY = 18; const sg = c.createLinearGradient(0, y0, 0, y0 + CH); sg.addColorStop(0, '#f0e6cf'); sg.addColorStop(1, '#d9ccac'); c.fillStyle = sg; c.beginPath(); c.roundRect(x0, y0, CW, CH, 26); c.fill(); c.restore();
+  c.strokeStyle = 'rgba(60,40,20,.35)'; c.lineWidth = 1.5; c.beginPath(); c.roundRect(x0 + 8, y0 + 8, CW - 16, CH - 16, 20); c.stroke();
+  // lower trapezoid, guides and head openings
+  c.fillStyle = '#d2c5a4'; c.beginPath(); c.moveTo(x0 + 130, y0 + CH); c.lineTo(x0 + 176, y0 + 396); c.lineTo(x1 - 176, y0 + 396); c.lineTo(x1 - 130, y0 + CH); c.closePath(); c.fill(); c.strokeStyle = 'rgba(60,40,20,.35)'; c.stroke();
+  for (const dx of [-176, 176]) { c.fillStyle = DARK; c.beginPath(); c.arc(CX + dx, y0 + 452, 19, 0, TAU); c.fill(); c.fillStyle = '#5a4636'; c.beginPath(); c.arc(CX + dx, y0 + 452, 9, 0, TAU); c.fill(); }
+  for (const dx of [-76, 76]) { c.fillStyle = DARK; c.beginPath(); c.roundRect(CX + dx - 13, y0 + 470, 26, 26, 5); c.fill(); }
+  c.fillStyle = '#8a5a34'; c.beginPath(); c.roundRect(CX - 26, y0 + 478, 52, 16, 4); c.fill(); c.strokeStyle = BROWN; c.lineWidth = 3; c.beginPath(); c.moveTo(x0 + 150, y0 + 506); c.lineTo(x1 - 150, y0 + 506); c.stroke();
+  // label
+  const lx = x0 + 36, ly = y0 + 30, lw = CW - 72, lh = 338; c.fillStyle = '#f6efdc'; c.beginPath(); c.roundRect(lx, ly, lw, lh, 14); c.fill();
+  c.save(); c.beginPath(); c.roundRect(lx, ly, lw, lh, 14); c.clip(); c.fillStyle = MUSTARD; c.fillRect(lx, ly, lw, 92); for (const [yy, hh, col] of [[286, 18, ORANGE], [308, 12, MUSTARD], [324, 8, BROWN]]) { c.fillStyle = col; c.fillRect(lx, ly + yy, lw, hh); } c.restore();
+  // hand-lettered title
+  c.fillStyle = DARK; c.beginPath(); c.arc(lx + 56, ly + 46, 30, 0, TAU); c.fill(); c.fillStyle = MUSTARD; c.font = 'italic 600 44px "Fraunces Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillText('A', lx + 56, ly + 61);
+  c.fillStyle = DARK; c.textAlign = 'left'; const title = 'Side A — slow jams for fast machines'; c.font = 'italic 500 37px "Fraunces Variable"'; let xx = lx + 104; for (let i = 0; i < title.length; i++) { const ch = title[i]; c.save(); c.translate(xx, ly + 58 + (hash(i, 4) - 0.5) * 5); c.rotate((hash(i, 5) - 0.5) * 0.05); c.fillText(ch, 0, 0); c.restore(); xx += c.measureText(ch).width; }
+  c.strokeStyle = 'rgba(58,35,24,.4)'; c.lineWidth = 1.2; for (const yy of [112, 258]) { c.beginPath(); c.moveTo(lx + 24, ly + yy); c.lineTo(lx + lw - 24, ly + yy); c.stroke(); }
+  c.font = '500 12px "JetBrains Mono Variable"'; c.fillStyle = 'rgba(58,35,24,.75)'; c.fillText('C · 6 0     N O R M A L   P O S I T I O N', lx + 26, ly + 278); c.textAlign = 'right'; c.fillText('N R   ☐  O N   ☑  O F F', lx + lw - 26, ly + 278);
+  // window with the two reels
+  const wy = ly + 124, wh = 124, ww = 404, ry = wy + wh / 2; c.fillStyle = DARK; c.beginPath(); c.roundRect(CX - ww / 2, wy, ww, wh, 18); c.fill();
+  c.save(); c.beginPath(); c.roundRect(CX - ww / 2 + 4, wy + 4, ww - 8, wh - 8, 14); c.clip();
+  const packs = [[CX - 152, rL(s), aL], [CX + 152, rR(s), aR]];
+  for (const [px, r] of packs) { const g = c.createRadialGradient(px, ry, 30, px, ry, r); g.addColorStop(0, '#4a2e1e'); g.addColorStop(1, '#2c1a10'); c.fillStyle = g; c.beginPath(); c.arc(px, ry, r, 0, TAU); c.fill(); c.strokeStyle = 'rgba(255,220,180,.08)'; c.lineWidth = 1; for (let k = 40; k < r; k += 9) { c.beginPath(); c.arc(px, ry, k, 0, TAU); c.stroke(); } }
+  // the run of tape between them
+  c.strokeStyle = '#5a3a26'; c.lineWidth = 2; c.beginPath(); c.moveTo(packs[0][0] - packs[0][1] * 0.2, ry + packs[0][1] * 0.98); c.lineTo(CX - 176, wy + wh + 30); c.moveTo(packs[1][0] + packs[1][1] * 0.2, ry + packs[1][1] * 0.98); c.lineTo(CX + 176, wy + wh + 30); c.stroke();
+  for (const [px, , ang] of packs) { c.save(); c.translate(px, ry); c.rotate(ang); c.fillStyle = '#f4eedf'; c.beginPath(); c.arc(0, 0, 31, 0, TAU); c.fill(); c.fillStyle = DARK; c.beginPath(); c.arc(0, 0, 17, 0, TAU); c.fill(); c.fillStyle = '#f4eedf'; for (let k = 0; k < 6; k++) { c.save(); c.rotate(k * TAU / 6); c.fillRect(-3, -19, 6, 9); c.restore(); } c.restore(); }
+  c.restore(); c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 2; c.beginPath(); c.roundRect(CX - ww / 2, wy, ww, wh, 18); c.stroke();
+  const gl = c.createLinearGradient(CX - ww / 2, wy, CX + ww / 2, wy + wh); gl.addColorStop(0, 'rgba(255,255,255,.14)'); gl.addColorStop(0.5, 'rgba(255,255,255,0)'); c.fillStyle = gl; c.beginPath(); c.roundRect(CX - ww / 2, wy, ww, wh, 18); c.fill();
+  [[x0 + 24, y0 + 24, 0.4], [x1 - 24, y0 + 24, 1.2], [x0 + 24, y0 + CH - 24, 2.0], [x1 - 24, y0 + CH - 24, 0.9], [CX, y0 + 420, 0.2]].forEach(([x, y, a]) => screw(c, x, y, a));
+}
+function vu(c, x, y, v, label, lit) {
+  const w = 400, h = 232; c.save(); c.fillStyle = DARK; c.beginPath(); c.roundRect(x - 8, y - 8, w + 16, h + 16, 16); c.fill();
+  const g = c.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, lit ? '#fff3d2' : '#b9ad92'); g.addColorStop(1, lit ? '#f1d998' : '#93876e'); c.fillStyle = g; c.beginPath(); c.roundRect(x, y, w, h, 10); c.fill(); c.beginPath(); c.roundRect(x, y, w, h, 10); c.clip();
+  const px = x + w / 2, py = y + h + 46, R = 210, a0 = -0.86, a1 = 0.86, ang = (u) => -Math.PI / 2 + lerp(a0, a1, u);
+  c.lineWidth = 3; c.strokeStyle = DARK; c.beginPath(); c.arc(px, py, R, ang(0), ang(0.72)); c.stroke(); c.strokeStyle = ORANGE; c.lineWidth = 7; c.beginPath(); c.arc(px, py, R - 2, ang(0.72), ang(1)); c.stroke();
+  c.font = '600 14px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  [[0, '-20'], [0.2, '-10'], [0.38, '-7'], [0.5, '-5'], [0.61, '-3'], [0.72, '0'], [0.86, '+2'], [1, '+3']].forEach(([u, s]) => { const a = ang(u); c.strokeStyle = u >= 0.72 ? ORANGE : DARK; c.lineWidth = 2.4; c.beginPath(); c.moveTo(px + Math.cos(a) * (R - 12), py + Math.sin(a) * (R - 12)); c.lineTo(px + Math.cos(a) * (R + 10), py + Math.sin(a) * (R + 10)); c.stroke(); c.fillStyle = u >= 0.72 ? ORANGE : DARK; c.fillText(s, px + Math.cos(a) * (R + 28), py + Math.sin(a) * (R + 28)); });
+  c.fillStyle = DARK; c.font = 'italic 600 30px "Fraunces Variable"'; c.fillText('VU', px, y + 150); c.font = '600 13px "JetBrains Mono Variable"'; c.fillText(label, px, y + 180);
+  const na = ang(clamp01(v)); c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 4; c.beginPath(); c.moveTo(px + 5, py + 4); c.lineTo(px + 5 + Math.cos(na) * (R + 6), py + 4 + Math.sin(na) * (R + 6)); c.stroke(); c.strokeStyle = '#1a0f0a'; c.lineWidth = 3; c.beginPath(); c.moveTo(px, py); c.lineTo(px + Math.cos(na) * (R + 6), py + Math.sin(na) * (R + 6)); c.stroke();
+  c.fillStyle = DARK; c.beginPath(); c.arc(px, y + h + 4, 44, Math.PI, 0); c.fill(); c.restore();
+}
+
+Stage.create({
+  no: 76, title: 'Side A', subtitle: 'slow jams for fast machines · 96 bpm',
+  duration: 20, background: '#24160f', grain: 0.05, poster: 8.3,
+  fonts: ['italic 500 37px "Fraunces Variable"', 'italic 600 44px "Fraunces Variable"', '600 14px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.0 },
+  slate: { at: 0.5, hold: 2.4, pos: 'tl', color: 'rgba(234,223,196,.86)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 76 });
+    M.master({ reverb: { decay: 1.4, size: 0.8, damp: 0.5 }, fadeOut: 0.3, saturate: 0.25 });
+    const ep = M.track('epiano', { reverb: 0.3, gain: 0.7, chorus: 0.4, pan: -0.15 }), bass = M.track('fmbass', { reverb: 0.05, gain: 0.58 }), kick = M.track('kick', { reverb: 0.04, gain: 0.7 }), sn = M.track('snare', { reverb: 0.2, gain: 0.5 }), hat = M.track('hat', { reverb: 0.06, gain: 0.24 }), gtr = M.track('guitar', { reverb: 0.2, gain: 0.5, pan: 0.35, params: { decay: 0.25 } }), vinyl = M.track('vinyl', { gain: 0.18 }), tk = M.track('tick', { reverb: 0.15, gain: 0.8, humanize: 0 }), wb = M.track('woodblock', { reverb: 0.2, gain: 0.6, humanize: 0 });
+    wb.hit(M.b(T_IN), 0.8, 0.1, { pitch: 50 }); wb.hit(M.b(T_IN + 0.07), 0.5); tk.hit(4 - 0.02, 1, 0.05, { tone: 1800 });
+    const ch = [['E2', ['D4', 'F#4', 'G4', 'B4']], ['A2', ['C#4', 'E4', 'G4', 'B4']], ['C2', ['B3', 'E4', 'G4', 'B4']], ['B1', ['A3', 'D#4', 'F#4', 'D5']]];
+    for (let bar = 0; bar < 6; bar++) {
+      const b = 4 + bar * 4, [r, c] = ch[bar % 4], brk = bar === 3, m = S.midi(r);
+      ep.chord(b, c, 1.2, 0.5); ep.chord(b + 1.75, c, 0.4, 0.4); ep.chord(b + 2.5, c, 1.2, 0.45);
+      if (brk) { hat.pattern(b, 0.5, 'x.x.x.x.', { vel: 0.3 }); bass.note(b, r, 3.5, 0.5); continue; }
+      [[0, m, 0.4], [0.75, m, 0.2], [1.5, m + 12, 0.2], [2, m + 7, 0.4], [2.75, m + 10, 0.2], [3.25, m + 12, 0.2], [3.5, m + 7, 0.3]].forEach(([o, n, d]) => bass.note(b + o, n, d, 0.8));
+      kick.pattern(b, 0.25, 'x.....x...x..x..', { vel: 0.9 }); sn.pattern(b, 1, '.x.x', { vel: 0.8 }); if (bar % 2) sn.hit(b + 3.75, 0.4); hat.pattern(b, 0.25, 'x.xxx.xxx.xxx.xo', { vel: 0.5 });
+      [0.5, 1.25, 1.5, 2.5, 3.25].forEach((o) => gtr.chord(b + o, [c[1], c[2], c[3]].map((n) => S.midi(n) + 12), 0.12, 0.5));
+      if (bar >= 4) [[0, 'B5'], [0.5, 'D6'], [0.75, 'E6'], [1.5, 'G6'], [2, 'E6'], [2.75, 'D6'], [3, 'B5']].forEach(([o, n]) => gtr.note(b + o, n, 0.4, 0.5, { decay: 0.6 }));
+    }
+    // stop: the last chord sags like tape losing speed
+    [0, 1, 2, 3, 4, 5].forEach((k) => { ep.chord(28 + k * 0.12, ['D4', 'F#4', 'G4', 'B4'].map((n) => S.midi(n) - k * 0.5 - k * k * 0.12), 0.16, 0.45 - 0.06 * k); bass.note(28 + k * 0.12, 40 - k * 0.6 - k * k * 0.15, 0.14, 0.7 - 0.1 * k); });
+    tk.hit(28 - 0.02, 0.9, 0.05, { tone: 1400 }); vinyl.hit(4, 0.6, 24 * 0.625 / 0.625 * 1.0);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const c = bg, g = c.createRadialGradient(W / 2, 300, 100, W / 2, H / 2, 1300); g.addColorStop(0, '#3b2619'); g.addColorStop(1, '#170e09'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const r = Stage.rng(76); for (let i = 0; i < 260; i++) { c.fillStyle = `rgba(${r() < 0.5 ? '255,210,160' : '0,0,0'},${0.012 + 0.03 * r()})`; c.fillRect(0, r() * H, W, 1 + 3 * r()); }
+    // the deck: well for the cassette, brushed faceplate for the meters
+    c.fillStyle = '#120a06'; c.beginPath(); c.roundRect(CX - CW / 2 - 30, CY0 - 22, CW + 60, CH + 50, 34); c.fill(); c.strokeStyle = 'rgba(255,220,170,.12)'; c.lineWidth = 2; c.stroke();
+    const fp = c.createLinearGradient(0, 640, 0, 1030); fp.addColorStop(0, '#d8b45a'); fp.addColorStop(1, '#b98d34'); c.fillStyle = fp; c.beginPath(); c.roundRect(220, 636, 1480, 398, 22); c.fill();
+    for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(${r() < 0.5 ? '255,245,210' : '70,40,10'},${0.03 + 0.05 * r()})`; c.fillRect(220, 636 + r() * 398, 1480, 1); }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const on = t >= T_PLAY && t < T_STOP, power = smoothstep(T_PLAY - 0.1, T_PLAY + 0.4, t) * (1 - smoothstep(T_STOP, T_STOP + 0.8, t));
+    // cassette drops into the well
+    const d = prog(t, T_IN - 0.55, 0.55, E.inCubic), bounce = t > T_IN ? Math.exp(-(t - T_IN) * 9) * Math.sin((t - T_IN) * 30) * 7 : 0;
+    c.save(); c.translate(0, -640 * (1 - d) - bounce); cassette(c, t); c.restore();
+    // meters read the mix
+    const lv = Math.pow(Stage.level(t), 0.5), kH = Stage.hit('kick', t, 0.22), sH = Stage.hit('snare', t, 0.2), lo = clamp01(Stage.low(t) * 2 + 0.6 * kH + 0.45 * Stage.hit('fmbass', t, 0.25)), mi = clamp01(Stage.mid(t) * 1.6 + 0.4 * Stage.hit('epiano', t, 0.5) + 0.45 * sH), hi = clamp01(Stage.high(t) * 1.1 + 0.3 * Stage.hit('hat', t, 0.08));
+    vu(c, 284, 672, power * clamp01(0.06 + 0.82 * lv + 0.16 * kH), 'L E F T', power > 0.3); vu(c, 1236, 672, power * clamp01(0.06 + 0.8 * lv + 0.15 * sH + 0.05 * hi), 'R I G H T', power > 0.3);
+    // LED ladders
+    const rows = [['LOW', lo], ['MID', mi], ['HIGH', hi]]; c.font = '600 13px "JetBrains Mono Variable"'; c.textBaseline = 'middle';
+    c.fillStyle = DARK; c.beginPath(); c.roundRect(736, 664, 448, 168, 14); c.fill();
+    rows.forEach(([name, v], j) => { const y = 700 + j * 46, n = 16, litN = Math.round(clamp01(Math.pow(v, 0.8)) * n * power); c.fillStyle = 'rgba(234,223,196,.7)'; c.textAlign = 'left'; c.fillText(name, 758, y);
+      for (let i = 0; i < n; i++) { const lit = i < litN, col = i >= 13 ? '#ff5a36' : i >= 10 ? '#ffc23a' : '#8fe06a'; c.fillStyle = lit ? col : 'rgba(255,255,255,.07)'; if (lit) { c.shadowColor = col; c.shadowBlur = 10; } c.beginPath(); c.roundRect(816 + i * 22, y - 11, 16, 22, 3); c.fill(); c.shadowBlur = 0; } });
+    // transport keys
+    const keys = ['◀◀', '▶', '■', '▶▶', '⏏']; keys.forEach((k, i) => { const x = 736 + i * 92, down = (i === 1 && on) || (i === 2 && t >= T_STOP && t < T_STOP + 0.5) ? 5 : 0, g2 = c.createLinearGradient(0, 858, 0, 930); g2.addColorStop(0, '#f3ead4'); g2.addColorStop(1, '#cfc2a2'); c.fillStyle = 'rgba(0,0,0,.4)'; c.beginPath(); c.roundRect(x, 866, 80, 62, 8); c.fill(); c.fillStyle = g2; c.beginPath(); c.roundRect(x, 858 + down, 80, 62, 8); c.fill(); c.fillStyle = i === 1 && on ? ORANGE : BROWN; c.font = '600 20px "Inter Variable"'; c.textAlign = 'center'; c.fillText(k, x + 40, 890 + down); });
+    // counter and lamp
+    const cnt = String(Math.floor(tape(t) * 3.2)).padStart(3, '0'); c.fillStyle = DARK; c.beginPath(); c.roundRect(736, 952, 150, 52, 8); c.fill(); c.fillStyle = '#f1d998'; c.font = '600 30px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.fillText(cnt.split('').join(' '), 811, 980);
+    c.fillStyle = on ? '#ff5a36' : '#5a2a1c'; if (on) { c.shadowColor = '#ff5a36'; c.shadowBlur = 16; } c.beginPath(); c.arc(1150, 978, 9, 0, TAU); c.fill(); c.shadowBlur = 0; c.fillStyle = BROWN; c.font = '600 13px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.fillText('P L A Y', 1128, 979);
+  }
+});
+</script>
+</body>
+</html>

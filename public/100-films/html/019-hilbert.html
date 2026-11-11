@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 019 — Hilbert</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 019 — HILBERT
+ * One line learns to fill a square: Hilbert curve orders 1 → 6. Each order's points are mapped onto the next
+ * (every point splits into four), so the line unfolds rather than cuts. Eight bars at 120 bpm (2 s each):
+ * orders 1–4 one per bar, 5 and 6 inside bar 5, a breath, then the vermilion dot runs the whole curve in one bar
+ * and leaves it coloured by distance. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, SIDE = 800, X0 = 960 - SIDE / 2 - 150, Y0 = 540 - SIDE / 2;
+const PAPER = '#f6f3ea', INK = '#141414', RED = '#d9351f';
+const T_ORDER = [0.5, 2, 4, 6, 8, 9], RUN0 = 12, RUN1 = 14;
+let ctx, orders = [];
+const ramp = Stage.color.ramp([INK, '#5a1c14', RED]);
+
+function d2xy(n, d) { let x = 0, y = 0, t = d; for (let s = 1; s < n; s *= 2) { const rx = 1 & (t / 2), ry = 1 & (t ^ rx); if (ry === 0) { if (rx === 1) { x = s - 1 - x; y = s - 1 - y; } const q = x; x = y; y = q; } x += s * rx; y += s * ry; t = Math.floor(t / 4); } return [x, y]; }
+
+Stage.create({
+  no: 19, title: 'Hilbert', subtitle: 'space-filling curve · 120 bpm',
+  duration: 16, background: PAPER, grain: 0.045, poster: 15,
+  fonts: ['300 150px "JetBrains Mono Variable"', '500 15px "JetBrains Mono Variable"', 'italic 400 32px "Fraunces Variable"'],
+  fade: { in: 0.5, out: 0.9, color: PAPER },
+  slate: { at: 0.6, hold: 2.8, color: 'rgba(20,20,20,.86)', pos: 'br' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 19 });
+    M.master({ reverb: { decay: 1.4, size: 0.7, damp: 0.5 }, fadeOut: 1.2 });
+    const tick = M.track('tick', { reverb: 0.15, gain: 0.36 }), kick = M.track('kick', { reverb: 0.03, gain: 0.8, params: { decay: 0.24, click: 0.7 } });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 1.2, delay: { time: 0.75, fb: 0.3, mix: 0.2 }, params: { decay: 1.0, bright: 0.55 } });
+    const acid = M.track('acid', { reverb: 0.15, gain: 0.5, lowpass: (t) => 500 + 2600 * smoothstep(12, 13.8, t) }), hat = M.track('hat', { reverb: 0.05, gain: 0.3 });
+    const sub = M.track('sub', { reverb: 0.03, gain: 0.6 }), ch = M.track('chime', { reverb: 0.7, gain: 0.6 });
+    const sc = S.scale('C3', 'minor', 3);
+    // the sequence doubles in density with each order: 2, 4, 8, 16 notes to the bar, then sixteenths in two octaves
+    const walk = (i) => sc[[0, 4, 2, 6, 7, 4, 9, 6, 2, 7, 4, 11, 9, 6, 7, 4][i % 16]];
+    [2, 4, 8, 16, 16, 16].forEach((n, bar) => { const b = bar * 4, step = 4 / n; for (let i = 0; i < n; i++) plk.note(b + i * step, walk(i * (16 / n)) + (bar >= 4 ? 12 : 0), step * 0.9, i % (n / 2) === 0 ? 0.8 : 0.55); if (bar >= 4) for (let i = 0; i < 16; i += 2) plk.note(b + i * 0.25 + 0.125, walk(i + 5) + 24, 0.2, 0.3); });
+    for (let bar = 0; bar < 7; bar++) { const b = bar * 4; tick.pattern(b, 0.5, bar < 2 ? 'x...x...' : 'x.x.x.x.', { vel: 0.6 }); if (bar >= 2 && bar < 5) kick.pattern(b, 1, 'x.x.', { vel: 0.85 }); if (bar >= 5) kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); if (bar >= 3) hat.pattern(b, 0.25, '..x...x...x...x.', { vel: 0.5 }); if (bar >= 2) sub.note(b, 'C1', 3.5, 0.7); }
+    acid.seq(24, 0.25, ['C2', 'C3', 'Eb2', 'C2', 'G2', 'C3', 'Bb2', 'C2', 'C2', 'Eb3', 'D3', 'C3', 'G2', 'Bb2', 'C3', 'G3'], { vel: 0.8, gate: 0.8 });
+    plk.seq(24, 0.25, Array.from({ length: 16 }, (_, i) => walk(i) + 12), { vel: 0.6, gate: 0.9 });
+    ch.note(28, 'C6', 4, 0.6); ch.note(28, 'G5', 4, 0.5); plk.chord(28, ['C3', 'G3', 'Eb4', 'Bb4', 'D5'], 4, 0.7, { strum: 0.05 }); kick.hit(28, 1); sub.note(28, 'C1', 4, 0.9);
+    T_ORDER.forEach((t) => tick.hit(M.b(t), 1, 1, { tone: 900 }));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    for (let k = 1; k <= 6; k++) { const n = 1 << k, pts = []; for (let d = 0; d < n * n; d++) { const [x, y] = d2xy(n, d); pts.push([X0 + (x + 0.5) / n * SIDE, Y0 + SIDE - (y + 0.5) / n * SIDE]); } orders.push(pts); }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // frame of the unit square
+    c.strokeStyle = 'rgba(20,20,20,.16)'; c.lineWidth = 1; c.strokeRect(X0 - 0.5, Y0 - 0.5, SIDE + 1, SIDE + 1);
+    for (const [x, y] of [[X0, Y0], [X0 + SIDE, Y0], [X0, Y0 + SIDE], [X0 + SIDE, Y0 + SIDE]]) { c.beginPath(); c.moveTo(x - 10, y); c.lineTo(x + 10, y); c.moveTo(x, y - 10); c.lineTo(x, y + 10); c.strokeStyle = 'rgba(20,20,20,.4)'; c.stroke(); }
+    let k = 0; for (let i = 0; i < 6; i++) if (t >= T_ORDER[i]) k = i;
+    const dur = k >= 4 ? 0.8 : 1.15, m = k === 0 ? 1 : prog(t, T_ORDER[k], dur, E.inOutCubic), pts = orders[k], prev = k > 0 ? orders[k - 1] : null, N = pts.length;
+    const P = (j) => prev && m < 1 ? [lerp(prev[j >> 2][0], pts[j][0], m), lerp(prev[j >> 2][1], pts[j][1], m)] : pts[j];
+    const draw0 = k === 0 ? prog(t, 0.5, 1.2, E.inOutCubic) : 1;
+    const orderF = k === 0 ? 1 : k + m, lw = lerp(11, 4.6, clamp01((orderF - 1) / 5)) * (1 + 0.05 * Stage.hit('kick', t, 0.12));
+    const run = prog(t, RUN0, RUN1 - RUN0, E.inOutSine), settled = k === 5 && m >= 1;
+    c.lineCap = 'round'; c.lineJoin = 'round'; c.lineWidth = lw;
+    if (settled && run > 0) {
+      // behind the dot the line takes its colour; ahead of it stays ink
+      const CH = 32, lim = run * (N - 1);
+      for (let s = 0; s < N - 1; s += CH) { const e = Math.min(N - 1, s + CH); c.beginPath(); c.moveTo(pts[s][0], pts[s][1]); for (let j = s + 1; j <= e; j++) c.lineTo(pts[j][0], pts[j][1]); c.strokeStyle = s < lim ? ramp(Math.pow(s / N, 0.9)) : INK; c.stroke(); }
+    } else {
+      c.strokeStyle = INK; c.beginPath(); const last = draw0 * (N - 1);
+      for (let j = 0; j <= Math.floor(last); j++) { const p = P(j); j ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); }
+      if (last < N - 1) { const a = P(Math.floor(last)), b = P(Math.floor(last) + 1), f = last - Math.floor(last); c.lineTo(lerp(a[0], b[0], f), lerp(a[1], b[1], f)); }
+      c.stroke();
+    }
+    // the dot: pen tip at first, resting on the end of the line, then running the curve
+    let dp; if (k === 0) { const last = draw0 * (N - 1), a = P(Math.floor(last)), b = P(Math.min(N - 1, Math.floor(last) + 1)), f = last - Math.floor(last); dp = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)]; }
+    else if (settled && t >= RUN0) { const u = run * (N - 1), a = pts[Math.floor(u)], b = pts[Math.min(N - 1, Math.floor(u) + 1)], f = u - Math.floor(u); dp = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)]; }
+    else dp = settled ? pts[0] : P(N - 1);
+    if (settled && t < RUN0) { const g = prog(t, 10.6, 1.2, E.inOutCubic); dp = [lerp(pts[N - 1][0], pts[0][0], g), lerp(pts[N - 1][1], pts[0][1], g) - 60 * Math.sin(g * Math.PI)]; }
+    const dr = (k < 2 ? 15 : 12) * (1 + 0.35 * Stage.hit('tick', t, 0.1)) * prog(t, 0.4, 0.4, E.outBack) * (1 - prog(t, RUN1 + 0.2, 0.6, E.inCubic));
+    if (dr > 0) { c.fillStyle = 'rgba(217,53,31,.16)'; c.beginPath(); c.arc(dp[0], dp[1], dr * 2.3, 0, TAU); c.fill(); c.fillStyle = RED; c.beginPath(); c.arc(dp[0], dp[1], dr, 0, TAU); c.fill(); }
+    // readout
+    const rx = X0 + SIDE + 110, on = prog(t, 0.6, 0.6, E.outCubic) * (1 - prog(t, 15.2, 0.6));
+    c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = `rgba(20,20,20,${0.5 * on})`; c.font = '500 15px "JetBrains Mono Variable"'; c.fillText('O R D E R', rx, Y0 + 40);
+    const flip = k === 0 ? 1 : prog(t, T_ORDER[k], 0.45, E.outExpo);
+    c.save(); c.beginPath(); c.rect(rx - 10, Y0 + 60, 300, 150); c.clip(); c.fillStyle = `rgba(20,20,20,${on})`; c.font = '300 150px "JetBrains Mono Variable"'; c.fillText(String(k + 1), rx - 8, Y0 + 190 + (1 - flip) * 150); if (k > 0 && flip < 1) c.fillText(String(k), rx - 8, Y0 + 190 - flip * 150); c.restore();
+    c.strokeStyle = `rgba(20,20,20,${0.3 * on})`; c.lineWidth = 1; c.beginPath(); c.moveTo(rx, Y0 + 232); c.lineTo(rx + 250, Y0 + 232); c.stroke();
+    c.fillStyle = `rgba(20,20,20,${0.72 * on})`; c.font = '500 15px "JetBrains Mono Variable"'; c.fillText((1 << (2 * (k + 1))).toLocaleString('en-US') + ' POINTS  ·  ' + (1 << (k + 1)) + ' × ' + (1 << (k + 1)), rx, Y0 + 268);
+    const cap = t < RUN0 ? 'one line, never crossing' : 'coloured by distance travelled', ca = on * (t < RUN0 ? prog(t, 2.2, 0.8) * (1 - prog(t, RUN0 - 0.5, 0.4)) : prog(t, RUN0 + 0.2, 0.6));
+    c.fillStyle = `rgba(20,20,20,${0.62 * ca})`; c.font = 'italic 400 32px "Fraunces Variable"'; c.fillText(cap, rx, Y0 + 326);
+    if (t >= RUN0) { const g = c.createLinearGradient(rx, 0, rx + 250, 0); g.addColorStop(0, INK); g.addColorStop(0.5, '#5a1c14'); g.addColorStop(1, RED); c.globalAlpha = ca; c.fillStyle = g; c.fillRect(rx, Y0 + 352, 250 * run, 6); c.globalAlpha = 1; }
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 100 — One Hundred</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 100 — ONE HUNDRED
+ * The curtain call. A hundred tiles, each a tiny looping film in the spirit of the series — sixteen kinds of
+ * motif (orbits, rings, waves, polygons, bars, spirals, pendulums, bouncing balls, Lissajous dots, radar
+ * sweeps …), varied by speed, phase and a palette of five colours. They switch on one by one, faster and
+ * faster, while a counter rolls from 001 to 100 and a tick sounds for each. For two bars the whole mosaic
+ * plays; then every tile changes places — forty-five of them landing, on the downbeat of bar 9, as a large
+ * "100" — and the rest step back. Twelve bars at 120 bpm (2 s each), D major. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, PITCH = 96, TS = 84, T_SH = 15.2, T_100 = 16, BG = '#141210', DARK = '#1b1815', CREAM = '#f2e8d5';
+const PAL = [CREAM, '#e5523a', '#ecb53a', '#3fb0a0', '#4f74e6'];
+const ton = (i) => 0.8 + 11.0 * Math.pow(i / 99, 0.62);
+const TILE = Array.from({ length: 100 }, (_, i) => { const row = Math.floor(i / 10), inv = hash(i, 9) < 0.2, a = PAL[(i * 3 + row) % 5]; return { i, col: i % 10, row, type: (i * 7 + row * 3) % 16, a: inv ? DARK : a, b: inv ? CREAM : PAL[(i * 3 + row + 2) % 5], bg: inv ? (a === CREAM ? PAL[1 + i % 4] : a) : '#221f1b', sp: [0.5, 1, 1, 2][Math.floor(hash(i, 2) * 4)], ph: hash(i, 3), h: hash(i, 4), on: ton(i) }; });
+// where everyone goes at the end: "1 0 0" in an 8-row face, columns 0–1 · 3–5 · 7–9
+const DIG = []; for (let r = 1; r <= 8; r++) { DIG.push([1, r]); for (const c0 of [3, 7]) { if (r === 1 || r === 8) DIG.push([c0, r], [c0 + 1, r], [c0 + 2, r]); else DIG.push([c0, r], [c0 + 2, r]); } } DIG.push([0, 2]);
+{ const key = (c) => c[0] + ',' + c[1], dset = new Set(DIG.map(key)), rest = []; for (let r = 0; r < 10; r++) for (let c = 0; c < 10; c++) if (!dset.has(key([c, r]))) rest.push([c, r]); const order = TILE.map((t) => t.i), rnd = Stage.rng(100); for (let i = 99; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  order.forEach((ti, k) => { const d = k < DIG.length ? DIG[k] : rest[k - DIG.length]; TILE[ti].dc = d[0]; TILE[ti].dr = d[1]; TILE[ti].digit = k < DIG.length; TILE[ti].fin = PAL[d[0] <= 1 ? 1 : d[0] <= 5 ? 2 : 3]; TILE[ti].lag = 0.3 * hash(ti, 12); }); }
+let ctx;
+
+function motif(c, k, p, a, b, h) {
+  const tp = TAU * p, dot = (x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }, ring = (x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke(); }; c.fillStyle = c.strokeStyle = a; c.lineWidth = 4; c.lineCap = 'round'; c.lineJoin = 'round'; const al = c.globalAlpha;
+  switch (k) {
+    case 0: { c.globalAlpha = al * 0.3; ring(0, 0, 22); c.globalAlpha = al; const n = 1 + Math.floor(h * 3); for (let j = 0; j < n; j++) dot(22 * Math.cos(tp + j * TAU / n), 22 * Math.sin(tp + j * TAU / n), 6); c.fillStyle = b; dot(0, 0, 5); break; }
+    case 1: { c.lineWidth = 3.4; for (let j = 0; j < 3; j++) { const q = (p + j / 3) % 1; c.globalAlpha = al * (1 - q); ring(0, 0, 3 + 27 * q); } c.globalAlpha = al; c.fillStyle = b; dot(0, 0, 3.4); break; }
+    case 2: { for (const [col, off, am] of [[b, 1.6, 7], [a, 0, 12]]) { c.strokeStyle = col; c.beginPath(); for (let x = -28; x <= 28; x += 4) { const y = am * Math.sin(x * 0.15 + tp + off) + (col === b ? 10 : -4); x === -28 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); } break; }
+    case 3: { const n = 3 + Math.floor(h * 4), r0 = tp / n; c.beginPath(); for (let j = 0; j <= n; j++) { const an = r0 + j * TAU / n - TAU / 4; j ? c.lineTo(24 * Math.cos(an), 24 * Math.sin(an)) : c.moveTo(24 * Math.cos(an), 24 * Math.sin(an)); } c.closePath(); c.stroke(); c.fillStyle = b; dot(0, 0, 5 + 2 * Math.sin(tp)); break; }
+    case 4: { for (let j = 0; j < 4; j++) { const hh = 10 + 38 * Math.abs(Math.sin(tp / 2 + j * 1.3 + h * 6)); c.fillStyle = j === 1 ? b : a; c.beginPath(); c.roundRect(-27 + j * 15, 26 - hh, 9, hh, 4.5); c.fill(); } break; }
+    case 5: { c.lineWidth = 3.4; c.beginPath(); for (let j = 0; j <= 60; j++) { const u = j / 60, an = u * 3 * TAU - tp, r = 2 + 25 * u; j ? c.lineTo(r * Math.cos(an), r * Math.sin(an)) : c.moveTo(r * Math.cos(an), r * Math.sin(an)); } c.stroke(); c.fillStyle = b; dot(27 * Math.cos(-tp), 27 * Math.sin(-tp), 4.5); break; }
+    case 6: { const st = Math.floor(p * 8); for (let j = 0; j < 9; j++) { const onn = (j * 5 + st) % 9 < 4; c.fillStyle = onn ? (j % 4 === 0 ? b : a) : a; c.globalAlpha = al * (onn ? 1 : 0.25); dot(-20 + (j % 3) * 20, -20 + Math.floor(j / 3) * 20, onn ? 6.5 : 3.5); } c.globalAlpha = al; break; }
+    case 7: { const an = 0.95 * Math.sin(tp), x = 46 * Math.sin(an), y = -24 + 46 * Math.cos(an); c.lineWidth = 3; c.beginPath(); c.moveTo(0, -24); c.lineTo(x, y); c.stroke(); dot(0, -24, 3.5); c.fillStyle = b; dot(x, y, 8); break; }
+    case 8: { const u = Math.abs(Math.sin(Math.PI * p)), y = 20 - 40 * u, sq = Math.max(0, 1 - u * 6) * 0.35; c.lineWidth = 3; c.globalAlpha = al * 0.5; c.beginPath(); c.moveTo(-24, 28); c.lineTo(24, 28); c.stroke(); c.globalAlpha = al; c.fillStyle = b; c.beginPath(); c.ellipse(0, y + 8 * sq, 8.5 * (1 + sq), 8.5 * (1 - sq), 0, 0, TAU); c.fill(); break; }
+    case 9: { for (let j = 0; j < 22; j++) { const s = tp - (21 - j) * 0.075; c.globalAlpha = al * (0.15 + 0.85 * j / 21); c.fillStyle = j === 21 ? b : a; dot(24 * Math.sin(2 * s), 24 * Math.sin(3 * s + h * 3), 1.6 + 3.2 * j / 21); } c.globalAlpha = al; break; }
+    case 10: { c.lineWidth = 3; c.globalAlpha = al * 0.35; ring(0, 0, 25); c.globalAlpha = al * 0.4; c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, 25, tp - 1.3, tp); c.closePath(); c.fill(); c.globalAlpha = al; c.strokeStyle = b; c.beginPath(); c.moveTo(0, 0); c.lineTo(25 * Math.cos(tp), 25 * Math.sin(tp)); c.stroke(); break; }
+    case 11: { const q = p * 4, an = (Math.floor(q) + E.inOutCubic(q % 1)) * Math.PI / 2; c.save(); c.rotate(an); c.lineWidth = 5; for (let j = 0; j < 4; j++) { c.strokeStyle = j % 2 ? b : a; c.beginPath(); c.arc(j < 2 ? -14 : 14, j % 2 ? 14 : -14, 12, j * 1.57, j * 1.57 + 3.9); c.stroke(); } c.restore(); break; }
+    case 12: { c.save(); c.beginPath(); c.arc(0, 0, 27, 0, TAU); c.clip(); c.lineWidth = 6; for (let j = -5; j <= 5; j++) { c.strokeStyle = (j & 1) ? b : a; const o = j * 14 + (p * 28) % 28; c.beginPath(); c.moveTo(o - 40, 40); c.lineTo(o + 40, -40); c.stroke(); } c.restore(); break; }
+    case 13: { const s = 0.5 + 0.5 * Math.sin(tp); dot(0, 0, 9 + 11 * s); c.strokeStyle = b; c.lineWidth = 3; ring(0, 0, 29 - 7 * s); break; }
+    case 14: { const q = p * 2, an = (Math.floor(q) + E.inOutCubic(q % 1)) * Math.PI / 2 + (h < 0.5 ? 0 : Math.PI / 4); c.save(); c.rotate(an); c.lineWidth = 9; c.beginPath(); c.moveTo(-22, 0); c.lineTo(22, 0); c.stroke(); c.strokeStyle = b; c.beginPath(); c.moveTo(0, -22); c.lineTo(0, 22); c.stroke(); c.restore(); break; }
+    default: { for (let j = 0; j < 5; j++) { const u = Math.max(0, Math.sin(tp - j * 0.9)); c.fillStyle = j === 2 ? b : a; dot(-24 + j * 12, 10 - 24 * u, 5); } }
+  }
+  c.globalAlpha = al;
+}
+
+Stage.create({
+  no: 100, title: 'One Hundred', subtitle: 'the curtain call · 120 bpm',
+  duration: 24, background: BG, grain: 0.045, poster: 18.4,
+  fonts: ['200 300px "Fraunces Variable"', 'italic 300 46px "Fraunces Variable"', '500 14px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.6 },
+  slate: { at: 23.9, hold: 0.05, pos: 'bl', color: 'rgba(0,0,0,0)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 24, seed: 100 });
+    M.master({ reverb: { decay: 2.2, size: 0.95, damp: 0.45 }, fadeOut: 1.8 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.62 }), clap = M.track('clap', { reverb: 0.3, gain: 0.42 }), hat = M.track('hat', { reverb: 0.08, gain: 0.2 }), bass = M.track('bass', { reverb: 0.05, gain: 0.42, lowpass: 1000 }), pno = M.track('piano', { reverb: 0.35, gain: 0.6, pan: -0.15 }), str = M.track('strings', { reverb: 0.55, gain: 0.34 }), mar = M.track('marimba', { reverb: 0.3, gain: 0.72, pan: 0.2, humanize: 0 });
+    const tk = M.track('tick', { reverb: 0.15, gain: 0.3, humanize: 0 }), ris = M.track('riser', { reverb: 0.4, gain: 0.34 }), crash = M.track('crash', { reverb: 0.5, gain: 0.34 }), imp = M.track('impact', { reverb: 0.5, gain: 0.5 }), sn = M.track('snare', { reverb: 0.25, gain: 0.34 }), sub = M.track('sub', { reverb: 0.05, gain: 0.34 }), cel = M.track('celesta', { reverb: 0.5, gain: 0.5 });
+    const CH = { D: ['D2', ['D4', 'F#4', 'A4'], ['D5', 'F#5', 'A5', 'F#5', 'B5', 'A5', 'F#5', 'A5']], G: ['G1', ['D4', 'G4', 'B4'], ['D5', 'G5', 'B5', 'G5', 'D6', 'B5', 'G5', 'B5']], A: ['A1', ['C#4', 'E4', 'A4'], ['C#5', 'E5', 'A5', 'E5', 'C#6', 'A5', 'E5', 'A5']], Bm: ['B1', ['D4', 'F#4', 'B4'], ['D5', 'F#5', 'B5', 'F#5', 'D6', 'B5', 'F#5', 'B5']] };
+    ['D', 'D', 'G', 'A', 'Bm', 'G', 'D', 'A', 'D', 'G', 'A'].forEach((n, i) => { const b = i * 4, [r, tri, hook] = CH[n], full = i >= 4, big = i >= 8, m = S.midi(r);
+      hook.forEach((nt, k) => mar.note(b + k * 0.5, nt, 0.4, (k % 2 ? 0.4 : 0.55) * (i < 2 ? 0.8 : 1)));
+      if (i >= 2) { [0, 1.5, 3].forEach((o, k) => pno.chord(b + o, big ? tri.concat([S.midi(tri[0]) + 12]) : tri, 0.9, 0.55 - 0.05 * k)); for (let k = 0; k < 8; k++) bass.note(b + k * 0.5, k % 4 === 3 ? m + 12 : m, 0.4, k % 2 ? 0.55 : 0.75); }
+      if (full && i !== 10) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); clap.pattern(b, 1, '.x.x', { vel: 0.7 }); hat.pattern(b, 0.5, i >= 6 ? 'xxxxxxxx' : '.x.x.x.x', { vel: 0.45 }); } else if (i >= 1 && i < 4) hat.pattern(b, 1, '.x.x', { vel: 0.4 });
+      if (i === 10) { kick.pattern(b, 2, 'xx', { vel: 0.9 }); clap.hit(b + 2, 0.7); }
+      if (i >= 6) str.chord(b, tri.map((x) => S.midi(x) + 12).concat([m + 24]), 4.1, big ? 0.6 : 0.42); });
+    // a tick for every tile
+    TILE.forEach((t) => tk.hit(M.b(t.on), 0.35 + 0.3 * (t.i / 99), 0.03, { tone: 1500 + 26 * t.i, pan: (t.col - 4.5) / 6 }));
+    for (let k = 0; k < 8; k++) sn.hit(30 + k * 0.25, 0.3 + 0.08 * k); ris.hit(28, 0.8, 4); crash.hit(32, 0.9, 3); imp.hit(32, 0.9, 3); sub.note(32, 'D1', 3.5, 0.8);
+    [[32, 'F#5', 1.5], [33.5, 'A5', 0.5], [34, 'D6', 2], [36, 'B5', 1.5], [37.5, 'D6', 0.5], [38, 'G6', 2], [40, 'E6', 2], [42, 'C#6', 2]].forEach(([b, n, d]) => str.note(b, n, d, 0.6));
+    cel.note(40, 'A6', 1, 0.5); cel.note(40.25, 'E7', 1.5, 0.45);
+    // the last chord: wide and warm
+    pno.chord(44, ['D2', 'A2', 'D3', 'F#3', 'A3', 'D4', 'F#4', 'A4', 'E5'], 4, 0.7); str.chord(44, ['D3', 'A3', 'F#4', 'D5', 'A5'], 4, 0.6); sub.note(44, 'D1', 4, 0.8); ['D5', 'F#5', 'A5', 'D6', 'F#6', 'A6', 'D7'].forEach((n, k) => mar.note(44 + k * 0.09, n, 2, 0.5 - 0.03 * k)); crash.hit(44, 0.5, 4); kick.hit(44, 1);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const g = c.createRadialGradient(960, 500, 100, 960, 540, 1200); g.addColorStop(0, '#1d1a17'); g.addColorStop(1, '#0d0c0b'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const mv = E.inOutCubic(prog(t, T_SH - 0.1, 0.9)), gx = lerp(1334, 960, mv), gy = lerp(540, 462, mv), gs = lerp(1, 0.9, mv) * (1 + 0.012 * Math.sin(t * 0.8) * mv), beat = Stage.hit('kick', t, 0.18), after = t - T_100, n = TILE.filter((q) => q.on <= t).length;
+    // counter
+    const ca = prog(t, 0.2, 0.6) * (1 - prog(t, 14.8, 0.7)); if (ca > 0) {
+      c.textBaseline = 'alphabetic'; c.textAlign = 'center'; c.font = '200 300px "Fraunces Variable"'; const s = String(n).padStart(3, '0'), chg = [n >= 100 ? ton(99) : -9, n >= 10 ? ton(10 * Math.floor(n / 10) - 1) : -9, n >= 1 ? ton(n - 1) : -9];
+      c.save(); c.beginPath(); c.rect(120, 300, 640, 330); c.clip(); for (let d = 0; d < 3; d++) { const u = E.outCubic(clamp01((t - chg[d]) / 0.16)), x = 270 + d * 172; c.fillStyle = Stage.color.alpha(CREAM, ca * u * (d === 0 && n < 100 || d === 1 && n < 10 ? 0.22 : 1)); c.fillText(s[d], x, 590 + 46 * (1 - u)); } c.restore();
+      c.font = '500 14px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.fillStyle = Stage.color.alpha(CREAM, 0.5 * ca); c.fillText('F I L M S   S W I T C H E D   O N', 196, 676); c.fillStyle = Stage.color.alpha(CREAM, 0.14 * ca); c.fillRect(196, 700, 500, 3); c.fillStyle = Stage.color.alpha(PAL[1], 0.9 * ca); c.fillRect(196, 700, 5 * n, 3);
+    }
+    // tiles: the ones that step back first, then the ones that make the number
+    const list = TILE.slice().sort((p, q) => (p.digit ? 1 : 0) - (q.digit ? 1 : 0));
+    for (const q of list) {
+      const u = E.inOutCubic(clamp01((t - T_SH - q.lag) / 0.5)), col = lerp(q.col, q.dc, u), row = lerp(q.row, q.dr, u), arc = Math.sin(Math.PI * u), x = gx + ((col - 4.5) * PITCH) * gs, y = gy + ((row - 4.5) * PITCH - 26 * arc) * gs;
+      const born = t - q.on, onA = clamp01(born / 0.12), pop = born > 0 ? E.outBack(clamp01(born / 0.3)) : 0, flash = born > 0 ? Math.exp(-born * 6) : 0, dim = q.digit ? 1 : lerp(1, 0.1, smoothstep(T_100 - 0.1, T_100 + 0.5, t)), fk = q.digit ? smoothstep(T_100 - 0.06, T_100 + 0.2, t) : 0, land = q.digit && after > 0 ? 0.16 * Math.exp(-after * 6) * Math.cos(after * 18) : 0;
+      const sc = gs * (born > 0 ? (0.6 + 0.4 * pop) * (1 + 0.025 * beat + land + 0.1 * arc) : 1);
+      c.save(); c.translate(x, y); c.scale(sc, sc); c.rotate(0.35 * arc * (q.i % 2 ? 1 : -1));
+      if (born <= 0) { c.strokeStyle = 'rgba(242,232,213,.07)'; c.lineWidth = 1.5; c.beginPath(); c.roundRect(-TS / 2, -TS / 2, TS, TS, 14); c.stroke(); c.restore(); continue; }
+      c.globalAlpha = onA * dim; c.fillStyle = fk > 0 ? Stage.color.mix(q.bg, q.fin, fk) : q.bg; c.beginPath(); c.roundRect(-TS / 2, -TS / 2, TS, TS, 14); c.fill(); if (flash > 0.02) { c.fillStyle = `rgba(255,248,230,${0.6 * flash})`; c.fill(); }
+      motif(c, q.type, (t / 2 * q.sp + q.ph) % 1, fk > 0.5 ? DARK : q.a, fk > 0.5 ? CREAM : q.b, q.h); c.restore();
+    }
+    c.globalAlpha = 1;
+    // the burst on the downbeat of bar nine
+    if (after > 0 && after < 2.6) for (let k = 0; k < 150; k++) { const a = hash(k, 21) * TAU, sp = 500 + 1300 * hash(k, 22), d = sp * (1 - Math.exp(-2.4 * after)) / 2.4, x = 960 + Math.cos(a) * d * 1.25, y = 462 + Math.sin(a) * d + 260 * after * after, life = 1.3 + 1.2 * hash(k, 23), al = clamp01(1 - after / life); if (al <= 0) continue; const sz = 7 + 12 * hash(k, 24);
+      c.save(); c.translate(x, y); c.rotate(after * (3 + 6 * hash(k, 25)) * (k % 2 ? 1 : -1)); c.globalAlpha = al; c.fillStyle = c.strokeStyle = PAL[k % 5]; c.lineWidth = 3; if (k % 4 === 0) { c.beginPath(); c.arc(0, 0, sz * 0.5, 0, TAU); c.fill(); } else if (k % 4 === 1) c.fillRect(-sz / 2, -sz / 2, sz, sz); else if (k % 4 === 2) { c.beginPath(); c.arc(0, 0, sz * 0.6, 0, TAU); c.stroke(); } else { c.beginPath(); c.moveTo(0, -sz * 0.6); c.lineTo(sz * 0.55, sz * 0.45); c.lineTo(-sz * 0.55, sz * 0.45); c.closePath(); c.fill(); } c.restore(); }
+    c.globalAlpha = 1;
+    // the line of small type, then: fin.
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.font = 'italic 300 46px "Fraunces Variable"';
+    const ta = prog(t, 17.0, 0.9, E.outCubic) * (1 - prog(t, 19.4, 0.5)), fa = prog(t, 20.0, 0.8, E.outCubic);
+    if (ta > 0) { c.fillStyle = Stage.color.alpha(CREAM, 0.92 * ta); c.fillText('one hundred films in code', 960, 992 + 10 * (1 - ta)); }
+    if (fa > 0) { c.fillStyle = Stage.color.alpha(CREAM, 0.92 * fa); c.fillText('fin.', 960, 992 + 10 * (1 - fa)); c.fillStyle = Stage.color.alpha(PAL[1], 0.9 * fa); c.fillRect(960 - 26 * fa, 1012, 52 * fa, 3); }
+  }
+});
+</script>
+</body>
+</html>

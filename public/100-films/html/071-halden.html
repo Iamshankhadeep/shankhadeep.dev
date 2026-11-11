@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 071 — Halden</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 071 — HALDEN
+ * Logo sting for a camera maker that does not exist. Out-of-focus glints; the focus pulls sharp while a
+ * nine-blade iris stops down, one detent per beat; on the downbeat of bar 4 the shutter fires — a single soft
+ * flash — and out of the after-image the lens shrinks into a monogram and the wordmark resolves.
+ * Everything is drawn: blades as machined-metal quads on a twisting ring, bokeh that takes the iris's own
+ * nine-sided shape as it closes, streak flares in warm white. Six bars at 90 bpm (2.67 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BEAT = 60 / 90, BAR = 4 * BEAT, CX = 960, CY = 540, RO = 318, T_SHOT = 3 * BAR;
+const STOPS = [0.88, 0.76, 0.65, 0.55, 0.46, 0.38, 0.31, 0.25, 0.2];      // aperture radius / RO at each detent
+let ctx, L, bg;
+
+function aperture(t) { let a = STOPS[0]; for (let k = 1; k < STOPS.length; k++) { const tk = BAR + (k - 1) * BEAT; a = lerp(a, STOPS[k], E.outBack(clamp01((t - tk) / 0.24))); } return a; }
+function nonagon(c, x, y, r, rot, round) { c.beginPath(); for (let i = 0; i <= 9; i++) { const a = rot + i * TAU / 9, px = x + r * Math.cos(a), py = y + r * Math.sin(a); if (!i) c.moveTo(px, py); else { const am = a - TAU / 18, k = 1 + round * 0.06; c.quadraticCurveTo(x + r * k * Math.cos(am), y + r * k * Math.sin(am), px, py); } } c.closePath(); }
+
+function lens(c, t, ap, defocus) {
+  c.clearRect(0, 0, W, H);
+  // barrel: grip ring, engraved front ring, bezel
+  const ring = (r0, r1, a, b) => { const g = c.createLinearGradient(CX - r1, CY - r1, CX + r1, CY + r1); g.addColorStop(0, a); g.addColorStop(0.5, b); g.addColorStop(1, a); c.fillStyle = g; c.beginPath(); c.arc(CX, CY, r1, 0, TAU); c.arc(CX, CY, r0, 0, TAU, true); c.fill('evenodd'); };
+  ring(RO + 96, RO + 150, '#0c0d0e', '#1d1f22'); for (let i = 0; i < 120; i++) { const a = i / 120 * TAU; c.strokeStyle = i % 2 ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.5)'; c.lineWidth = 3; c.beginPath(); c.moveTo(CX + Math.cos(a) * (RO + 104), CY + Math.sin(a) * (RO + 104)); c.lineTo(CX + Math.cos(a) * (RO + 144), CY + Math.sin(a) * (RO + 144)); c.stroke(); }
+  ring(RO + 22, RO + 96, '#101113', '#26282c'); ring(RO, RO + 22, '#050506', '#17181a');
+  c.strokeStyle = 'rgba(255,236,210,.16)'; c.lineWidth = 1.2; for (const r of [RO + 22, RO + 96, RO + 150]) { c.beginPath(); c.arc(CX, CY, r, 0, TAU); c.stroke(); }
+  c.font = '600 19px "Archivo Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = 'rgba(236,230,218,.55)';
+  const eng = 'HALDEN   ·   PRIME 50   ·   1:1.4   ·   Ø58   ·   '; for (let k = 0; k < 2; k++) for (let i = 0; i < eng.length; i++) { const a = -Math.PI / 2 - 0.62 + k * Math.PI + i * 0.0262; c.save(); c.translate(CX + Math.cos(a) * (RO + 59), CY + Math.sin(a) * (RO + 59)); c.rotate(a + Math.PI / 2); c.fillText(eng[i], 0, 0); c.restore(); }
+  // glass, and what the lens sees: glints that are discs when soft and nine-sided once the iris bites
+  c.save(); c.beginPath(); c.arc(CX, CY, RO, 0, TAU); c.clip();
+  const gg = c.createRadialGradient(CX - 60, CY - 80, 20, CX, CY, RO); gg.addColorStop(0, '#16202b'); gg.addColorStop(0.6, '#0a0e14'); gg.addColorStop(1, '#040507'); c.fillStyle = gg; c.fillRect(CX - RO, CY - RO, RO * 2, RO * 2);
+  const rot = 0.2 - 1.0 * (1 - ap);
+  c.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 16; i++) { const x = CX + (hash(i, 1) - 0.5) * RO * 1.5 + 12 * Math.sin(t * 0.5 + i), y = CY + (hash(i, 2) - 0.5) * RO * 1.2 + 9 * Math.cos(t * 0.4 + i * 2), rad = 5 + (22 + 60 * hash(i, 3)) * defocus, al = (0.12 + 0.3 * hash(i, 4)) * lerp(1, 0.55, defocus), col = hash(i, 5) < 0.6 ? '255,204,150' : '255,244,230';
+    c.fillStyle = `rgba(${col},${al})`; nonagon(c, x, y, rad, rot, lerp(1, 6, ap)); c.fill(); c.strokeStyle = `rgba(${col},${al * 0.8})`; c.lineWidth = 1.5; c.stroke(); }
+  c.globalCompositeOperation = 'source-over';
+  // blades
+  const r = ap * RO, tw = lerp(0.55, 1.2, 1 - ap), A = (i) => [CX + r * Math.cos(rot + i * TAU / 9), CY + r * Math.sin(rot + i * TAU / 9)], O = (i) => rot + i * TAU / 9 + tw;
+  for (let i = 0; i < 9; i++) {
+    const a0 = A(i), a1 = A(i + 1), o0 = O(i), o1 = O(i + 1), ox = CX + (RO + 4) * Math.cos(o1), oy = CY + (RO + 4) * Math.sin(o1);
+    c.beginPath(); c.moveTo(a0[0], a0[1]); c.lineTo(a1[0], a1[1]); c.lineTo(ox, oy); c.arc(CX, CY, RO + 4, o1, o0, true); c.closePath();
+    const sh = 0.5 + 0.5 * Math.cos(rot + (i + 0.5) * TAU / 9 - 2.2), g = c.createLinearGradient(a0[0], a0[1], ox, oy); g.addColorStop(0, `rgb(${18 + 22 * sh},${19 + 22 * sh},${21 + 23 * sh})`); g.addColorStop(0.55, `rgb(${44 + 52 * sh},${46 + 52 * sh},${50 + 54 * sh})`); g.addColorStop(1, `rgb(${14 + 16 * sh},${15 + 16 * sh},${17 + 17 * sh})`); c.fillStyle = g; c.fill();
+    c.strokeStyle = 'rgba(0,0,0,.55)'; c.lineWidth = 3; c.beginPath(); c.moveTo(a1[0] + 2, a1[1] + 2.5); c.lineTo(ox + 2, oy + 2.5); c.stroke();
+    c.strokeStyle = `rgba(255,238,214,${0.16 + 0.34 * sh})`; c.lineWidth = 1.3; c.beginPath(); c.moveTo(a1[0], a1[1]); c.lineTo(ox, oy); c.stroke();
+    c.strokeStyle = `rgba(255,238,214,${0.2 + 0.3 * sh})`; c.lineWidth = 1.1; c.beginPath(); c.moveTo(a0[0], a0[1]); c.lineTo(a1[0], a1[1]); c.stroke();
+  }
+  // coatings: two soft reflections on the front element
+  for (const [dx, dy, rr, col] of [[-110, -130, 250, '150,110,255'], [130, 150, 220, '90,220,190']]) { const g = c.createRadialGradient(CX + dx, CY + dy, rr * 0.55, CX + dx, CY + dy, rr); g.addColorStop(0, `rgba(${col},0)`); g.addColorStop(0.82, `rgba(${col},.07)`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(CX - RO, CY - RO, RO * 2, RO * 2); }
+  c.restore();
+}
+function streak(c, x, y, len, a, col) { const g = c.createLinearGradient(x - len, 0, x + len, 0); g.addColorStop(0, `rgba(${col},0)`); g.addColorStop(0.5, `rgba(${col},${a})`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(x - len, y - 1.5, len * 2, 3); const g2 = c.createLinearGradient(x - len * 0.6, 0, x + len * 0.6, 0); g2.addColorStop(0, `rgba(${col},0)`); g2.addColorStop(0.5, `rgba(${col},${a * 0.22})`); g2.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g2; c.fillRect(x - len * 0.6, y - 9, len * 1.2, 18); }
+
+Stage.create({
+  no: 71, title: 'Halden', subtitle: 'logo sting · 90 bpm',
+  duration: 16, background: '#050506', grain: 0.045, poster: 12.4,
+  fonts: ['700 118px "Syne Variable"', '600 19px "Archivo Variable"', '500 17px "JetBrains Mono Variable"'],
+  fade: { in: 1.0, out: 1.2 },
+  slate: { at: 0.6, hold: 2.2, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 16, seed: 71 });
+    M.master({ reverb: { decay: 3.6, size: 1.2, damp: 0.42 }, fadeIn: 0.4, fadeOut: 1.4 });
+    const sub = M.track('sub', { reverb: 0.06, gain: (t) => 0.1 + 0.22 * smoothstep(0, 8, t) * (t < 8 ? 1 : 0.6) }), pad = M.track('pad', { reverb: 0.6, gain: 0.6, lowpass: (t) => 500 + 2400 * smoothstep(2, 8, t) }), ris = M.track('riser', { reverb: 0.4, gain: 0.36 }), imp = M.track('impact', { reverb: 0.6, gain: 0.8 });
+    const tk = M.track('tick', { reverb: 0.25, gain: 0.5, params: { tone: 3000 }, humanize: 0 }), bell = M.track('bell', { reverb: 0.65, gain: 0.8, delay: { time: 0.75, fb: 0.3, mix: 0.22 } }), wp = M.track('warmpad', { reverb: 0.6, gain: 0.75 }), gl = M.track('glass', { reverb: 0.7, gain: 0.4 });
+    sub.note(0, 'D1', 12, 0.7); pad.chord(0, ['D2', 'A2', 'E3', 'F3'], 12, 0.5);
+    for (let k = 1; k < STOPS.length; k++) tk.hit(4 + (k - 1), 0.4 + 0.05 * k, 0.04, { tone: 2400 + 180 * k });
+    [0.5, 2.2, 3.4].forEach((b, i) => gl.note(b, ['A5', 'E6', 'D6'][i], 2, 0.3));
+    ris.hit(8, 0.8, 4); imp.hit(12, 1, 4); tk.hit(12, 1, 0.05, { tone: 5200 }); tk.hit(12.09, 0.7, 0.05, { tone: 3600 });
+    wp.chord(12, ['D2', 'A2', 'D3', 'F3', 'A3', 'E4'], 12, 0.55); sub.note(12, 'D1', 10, 0.6);
+    bell.note(16, 'D5', 3, 0.6); bell.note(17, 'A5', 3, 0.55); bell.note(18, 'E6', 4, 0.5);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 }); L = Stage.buffer(W, H);
+    const g = bg.createRadialGradient(CX, CY, 200, CX, CY, 1150); g.addColorStop(0, '#111214'); g.addColorStop(0.5, '#08090a'); g.addColorStop(1, '#020203'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.filter = 'none'; c.clearRect(0, 0, W, H);
+    const focus = prog(t, BAR * 0.8, BAR * 1.5, E.inOutCubic), breathe = 0.12 * Math.sin(t * 1.3) * (1 - focus), defocus = clamp01(1 - focus + breathe), ap = aperture(t);
+    const after = t - T_SHOT, shrink = prog(t, T_SHOT + 0.25, 1.5, E.inOutCubic), sc = lerp(1 + 0.04 * prog(t, 0, T_SHOT), 0.26, shrink), ly = lerp(CY, 346, shrink);
+    // the lens (blurred by focus), shrinking into the monogram after the shot
+    if (shrink < 1) {
+      lens(L, t, ap, defocus);
+      c.save(); c.translate(CX, ly); c.scale(sc, sc); c.translate(-CX, -CY); c.globalAlpha = 1 - smoothstep(0.55, 1, shrink); c.filter = defocus > 0.01 ? `blur(${(defocus * 26).toFixed(2)}px)` : 'none'; c.drawImage(L.canvas, 0, 0); c.filter = 'none'; c.restore(); c.globalAlpha = 1;
+    }
+    // flares on the glints while the lens is live
+    c.globalCompositeOperation = 'lighter';
+    // loose glints in front of the lens before focus arrives
+    if (focus < 1) for (let i = 0; i < 9; i++) { const x = hash(i, 11) * W + 60 * Math.sin(t * 0.3 + i * 1.7) + 30 * t * (hash(i, 12) - 0.5), y = 160 + hash(i, 13) * 760 + 30 * Math.cos(t * 0.25 + i), r = (50 + 110 * hash(i, 14)) * (0.55 + 0.45 * defocus), al = (0.05 + 0.12 * hash(i, 15)) * (1 - focus) * (0.7 + 0.3 * Math.sin(t * 0.9 + i * 2.3)), col = i % 3 ? '255,206,150' : '255,240,224';
+      const g = c.createRadialGradient(x, y, r * 0.7, x, y, r); g.addColorStop(0, `rgba(${col},${al})`); g.addColorStop(0.9, `rgba(${col},${al * 1.5})`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+    if (after < 0.2) { const fa = (0.25 + 0.35 * focus) * (0.7 + 0.3 * Math.sin(t * 2.1)); streak(c, CX - 70 + 12 * Math.sin(t * 0.5), CY - 60, 520 + 260 * focus, 0.5 * fa, '255,226,190'); streak(c, CX + 120, CY + 84 + 9 * Math.cos(t * 0.4), 300, 0.3 * fa, '255,200,140'); }
+    // the shot: curtain, flash, long streak
+    if (after > -0.05 && after < 3) {
+      const fl = after < 0 ? 0 : Math.exp(-after * 2.6), g = c.createRadialGradient(CX, ly, 0, CX, ly, 1100); g.addColorStop(0, `rgba(255,244,226,${0.95 * fl})`); g.addColorStop(0.35, `rgba(255,214,170,${0.5 * fl})`); g.addColorStop(1, 'rgba(255,200,150,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+      streak(c, CX, ly, 1500, 0.9 * Math.exp(-after * 1.3), '255,236,210');
+    }
+    c.globalCompositeOperation = 'source-over';
+    if (after > -0.06 && after < 0.07) { const k = 1 - Math.abs(after - 0.005) / 0.065; c.fillStyle = '#000'; c.fillRect(0, 0, W, H * 0.5 * k); c.fillRect(0, H - H * 0.5 * k, W, H * 0.5 * k); }
+    // monogram: ring and nine-sided opening, drawn as line
+    const mono = smoothstep(0.5, 1, shrink);
+    if (mono > 0) {
+      c.save(); c.translate(CX, 346); c.strokeStyle = `rgba(244,238,228,${0.95 * mono})`; c.lineWidth = 3; c.scale(1.3, 1.3); c.beginPath(); c.arc(0, 0, 64, 0, TAU); c.stroke();
+      const mr = 0.2 - 1.0 * (1 - 0.46) + 0.05 * Math.sin(t * 0.5); nonagon(c, 0, 0, 30, mr, 2); c.stroke();
+      c.lineWidth = 1.6; for (let i = 0; i < 9; i++) { const a = mr + i * TAU / 9, o = a + 0.95; c.beginPath(); c.moveTo(30 * Math.cos(a), 30 * Math.sin(a)); c.lineTo(62 * Math.cos(o), 62 * Math.sin(o)); c.stroke(); }
+      c.restore();
+    }
+    // wordmark out of the after-image
+    const wm = prog(t, T_SHOT + 0.5, 1.9, E.outCubic);
+    if (wm > 0) {
+      const word = 'HALDEN', size = 118, track = lerp(0.62, 0.36, wm) * size; c.font = `700 ${size}px "Syne Variable"`; c.textBaseline = 'alphabetic'; c.textAlign = 'left';
+      const ws = word.split('').map((ch) => c.measureText(ch).width), total = ws.reduce((a, b) => a + b, 0) + track * (word.length - 1); let x = CX - total / 2; const y = 640;
+      const draw = () => { let xx = x; word.split('').forEach((ch, i) => { c.fillText(ch, xx, y); xx += ws[i] + track; }); };
+      c.globalCompositeOperation = 'lighter'; c.filter = `blur(${lerp(46, 10, wm).toFixed(1)}px)`; c.fillStyle = `rgba(255,206,150,${0.75 * (1 - 0.6 * wm) * Math.min(1, wm * 3)})`; draw(); c.filter = 'none'; c.globalCompositeOperation = 'source-over';
+      c.fillStyle = `rgba(246,240,230,${smoothstep(0.25, 1, wm)})`; draw();
+      // a slow sheen crossing the letters
+      const shx = lerp(-200, W + 200, prog(t, 11.6, 3.2, E.inOutSine)); c.save(); c.globalCompositeOperation = 'source-atop'; c.restore();
+      const tg = prog(t, T_SHOT + 2.3, 1.2, E.outCubic); if (tg > 0) { c.font = '500 17px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.fillStyle = `rgba(214,206,192,${0.7 * tg})`; c.fillText('O P T I C S   S I N C E   N E V E R', CX, 706 + 8 * (1 - tg)); c.strokeStyle = `rgba(255,214,170,${0.5 * tg})`; c.lineWidth = 1; c.beginPath(); c.moveTo(CX - 150 * tg, 734); c.lineTo(CX + 150 * tg, 734); c.stroke(); }
+      c.globalCompositeOperation = 'lighter'; streak(c, shx, 600, 420, 0.22 * wm, '255,230,200'); streak(c, CX + 40 * Math.sin(t * 0.3), 356, 360, 0.16 * mono, '255,220,180'); c.globalCompositeOperation = 'source-over';
+    }
+  }
+});
+</script>
+</body>
+</html>

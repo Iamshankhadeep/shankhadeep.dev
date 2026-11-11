@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 065 — Halftone</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/065-bust.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 065 — HALFTONE
+ * A marble bust printed in four inks that refuse to stay in register. The generated photograph is first
+ * art-directed in code (background flood-filled to mustard, the marble gradient-mapped from indigo through
+ * dusty pink to paper), then a fragment shader separates it into C, M, Y and K and prints each as its own
+ * halftone screen at its own angle — every plate a rigid sheet that can slide, rotate and vanish, registration
+ * marks and all. Black alone; colour arrives crooked; the dots grow; we fall into a rosette; and on the
+ * downbeat of bar 7 everything snaps into register. Seven bars at 105 bpm (2.29 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const B = 60 / 105, BAR = 4 * B;
+let sh, tex;
+
+const FRAG = `
+uniform sampler2D uImg;
+uniform vec4 uP[4];            // per plate: offset x, offset y, rotation, opacity
+uniform float uDot, uZoom;
+uniform vec2 uCen;
+const vec3 INK[4] = vec3[4](vec3(0.04, 0.60, 0.85), vec3(0.90, 0.09, 0.46), vec3(0.99, 0.85, 0.08), vec3(0.11, 0.10, 0.13));
+const float ANG[4] = float[4](0.2618, 1.3090, 0.0, 0.7854);
+vec4 cmyk(vec3 c) { float k = 1.0 - max(c.r, max(c.g, c.b)), d = max(1e-3, 1.0 - k); return vec4((1.0 - c.r - k) / d, (1.0 - c.g - k) / d, (1.0 - c.b - k) / d, k); }
+vec3 src(vec2 pg) { return texture(uImg, clamp(vec2((pg.x - 393.0) / 1133.0, (pg.y + 80.0) / 1240.0), vec2(0.003), vec2(0.997))).rgb; }
+float mark(vec2 q, vec2 c, float px) { vec2 d = q - c; float r = length(d); float ring = smoothstep(px * 1.6, 0.0, abs(r - 17.0) - 1.0); float cross = smoothstep(px * 1.6, 0.0, min(abs(d.x), abs(d.y)) - 0.9) * step(r, 30.0); return max(ring, cross); }
+float plate(int i, vec2 pg, float px) {
+  vec4 P = uP[i]; if (P.w < 0.004) return 0.0;
+  vec2 q = rot(-P.z) * (pg - vec2(960.0, 540.0) - P.xy) + vec2(960.0, 540.0);
+  mat2 R = rot(ANG[i]); vec2 g = R * q / uDot, cell = floor(g); float cov = 0.0, aa = px / uDot;
+  for (int a = -1; a <= 1; a++) for (int b = -1; b <= 1; b++) {
+    vec2 cc = cell + vec2(float(a), float(b)) + 0.5; float v = cmyk(src(transpose(R) * (cc * uDot)))[i];
+    float r = sqrt(clamp(v, 0.0, 1.0)) * 0.73; cov = max(cov, smoothstep(r + aa, r - aa, length(g - cc)) * step(0.012, v));
+  }
+  cov = max(cov, max(mark(q, vec2(118.0, 118.0), px), mark(q, vec2(1802.0, 962.0), px)));
+  // the plate is a finite sheet: nothing prints beyond its edge
+  vec2 e = abs(q - vec2(960.0, 540.0)) - vec2(1030.0, 610.0); cov *= smoothstep(px, -px, max(e.x, e.y));
+  return cov * P.w;
+}
+void main() {
+  vec2 pg = (gl_FragCoord.xy - 0.5 * uRes) / uZoom + uCen; float px = 1.0 / uZoom;
+  // paper: off-white, a little tooth
+  vec3 col = vec3(0.956, 0.932, 0.872) - 0.035 * fbm(pg * 0.012) - 0.02 * vnoise(pg * 0.9);
+  // print order: yellow, magenta, cyan, black — inks multiply, slightly uneven
+  int order[4] = int[4](2, 1, 0, 3);
+  for (int n = 0; n < 4; n++) { int i = order[n]; float cov = plate(i, pg, px); cov *= 0.93 - 0.1 * vnoise(pg * 0.35 + float(i) * 17.0); col *= mix(vec3(1.0), INK[i], cov); }
+  vec2 v = vUv - 0.5; col *= 1.0 - 0.22 * dot(v, v) * 1.5;
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+// keyframes: [time, x, y, rotation, opacity, ease]; values hold after the last key
+function kf(list, t) {
+  if (t <= list[0][0]) return list[0].slice(1, 5);
+  for (let i = 1; i < list.length; i++) if (t < list[i][0]) { const a = list[i - 1], b = list[i], u = (b[5] || E.inOutCubic)(clamp01((t - a[0]) / (b[0] - a[0]))); return [lerp(a[1], b[1], u), lerp(a[2], b[2], u), lerp(a[3], b[3], u), lerp(a[4], b[4], u)]; }
+  return list[list.length - 1].slice(1, 5);
+}
+const b = (bar, beat) => (bar - 1) * BAR + (beat - 1) * B, SNAP = b(7, 1), J = 0.1, OB = E.outBack, OC = E.outCubic, IC = E.inCubic;
+const PL = [
+  // cyan: slides in from the left in bar 2
+  [[0, -2150, 60, 0.10, 1], [b(2, 1), -2150, 60, 0.10, 1], [b(2, 1) + 0.9, -26, 12, 0.012, 1, OC], [b(4, 1), -26, 12, 0.012, 1], [b(4, 1) + J, -64, 30, 0.05, 1, OB], [b(4, 2), -64, 30, 0.05, 1], [b(4, 2) + J, 44, -22, -0.04, 1, OB], [b(4, 3), 44, -22, -0.04, 1], [b(4, 3) + J, -96, -40, 0.09, 0, OB], [b(4, 4), -96, -40, 0.09, 0], [b(4, 4) + J, -40, 56, -0.03, 1, OB], [b(5, 1), -40, 56, -0.03, 1], [b(6, 1), -22, 22, 0.17, 1], [b(6, 3), -12, 8, 0.03, 1], [SNAP - 0.14, 7, -5, -0.012, 1], [SNAP, 0, 0, 0, 1, IC]],
+  // magenta: from the right in bar 3
+  [[0, 2150, -40, -0.08, 1], [b(3, 1), 2150, -40, -0.08, 1], [b(3, 1) + 0.8, 30, -16, -0.015, 1, OC], [b(4, 1), 30, -16, -0.015, 1], [b(4, 1) + J, 70, -34, -0.06, 1, OB], [b(4, 2), 70, -34, -0.06, 1], [b(4, 2) + J, -30, 26, 0.05, 1, OB], [b(4, 3), -30, 26, 0.05, 1], [b(4, 3) + J, 84, 30, -0.1, 1, OB], [b(4, 4), 84, 30, -0.1, 1], [b(4, 4) + J, 52, -44, 0.04, 1, OB], [b(5, 1), 52, -44, 0.04, 1], [b(6, 1), 26, -20, -0.15, 1], [b(6, 3), 14, -10, -0.03, 1], [SNAP - 0.14, -8, 6, 0.014, 1], [SNAP, 0, 0, 0, 1, IC]],
+  // yellow: drops from the top on beat 3 of bar 3
+  [[0, 0, 1300, 0.05, 1], [b(3, 3), 0, 1300, 0.05, 1], [b(3, 3) + 0.7, 10, 34, 0.02, 1, OC], [b(4, 1), 10, 34, 0.02, 1], [b(4, 1) + J, 16, 70, 0.04, 1, OB], [b(4, 2), 16, 70, 0.04, 1], [b(4, 2) + J, -20, -50, -0.05, 0, OB], [b(4, 3), -20, -50, -0.05, 0], [b(4, 3) + J, 30, -64, 0.07, 1, OB], [b(4, 4), 30, -64, 0.07, 1], [b(4, 4) + J, -50, -30, -0.05, 1, OB], [b(5, 1), -50, -30, -0.05, 1], [b(6, 1), -10, -34, 0.09, 1], [b(6, 3), -6, -14, 0.02, 1], [SNAP - 0.14, 5, 8, -0.01, 1], [SNAP, 0, 0, 0, 1, IC]],
+  // black: there from the start; steps out for half of bar 4
+  [[0, 0, 0, 0, 1], [b(4, 1), 0, 0, 0, 1], [b(4, 1) + J, -8, -18, -0.02, 1, OB], [b(4, 2), -8, -18, -0.02, 1], [b(4, 2) + J, 10, 14, 0.02, 0, OB], [b(4, 3), 10, 14, 0.02, 0], [b(4, 3) + J, 10, 14, 0.02, 0], [b(4, 4), 10, 14, 0.02, 0], [b(4, 4) + J, 20, 16, 0.03, 1, OB], [b(5, 1), 20, 16, 0.03, 1], [b(6, 1), 12, 10, -0.06, 1], [b(6, 3), 6, 4, -0.01, 1], [SNAP - 0.14, -4, -3, 0.006, 1], [SNAP, 0, 0, 0, 1, IC]]
+];
+const DOT = [[0, 14], [b(4, 1), 14], [b(4, 1) + J, 24, OB], [b(4, 3), 24], [b(4, 3) + J, 42, OB], [b(5, 1), 42], [b(5, 1) + 0.7, 18], [b(6, 1), 18], [b(6, 4), 14], [20, 14]];
+const val = (list, t) => { if (t <= list[0][0]) return list[0][1]; for (let i = 1; i < list.length; i++) if (t < list[i][0]) { const a = list[i - 1], c = list[i]; return lerp(a[1], c[1], (c[2] || E.inOutCubic)(clamp01((t - a[0]) / (c[0] - a[0])))); } return list[list.length - 1][1]; };
+
+// art-direct the photograph: mustard ground, marble mapped indigo → dusty pink → paper
+function prepare(img) {
+  const w = 720, h = Math.round(720 * img.naturalHeight / img.naturalWidth), c = Stage.buffer(w, h); c.imageSmoothingQuality = 'high'; c.drawImage(img, 0, 0, w, h);
+  const id = c.getImageData(0, 0, w, h), d = id.data, L = new Float32Array(w * h); for (let i = 0; i < w * h; i++) L[i] = (0.3 * d[i * 4] + 0.59 * d[i * 4 + 1] + 0.11 * d[i * 4 + 2]) / 255;
+  // flood the background in from the border: it is smooth, the marble is not
+  const bgm = new Uint8Array(w * h), q = []; const push = (i) => { if (!bgm[i]) { bgm[i] = 1; q.push(i); } };
+  for (let x = 0; x < w; x++) { push(x); } for (let y = 0; y < h * 0.8; y++) { push(y * w); push(y * w + w - 1); }
+  const ref = L[w * 4 + 4];
+  for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i - x) / w; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (!bgm[j] && Math.abs(L[j] - L[i]) < 0.011 && Math.abs(L[j] - ref) < 0.1) push(j); } }
+  let m = Float32Array.from(bgm); for (let pass = 0; pass < 3; pass++) { const n = new Float32Array(w * h); for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; n[i] = (m[i] * 4 + m[i - 1] + m[i + 1] + m[i - w] + m[i + w]) / 8; } for (let x = 0; x < w; x++) { n[x] = 1; } for (let y = 0; y < h; y++) { n[y * w] = m[y * w]; n[y * w + w - 1] = m[y * w + w - 1]; } m = n; }
+  const ramp = Stage.color.ramp(['#1f1a4c', '#4a3f96', '#d98a9c', '#f6dcc6', '#fdf7ea']);
+  const hex = (s) => { const mm = s.match(/\d+(\.\d+)?/g); return s[0] === '#' ? [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)] : mm.slice(0, 3).map(Number); };
+  for (let i = 0; i < w * h; i++) { const l = smoothstep(0.1, 0.9, L[i]), bc = hex(ramp(Math.pow(l, 0.9))), g = 0.9 + 0.1 * clamp01(L[i] / ref), bgc = [246 * g, 190 * g, 52 * g], a = m[i]; d[i * 4] = lerp(bc[0], bgc[0], a); d[i * 4 + 1] = lerp(bc[1], bgc[1], a); d[i * 4 + 2] = lerp(bc[2], bgc[2], a); d[i * 4 + 3] = 255; }
+  c.putImageData(id, 0, 0); return c.canvas;
+}
+
+Stage.create({
+  no: 65, title: 'Halftone', subtitle: 'four inks, out of register · 105 bpm',
+  duration: 16, background: '#f1ead9', grain: 0.045, poster: 14.6,
+  fade: { in: 0.5, out: 0.9, color: '#f1ead9' },
+  slate: { at: 0.6, hold: 2.4, pos: 'bl', color: 'rgba(24,22,32,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 105, duration: 16, seed: 65 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 0.5, saturate: 0.2 });
+    const bass = M.track('fmbass', { reverb: 0.05, gain: 0.5 }), kick = M.track('kick', { reverb: 0.05, gain: 0.68 }), clap = M.track('clap', { reverb: 0.25, gain: 0.62 }), stab = M.track('stab', { reverb: 0.25, gain: 0.85, pan: 0.2, delay: { time: 0.75, fb: 0.25, mix: 0.18 } });
+    const wb = M.track('woodblock', { reverb: 0.2, gain: 0.5, pan: -0.3 }), hat = M.track('hat', { reverb: 0.08, gain: 0.4 }), ris = M.track('riser', { reverb: 0.3, gain: 0.26 }), crash = M.track('crash', { reverb: 0.4, gain: 0.3 }), org = M.track('organ', { reverb: 0.3, gain: 0.3, pan: -0.2 });
+    const riff = ['E1', null, null, 'E1', null, 'G1', null, 'E1', null, null, 'D2', null, 'E2', null, 'B1', 'D2'], riff2 = ['A1', null, null, 'A1', null, 'C2', null, 'A1', null, null, 'G1', null, 'A1', null, 'B1', 'D2'];
+    for (let bar = 0; bar < 7; bar++) {
+      const t = bar * 4, groove = bar >= 1 && bar !== 4 && bar !== 5, r = bar === 3 ? riff2 : riff;
+      if (bar === 0) { wb.pattern(t, 0.25, 'x..x..x.x..x.x..', { vel: 0.6 }); kick.hit(t, 0.9); bass.note(t, 'E1', 0.4, 0.8); bass.note(t + 2.5, 'E1', 0.3, 0.7); bass.note(t + 3.5, 'D2', 0.3, 0.7); }
+      if (groove) { bass.seq(t, 0.25, r, { vel: 0.8, dur: 0.22 }); kick.pattern(t, 0.25, 'x..x..x...x.x...', { vel: 0.95 }); clap.pattern(t, 1, '.x.x', { vel: 0.8 }); hat.pattern(t, 0.25, 'x.xxx.xxx.xxx.xx', { vel: 0.45 }); wb.pattern(t, 0.25, '..x....x..x..x..', { vel: 0.5 });
+        const ch = bar === 3 ? ['A3', 'C4', 'E4', 'G4'] : ['E3', 'G3', 'B3', 'D4']; [0.75, 1.5, 2.75, 3.5].forEach((o, i) => stab.chord(t + o, ch, 0.18, 0.6 - 0.05 * i)); }
+      if (bar === 4) { bass.seq(t, 0.5, ['E1', null, 'E1', null, 'G1', null, 'A1', 'B1'], { vel: 0.7, dur: 0.4 }); wb.pattern(t, 0.25, 'x..x..x.x..x.x..', { vel: 0.5 }); org.chord(t, ['E3', 'B3', 'D4', 'F#4'], 4, 0.5); kick.hit(t, 0.9); }
+      if (bar === 5) { bass.seq(t, 0.25, ['E1', 'E1', null, 'E1', 'G1', null, 'A1', null, 'B1', 'B1', null, 'B1', 'D2', null, 'D#2', 'D#2'], { vel: 0.8, dur: 0.2 }); kick.pattern(t, 0.5, 'x.x.x.xx', { vel: 0.85 }); clap.pattern(t, 0.25, '............xxxx', { vel: 0.7 }); hat.pattern(t, 0.25, 'xxxxxxxxxxxxxxxx', { vel: 0.4 }); org.chord(t, ['B2', 'F#3', 'A3', 'D#4'], 4, 0.5); ris.hit(t + 1, 0.7, 3); }
+    }
+    crash.hit(24, 0.8, 3); stab.chord(24, ['E3', 'G3', 'B3', 'D4', 'F#4'], 0.5, 0.9); stab.chord(27, ['E3', 'G3', 'B3', 'E4'], 0.3, 0.8); bass.note(27, 'E1', 0.6, 0.9); kick.hit(27, 1); crash.hit(27, 0.4, 2);
+    return M;
+  },
+
+  async setup() { tex = prepare(await Stage.image('065-bust')); sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const P = new Float32Array(16); for (let i = 0; i < 4; i++) { const v = kf(PL[i], t); P.set(v, i * 4); }
+    // camera: a slow push, the fall into the rosette in bar 5, and back out
+    const zin = prog(t, b(5, 1), 1.25, E.inOutCubic) * (1 - prog(t, b(6, 1), 1.9, E.inOutCubic)), zoom = lerp(1 + 0.05 * clamp01(t / b(5, 1)), 8.2 + 1.2 * prog(t, b(5, 1) + 1.2, 1.1), E.inOutSine(zin)) * (t > SNAP ? 1 + 0.035 * prog(t, SNAP, 2.3, E.outCubic) - 0.05 : 1);
+    const zc = smoothstep(0, 0.35, zin);
+    sh.draw(t, { uImg: tex, uP: { v4: P }, uDot: val(DOT, t), uZoom: Math.max(1, zoom), uCen: [lerp(960, 905, zc), lerp(540, 912, zc)] });
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 012 — Strange Attractor</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+<style>
+  .cap { position: absolute; right: 104px; bottom: 90px; text-align: right; z-index: 5; white-space: nowrap; }
+  .cap .nm { font: italic 400 92px/1 "Instrument Serif", serif; letter-spacing: -0.012em; color: #f6e4e8; text-shadow: 0 0 34px rgba(4, 10, 16, .9); }
+  .cap .eq { font: 400 30px/1 "JetBrains Mono Variable", monospace; letter-spacing: 0.05em; color: #86c3d6; margin-top: 20px; text-shadow: 0 0 20px rgba(4, 10, 16, .9); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="cap" data-in="3.3" data-out="6.3"><div class="nm">Lorenz</div><div class="eq">dx/dt = 10 (y − x)</div></div>
+  <div class="cap" data-in="9.6" data-out="14.2"><div class="nm">Aizawa</div><div class="eq">dx/dt = (z − b) x − d y</div></div>
+  <div class="cap" data-in="17.5" data-out="20.5"><div class="nm">Thomas</div><div class="eq">dx/dt = sin y − b x</div></div>
+</div>
+<script>
+/* Nº 012 — STRANGE ATTRACTOR
+ * Three chaotic systems — Lorenz, Aizawa, Thomas — each integrated once (RK4, 131 072 samples) into a float texture.
+ * 104 000 points ride those trajectories in the vertex shader: 1 700 forty-point filaments spaced by arc length plus a
+ * haze of loose dust, coloured by local speed (deep cyan → rose-white). Everything is a pure function of t.
+ * 12 bars at 120 bpm (2 s each): cloud → Lorenz (bars 1–4) → Aizawa (5–8) → Thomas (9–11) → one point on bar 12. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const NS = 131072, TW = 512, TH = 256;
+const MORPH = [6.25, 14.25], FORM0 = 0.3, COLL0 = 20.75, END = 22.0;       // each morph is a ~2 s front whose middle sits on its bar line (8 s, 16 s)
+
+// ── camera path (hermite through keys) — defined first because each attractor is pre-rotated to face it mid-section
+function track(keys) {
+  const n = keys.length, m = keys.map((k, i) => (i === 0 || i === n - 1) ? 0 : (keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]));
+  return (t) => {
+    if (t <= keys[0][0]) return keys[0][1]; if (t >= keys[n - 1][0]) return keys[n - 1][1];
+    let i = 0; while (keys[i + 1][0] < t) i++;
+    const [t0, v0] = keys[i], [t1, v1] = keys[i + 1], h = t1 - t0, s = (t - t0) / h, s2 = s * s, s3 = s2 * s;
+    return (2 * s3 - 3 * s2 + 1) * v0 + (s3 - 2 * s2 + s) * h * m[i] + (-2 * s3 + 3 * s2) * v1 + (s3 - s2) * h * m[i + 1];
+  };
+}
+const camAz = (t) => -0.40 + 0.078 * t;
+const camEl = track([[0, 0.06], [4.5, 0.12], [8, 0.20], [12, 0.30], [16, 0.20], [19.5, 0.10], [22, 0.04], [24, 0.02]]);
+const camD = track([[0, 5.3], [3.6, 4.75], [6.2, 4.5], [8.0, 5.1], [10, 5.3], [14.2, 4.95], [16.0, 5.1], [18, 4.55], [20.7, 4.2], [22.0, 4.7], [24, 5.0]]);
+const camShift = (t) => 0.34 * (smoothstep(1.2, 4.2, t) - smoothstep(20.2, 21.9, t));       // the subject sits left of centre while captions are up
+
+// ── the three systems
+const TB = 0.208186;
+const SYS = [
+  { name: 'lorenz', dt0: 0.004, p0: [0.1, 0.0, 0.0], face: 4.8,
+    f: (x, y, z, o) => { o[0] = 10 * (y - x); o[1] = x * (28 - z) - y; o[2] = x * y - (8 / 3) * z; },
+    map: (x, y, z, o) => { o[0] = x; o[1] = z; o[2] = -y; } },
+  { name: 'aizawa', dt0: 0.01, p0: [0.1, 0.0, 0.0], face: 12,
+    f: (x, y, z, o) => { o[0] = (z - 0.7) * x - 3.5 * y; o[1] = 3.5 * x + (z - 0.7) * y; o[2] = 0.6 + 0.95 * z - z * z * z / 3 - (x * x + y * y) * (1 + 0.25 * z) + 0.1 * z * x * x * x; },
+    map: (x, y, z, o) => { const c = Math.cos(0.42), s = Math.sin(0.42); o[0] = x; o[1] = z * c - y * s; o[2] = z * s + y * c; } },   // axis tipped toward the lens
+  { name: 'thomas', dt0: 0.05, p0: [1.1, 1.1, -0.01], face: 19.2,
+    f: (x, y, z, o) => { o[0] = Math.sin(y) - TB * x; o[1] = Math.sin(z) - TB * y; o[2] = Math.sin(x) - TB * z; },
+    map: (x, y, z, o) => { o[0] = (x - y) * 0.70711; o[1] = (x + y - 2 * z) * 0.40825; o[2] = (x + y + z) * 0.57735; } }               // (1,1,1) toward the lens: three-fold symmetry
+];
+function integrate(sys, dt, n, warm, store) {
+  let [x, y, z] = sys.p0; const k1 = [0, 0, 0], k2 = [0, 0, 0], k3 = [0, 0, 0], k4 = [0, 0, 0], d = [0, 0, 0], h = dt / 2;
+  for (let i = -warm; i < n; i++) {
+    sys.f(x, y, z, k1); sys.f(x + h * k1[0], y + h * k1[1], z + h * k1[2], k2);
+    sys.f(x + h * k2[0], y + h * k2[1], z + h * k2[2], k3); sys.f(x + dt * k3[0], y + dt * k3[1], z + dt * k3[2], k4);
+    x += dt / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]); y += dt / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]); z += dt / 6 * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]);
+    if (i >= 0) { sys.map(x, y, z, d); store(i, d[0], d[1], d[2]); }
+  }
+}
+const pct = (arr, q) => { const s = Float32Array.from(arr).sort(); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
+function buildTrajectory(sys) {
+  // pilot run: bounding box and median speed → scale that fits a 2.6 × 2.0 × 2.6 box and a dt giving ≈0.007 units per sample
+  const PN = 40000, pp = new Float32Array(PN * 3);
+  integrate(sys, sys.dt0, PN, 3000, (i, x, y, z) => { pp[i * 3] = x; pp[i * 3 + 1] = y; pp[i * 3 + 2] = z; });
+  const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  for (let i = 0; i < PN; i++) for (let a = 0; a < 3; a++) { const v = pp[i * 3 + a]; if (v < lo[a]) lo[a] = v; if (v > hi[a]) hi[a] = v; }
+  const c = [0, 1, 2].map((a) => (lo[a] + hi[a]) / 2), hx = [0, 1, 2].map((a) => (hi[a] - lo[a]) / 2);
+  const sc = 1 / Math.max(hx[0] / 1.3, hx[1] / 1.0, hx[2] / 1.3);
+  const sp = new Float32Array(PN - 1);
+  for (let i = 0; i < PN - 1; i++) sp[i] = Math.hypot(pp[i * 3 + 3] - pp[i * 3], pp[i * 3 + 4] - pp[i * 3 + 1], pp[i * 3 + 5] - pp[i * 3 + 2]) * sc;
+  const dt = sys.dt0 * 0.007 / pct(sp, 0.5);
+  // full run, centred, scaled and turned to face the camera at the middle of its section
+  const data = new Float32Array(NS * 4), th = camAz(sys.face), ct = Math.cos(th), st = Math.sin(th);
+  integrate(sys, dt, NS, Math.round(40 / dt * sys.dt0 * 50), (i, x, y, z) => {
+    x = (x - c[0]) * sc; y = (y - c[1]) * sc; z = (z - c[2]) * sc;
+    data[i * 4] = x * ct + z * st; data[i * 4 + 1] = y; data[i * 4 + 2] = -x * st + z * ct;
+  });
+  const w = new Float32Array(NS);
+  for (let i = 0; i < NS; i++) { const j = (i + 1) % NS; w[i] = i === NS - 1 ? w[i - 1] : Math.hypot(data[j * 4] - data[i * 4], data[j * 4 + 1] - data[i * 4 + 1], data[j * 4 + 2] - data[i * 4 + 2]); data[i * 4 + 3] = w[i]; }
+  const med = pct(w, 0.5), p05 = pct(w, 0.04), p95 = pct(w, 0.96);
+  const tex = new THREE.DataTexture(data, TW, TH, THREE.RGBAFormat, THREE.FloatType);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  return { tex, med, minW: med * 0.3, spLo: p05, spInv: 1 / (p95 - p05), rate: 0.62 / med };      // rate: samples per second for ≈0.62 units/s median drift
+}
+
+const VERT = `
+uniform highp sampler2D uTA, uTB; uniform sampler2D uRamp;
+uniform vec4 uFlow, uSpd;
+uniform vec4 uOrdA, uOrdB; uniform vec2 uOrdBias;
+uniform float uT, uMorph, uForm, uColl, uAfter, uDs, uPx, uFocus, uAper, uGain, uPulse, uSpark, uSparkN, uBell, uSwirl;
+attribute vec4 aA, aB; attribute vec3 aJ;
+varying vec3 vCol;
+const float NS = ${NS}.;
+const float PI_ = 3.14159265;
+mat2 rot2(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float smoother(float x){ return x * x * x * (x * (x * 6. - 15.) + 10.); }
+// where a point stands in the queue of a morph: a plane sweep (xyz) and/or a radial one (w)
+float order(vec3 p, vec4 d, float b){ return clamp(b + dot(p, d.xyz) + d.w * length(p), 0., 1.); }
+vec4 tf(highp sampler2D tx, float i){ i = mod(i, NS); float r = floor(i / ${TW}.); return texelFetch(tx, ivec2(int(i - r * ${TW}.), int(r)), 0); }
+// a point k steps (of arc length uDs) behind the filament head; fades out where the trajectory wraps
+vec4 strand(highp sampler2D tx, float head, float k, float minW, out float seam){
+  float hi = mod(head, NS);
+  float w = max(tf(tx, floor(hi)).w, minW);
+  float im = mod(hi - k * uDs / w, NS), i0 = floor(im);
+  seam = smoothstep(0., 400., min(im, NS - im)) * smoothstep(0., 400., min(hi, NS - hi));
+  return mix(tf(tx, i0), tf(tx, i0 + 1.), im - i0);
+}
+void main(){
+  float k = aA.y, dust = aA.z, seamA, seamB;
+  vec4 pa = strand(uTA, aA.x + uFlow.x, k, uFlow.z, seamA);
+  vec4 pb = strand(uTB, aA.x + uFlow.y, k, uFlow.w, seamB);
+  // the morph is a front, not a fog: a point leaves when the front reaches it on A and where it is due on B,
+  // and travels on a helical arc about the vertical axis
+  float stag = 0.50 * order(pa.xyz, uOrdA, uOrdBias.x) + 0.34 * order(pb.xyz, uOrdB, uOrdBias.y) + 0.10 * aB.x + 0.06 * aB.z;
+  float m = clamp((uMorph - stag * 2.3) / 1.0, 0., 1.), e = smoother(m), bump = sin(PI_ * m);
+  vec3 qa = pa.xyz, qb = pb.xyz;
+  qa.xz = rot2(uSwirl * e) * qa.xz; qb.xz = rot2(-uSwirl * (1. - e)) * qb.xz;
+  vec3 p = mix(qa, qb, e);
+  float sp = mix(clamp((pa.w - uSpd.x) * uSpd.y, 0., 1.), clamp((pb.w - uSpd.z) * uSpd.w, 0., 1.), e);
+  float seam = mix(seamA, seamB, e);
+  p += aJ * mix(0.0035, 0.021, dust);
+  // formation out of the drifting cloud
+  float sf = 0.55 * clamp(length(pa.xyz) / 1.45, 0., 1.) + 0.45 * aB.x;      // the butterfly condenses from its crossing outward
+  float f = clamp((uForm - sf * 1.9) / 1.7, 0., 1.), ef = smoother(f), bf = sin(PI_ * f);
+  vec3 cl = position; cl.xz = rot2(0.11 * uT + 0.22 * uT / (1. + 2.5 * dot(cl.xz, cl.xz))) * cl.xz;
+  p = mix(cl, p, ef);
+  // turbulence while in transit: coherent wisps plus a little private scatter
+  float tb = bump * 0.13 + bf * 0.16;
+  vec3 q = p * 2.1 + aB.x * 0.7 + vec3(0., uT * 0.2, 0.);      // phase shared along a filament, so strands stay strands
+  vec3 turb = vec3(sin(q.y * 1.7 + q.z * 1.3), sin(q.z * 1.9 + q.x * 1.1 + 2.), sin(q.x * 1.5 + q.y * 1.2 + 4.));
+  p += (turb + aJ * (0.04 + 0.3 * dust)) * tb;
+  // collapse: a spiral fall into the origin
+  float sc = 0.5 * clamp(length(p) / 1.4, 0., 1.) + 0.3 * aB.x + 0.2 * aB.z;   // the core goes first, the outer loops trail in
+  float c = clamp((uColl - sc * 0.45) / 0.8, 0., 1.), ec = c * c * c * c;
+  p.xz = rot2(2.4 * ec) * p.xz; p *= 1. - ec;
+  float vis = 1. - smoothstep(0.86, 1.0, c);
+  if (uAfter > 0. && dust > 0.5) {                               // follow-through: the haze passes through and thins out as a shell
+    p = normalize(aJ) * (0.2 + 1.9 * aB.y) * (1. - exp(-uAfter * 1.25));
+    vis = 0.55 * exp(-uAfter * 1.5) * smoothstep(0., 0.12, uAfter);
+  }
+  p *= 1. + 0.012 * uPulse;
+  vec4 mv = modelViewMatrix * vec4(p, 1.);
+  float dz = max(-mv.z, 0.05);
+  float sz = uPx * aA.w / dz, coc = uAper * abs(dz - uFocus) / dz;
+  float s2 = sqrt(sz * sz + coc * coc), a = sz * sz / (s2 * s2);
+  if (s2 < 2.4) { a *= s2 * s2 / 5.76; s2 = 2.4; }
+  if (s2 > 80.) { a *= 6400. / (s2 * s2); s2 = 80.; }
+  gl_PointSize = s2; gl_Position = projectionMatrix * mv;
+  float tail = pow(1. - aB.z, 1.35);
+  float inten = mix(0.25 + 0.75 * tail, 0.55, dust) * aB.w;
+  float head = (1. - dust) * smoothstep(0.14, 0., aB.z);
+  float pick = step(0.972, fract(aB.x * 91.7 + uSparkN * 0.61803)) * (1. - dust) * smoothstep(0.55, 0., aB.z);
+  inten *= 1. + head * 1.3 + pick * uSpark * 5.;
+  inten *= (1. + uBell * sp * 0.9 + uPulse * 0.12) * (1. - 0.3 * bump);
+  float s = clamp(sp * 0.92 + bump * 0.24 + bf * 0.2 + pick * uSpark * 0.5 + ec * 0.6, 0., 1.);
+  vCol = pow(texture2D(uRamp, vec2(s, .5)).rgb, vec3(2.2)) * inten * a * vis * seam * uGain * smoothstep(0.05, 0.3, dz);
+}`;
+const FRAG = `
+varying vec3 vCol;
+void main(){ vec2 c = gl_PointCoord - .5; float r2 = dot(c, c) * 4.; if (r2 > 1.) discard; gl_FragColor = vec4(vCol * (exp(-3.2 * r2) - 0.04), 1.); }`;
+
+let G, mat, glow, bg, post, caps = [], TR, flowTab;
+const flowAt = (t) => { const x = Math.min(flowTab.length - 1.001, Math.max(0, t * 60)), i = Math.floor(x); return lerp(flowTab[i], flowTab[i + 1], x - i); };
+
+Stage.create({
+  no: 12, title: 'Strange Attractor', subtitle: 'three.js particles · 120 bpm',
+  duration: 24, background: '#04070b', grain: 0.06, vignette: 0.34, poster: 19.4,
+  fonts: ['italic 400 92px "Instrument Serif"', '400 30px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 0.85, color: '#020406' },
+  slate: { at: 0.7, hold: 3.0, pos: 'bl', color: 'rgba(206,230,240,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 24, seed: 12 });
+    M.master({ reverb: { decay: 3.4, size: 1.15, damp: 0.5 }, fadeOut: 1.4 });
+    const sm = (a, b, x) => { x = Math.min(1, Math.max(0, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
+    const arp = M.track('arp', { reverb: 0.3, delay: { time: 0.75, fb: 0.34, mix: 0.2, ping: true }, duck: { by: 'kick', depth: 0.22 },
+      gain: (t) => 0.5 + 0.22 * sm(7, 10, t) + 0.2 * sm(15.5, 17, t), params: { cutoff: 1500 },
+      lowpass: (t) => 420 + 800 * sm(1, 8, t) + 1700 * sm(8, 15, t) + 3600 * sm(15.5, 18.5, t) });
+    const shim = M.track('shimmer', { inst: 'pluck', reverb: 0.55, gain: 0.34, pan: 0.25, delay: { time: 0.75, fb: 0.3, mix: 0.25 } });
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.55, gain: (t) => 0.55 + 0.3 * sm(7, 16, t), duck: { by: 'kick', depth: 0.3 } });
+    const str = M.track('strings', { reverb: 0.6, gain: 0.5, lowpass: 3200 });
+    const sub = M.track('sub', { reverb: 0.03, gain: 0.8, duck: { by: 'kick', depth: 0.35 } });
+    const kick = M.track('kick', { inst: 'softkick', gain: 0.85 }), hat = M.track('hat', { gain: 0.3, reverb: 0.1 });
+    const bell = M.track('bell', { inst: 'glass', reverb: 0.65, gain: 0.8, delay: { time: 1.5, fb: 0.3, mix: 0.22 } });
+    const riser = M.track('riser', { reverb: 0.4, gain: 0.5 }), boom = M.track('impact', { reverb: 0.5, gain: 0.55 }), fall = M.track('fall', { reverb: 0.5, gain: 0.35 });
+
+    const chords = ['F#m9', 'F#m9', 'Dmaj9', 'Dmaj9', 'Bm9', 'Dmaj9', 'F#m9', 'C#m7', 'Dmaj9', 'E6', 'F#m9'];
+    const roots = ['F#1', 'F#1', 'D2', 'D2', 'B1', 'D2', 'F#1', 'C#2', 'D2', 'E2', 'F#2'];
+    const PAT = [[0, 2, 4, 2, 5, 4, 2, 4, 0, 2, 5, 4, 7, 5, 4, 2], [0, 2, 4, 5, 7, 5, 4, 2, 0, 4, 5, 7, 8, 7, 5, 4], [0, 4, 5, 7, 9, 7, 5, 4, 2, 4, 7, 9, 8, 7, 5, 4]];
+    const ACC = [1, 0.5, 0.62, 0.5, 0.82, 0.5, 0.62, 0.5, 0.9, 0.5, 0.62, 0.74, 0.82, 0.5, 0.62, 0.5];
+    chords.forEach((c, bar) => {
+      const b = bar * 4, sec = bar < 4 ? 0 : bar < 8 ? 1 : 2;
+      const pool = S.chord(c, 3).concat(S.chord(c, 4)).sort((x, y) => x - y);
+      arp.seq(b, 0.25, PAT[sec].map((i) => pool[Math.min(pool.length - 1, i)]), { vels: ACC.map((v) => v * (0.62 + 0.1 * sec)), gate: 0.8 });
+      pad.chord(b, c, 4, 0.5, { octave: 3 });
+      if (sec === 0) { if (bar % 2 === 0) sub.note(b, roots[bar], 7.6, 0.42); }
+      else sub.seq(b, 0.5, sec === 1 ? [roots[bar], null, null, roots[bar], null, null, roots[bar], null] : [roots[bar], null, roots[bar], roots[bar], null, null, roots[bar], roots[bar]], { vel: 0.66 + 0.1 * (sec - 1), gate: 0.9 });
+      if (sec >= 1) kick.pattern(b, 0.25, bar === 7 ? 'x...x...x.......' : 'x...x...x...x...', { vel: 0.8 });
+      if (bar >= 6 && sec === 1) hat.pattern(b, 0.25, '..x...x...x...x.', { vel: 0.6 });
+      if (sec === 2) { hat.pattern(b, 0.25, 'o.x.o.xoo.x.o.xo', { vel: 0.7 }); str.chord(b, c, 4, 0.5, { octave: 4 }); shim.arp(b, c, 0.5, 4, { mode: 'updown', octave: 5, vel: 0.5, gate: 1.4 }); }
+    });
+    // glass motif: four lone notes while the butterfly gathers, a phrase for Aizawa, its answer an octave up for Thomas
+    [[2, 'C#5'], [6, 'F#5'], [9, 'A5'], [12.5, 'E5']].forEach(([b, p]) => bell.note(b, p, 2, 0.42));
+    [[16, 'F#5', 1.5], [17.5, 'A5', 1.5], [19, 'G#5', 1], [20, 'E5', 1.5], [21.5, 'C#5', 2.5], [24, 'A5', 1.5], [25.5, 'C#6', 1.5], [27, 'B5', 1], [28, 'G#5', 1.5], [29.5, 'E5', 2]].forEach(([b, p, d]) => bell.note(b, p, d, 0.56));
+    [[32, 'F#6', 1], [33, 'E6', 0.5], [33.5, 'C#6', 1], [34.5, 'A5', 1.5], [36, 'G#5', 1], [37, 'B5', 0.5], [37.5, 'E6', 1], [38.5, 'C#6', 1.5], [40, 'A5', 1], [41, 'C#6', 0.5], [41.5, 'F#6', 1], [42.5, 'G#6', 1], [43.5, 'A6', 0.5]].forEach(([b, p, d]) => bell.note(b, p, d, 0.6));
+    // bar 12: everything has fallen into one note
+    bell.note(44, 'F#5', 4, 0.72); bell.note(44, 'C#5', 4, 0.5); bell.note(46, 'C#6', 2, 0.3);
+    sub.note(44, 'F#1', 3.6, 0.8); pad.chord(44, ['F#3', 'C#4', 'G#4'], 4, 0.36);
+    riser.hit(12, 0.5, 4); riser.hit(28, 0.66, 4); riser.hit(40, 0.82, 4);
+    boom.hit(16, 0.55, 3); boom.hit(32, 0.72, 3); boom.hit(44, 0.95, 4); fall.hit(44, 0.5, 3);
+    return M;
+  },
+
+  setup() {
+    G = Stage.three({ fov: 35, near: 0.05, far: 60, bloom: { strength: 0.5, radius: 0.62, threshold: 0.22 } });
+    TR = SYS.map(buildTrajectory);
+    // flow clock: ∫ rate(t) dt — gentle while the cloud gathers, eased back through each morph, quickest in the lattice
+    flowTab = new Float32Array(24 * 60 + 2);
+    for (let i = 1; i < flowTab.length; i++) {
+      const t = i / 60, r = 0.55 + 0.45 * smoothstep(1, 6, t) + 0.25 * smoothstep(16.5, 19, t) - 0.4 * (win(t, 6.6, 9.4, 0.8) + win(t, 14.6, 17.4, 0.8)) + 1.4 * smoothstep(20.8, 22, t);
+      flowTab[i] = flowTab[i - 1] + r / 60;
+    }
+    // ── particles
+    const NSTR = 1700, K = 40, NDUST = 36000, NP = NSTR * K + NDUST;
+    const pos = new Float32Array(NP * 3), aA = new Float32Array(NP * 4), aB = new Float32Array(NP * 4), aJ = new Float32Array(NP * 3);
+    const R = Stage.rng(1203), gs = () => { let u = 0; while (u < 1e-6) u = R(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.2831853 * R()); };
+    let n = 0;
+    const put = (cx, cy, cz, spread, head, k, dust, size, sh, kn, bright) => {
+      const j = [gs(), gs(), gs()];
+      pos[n * 3] = cx + gs() * spread; pos[n * 3 + 1] = cy + gs() * spread * 0.8; pos[n * 3 + 2] = cz + gs() * spread;
+      aA.set([head, k, dust, size], n * 4); aB.set([sh, R(), kn, bright], n * 4); aJ.set(j, n * 3); n++;
+    };
+    const ball = (rad) => { const d = [gs(), gs(), gs()], l = Math.hypot(d[0], d[1], d[2]) || 1, r = rad * Math.pow(R(), 0.55); return [d[0] / l * r, d[1] / l * r * 0.8, d[2] / l * r]; };
+    for (let s = 0; s < NSTR; s++) {
+      const c = ball(1.45), head = R() * NS, sh = R(), size = 0.85 + 0.5 * R(), bright = 0.55 + 0.75 * R() * R();
+      for (let k = 0; k < K; k++) put(c[0], c[1], c[2], 0.16, head, k, 0, size * (1 - 0.3 * k / K), sh, k / (K - 1), bright);
+    }
+    for (let i = 0; i < NDUST; i++) { const c = ball(1.7); put(c[0], c[1], c[2], 0.02, R() * NS, 0, 1, 0.7 + 2.2 * Math.pow(R(), 7), R(), R() * 0.6, 0.35 + 0.65 * R()); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('aA', new THREE.BufferAttribute(aA, 4));
+    geo.setAttribute('aB', new THREE.BufferAttribute(aB, 4)); geo.setAttribute('aJ', new THREE.BufferAttribute(aJ, 3));
+    // speed ramp: deep cyan → pale rose-white (OKLab)
+    const ramp = Stage.color.ramp(['#07374f', '#0c6f93', '#2aa3c7', '#a9c9dc', '#f3d6de', '#fff0ee']), rd = new Uint8Array(256 * 4);
+    for (let i = 0; i < 256; i++) { const c = ramp.rgb(i / 255); rd.set([c[0] * 255, c[1] * 255, c[2] * 255, 255], i * 4); }
+    const rampTex = new THREE.DataTexture(rd, 256, 1, THREE.RGBAFormat); rampTex.minFilter = rampTex.magFilter = THREE.LinearFilter; rampTex.needsUpdate = true;
+    const U = (v) => ({ value: v });
+    mat = new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      uniforms: { uTA: U(TR[0].tex), uTB: U(TR[1].tex), uRamp: U(rampTex), uFlow: U(new THREE.Vector4()), uSpd: U(new THREE.Vector4()),
+        uT: U(0), uMorph: U(0), uForm: U(0), uColl: U(0), uAfter: U(0), uDs: U(0.005), uPx: U(16), uFocus: U(4), uAper: U(9), uGain: U(1),
+        uPulse: U(0), uSpark: U(0), uSparkN: U(0), uBell: U(0), uSwirl: U(1.0), uOrdA: U(new THREE.Vector4()), uOrdB: U(new THREE.Vector4()), uOrdBias: U(new THREE.Vector2()) }
+    });
+    const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; G.scene.add(pts);
+    // ── backdrop: near-black with a faint radial lift behind the subject
+    bg = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      depthTest: false, depthWrite: false, uniforms: { uLift: U(1) },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+      fragmentShader: `varying vec2 vUv; uniform float uLift;
+        void main(){ vec2 p = (vUv - .5) * vec2(1.7778, 1.); float d = length(p * vec2(.82, 1.));
+          vec3 c = mix(vec3(.0105, .021, .031), vec3(.0022, .0036, .0062), smoothstep(0., .92, d));
+          c += vec3(.004, .009, .013) * exp(-d * d * 9.) * uLift;
+          gl_FragColor = vec4(c, 1.); }`
+    }));
+    bg.frustumCulled = false; bg.renderOrder = -10; G.scene.add(bg);
+    // ── the single point everything falls into
+    glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
+      transparent: true, depthTest: false, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      uniforms: { uI: U(0), uHalo: U(0) },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+      fragmentShader: `varying vec2 vUv; uniform float uI, uHalo;
+        void main(){ vec2 p = (vUv - .5) * 2.; float r = length(p), edge = smoothstep(1., .55, r);
+          float core = exp(-r * r * 9000.) * 7. + exp(-r * r * 900.) * .7;
+          float halo = exp(-r * 7.5) * .5 + exp(-r * 2.6) * .07;
+          float streak = exp(-abs(p.y) * 150.) * exp(-abs(p.x) * 4.5) * .22;
+          vec3 c = vec3(1., .88, .9) * core * uI + vec3(.16, .62, .86) * halo * uHalo + vec3(.75, .86, .95) * streak * uI;
+          gl_FragColor = vec4(c * edge, 1.); }`
+    }));
+    glow.scale.setScalar(3.2); glow.renderOrder = 5; G.scene.add(glow);
+    // ── final pass: dither the 8-bit output so the dark gradient never bands
+    post = new THREE.ShaderPass({
+      uniforms: { tDiffuse: U(null), uFrame: U(0) },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }',
+      fragmentShader: `uniform sampler2D tDiffuse; uniform float uFrame; varying vec2 vUv;
+        float h(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        void main(){ vec4 c = texture2D(tDiffuse, vUv); vec2 o = gl_FragCoord.xy + fract(uFrame * .618) * 91.7;
+          c.rgb += (h(o) + h(o * 1.31 + 17.) - 1.) * (1.6 / 255.); gl_FragColor = vec4(c.rgb, 1.); }`
+    });
+    G.composer.addPass(post);
+    // ── captions
+    document.querySelectorAll('.cap').forEach((el) => {
+      caps.push({ t0: +el.dataset.in, t1: +el.dataset.out, nm: Stage.split(el.querySelector('.nm'), 'chars'), eq: Stage.split(el.querySelector('.eq'), 'chars') });
+    });
+    // warm-up: compile programs and upload all three trajectories now, so the first captured frame is never blank
+    this.frame(12.5, 0); this.frame(0, 0);
+  },
+
+  frame(t, i) {
+    const u = mat.uniforms, seg = t < 12 ? 0 : 1, A = TR[seg], B = TR[seg + 1], fl = flowAt(t);
+    u.uTA.value = A.tex; u.uTB.value = B.tex;
+    u.uFlow.value.set(A.rate * fl, B.rate * fl, A.minW, B.minW);
+    u.uSpd.value.set(A.spLo, A.spInv, B.spLo, B.spInv);
+    // Lorenz → Aizawa: a front rising from the bottom of the frame. Aizawa → Thomas: the sphere unravels from the top while the lattice grows from its core.
+    if (seg === 0) { u.uOrdA.value.set(0, 0.5, 0, 0); u.uOrdB.value.set(0, 0.5, 0, 0); u.uOrdBias.value.set(0.5, 0.5); u.uSwirl.value = 0.9; }
+    else { u.uOrdA.value.set(0, -0.5, 0, 0); u.uOrdB.value.set(0, 0, 0, 0.8); u.uOrdBias.value.set(0.5, 0); u.uSwirl.value = -1.15; }
+    u.uT.value = t; u.uMorph.value = t - MORPH[seg]; u.uForm.value = t - FORM0; u.uColl.value = t - COLL0; u.uAfter.value = t - END;
+    // the picture opens with the filter: filaments lengthen and brighten section by section
+    const arc = 0.42 + 0.33 * smoothstep(3, 9.5, t) + 0.55 * smoothstep(15.5, 19, t);
+    u.uDs.value = 0.0052 * arc;
+    u.uGain.value = (0.30 + 0.04 * smoothstep(8, 10, t) - 0.09 * smoothstep(15.5, 17.5, t)) * (1 + 0.18 * Stage.hit('impact', t, 0.7));
+    u.uPulse.value = Stage.hit('kick', t, 0.16);
+    u.uSpark.value = Stage.hit('arp', t, 0.11, false) * (0.35 + 0.65 * smoothstep(6, 17, t)) * (1 - smoothstep(20.8, 21.6, t));
+    u.uSparkN.value = Stage.count('arp', t);
+    u.uBell.value = Stage.hit('bell', t, 0.45) * (t < END ? 1 : 0);
+    // camera: one slow orbit, breathing out through each morph, pushing into the lattice
+    const az = camAz(t), el = camEl(t), d = camD(t) - 0.03 * Stage.hit('impact', t, 0.5), cam = G.camera;
+    const sh = camShift(t);
+    cam.position.set(d * Math.cos(el) * Math.sin(az), d * Math.sin(el), d * Math.cos(el) * Math.cos(az)); cam.lookAt(Math.cos(az) * sh, 0, -Math.sin(az) * sh);
+    u.uFocus.value = d - 0.15; u.uAper.value = 9 + 5 * smoothstep(16, 20, t);
+    // the point
+    const land = prog(t, 21.15, 0.85, E.inCubic), after = Math.max(0, t - END);
+    const gI = t < END ? 0.75 * land : (0.5 + 0.5 * Math.exp(-after / 0.22)) * Math.exp(-after / 1.5) + 0.12 * Stage.hit('bell', t, 0.5);
+    glow.material.uniforms.uI.value = gI; glow.material.uniforms.uHalo.value = t < END ? land * 0.8 : 0.4 + 0.9 * Math.exp(-after / 0.5);
+    glow.quaternion.copy(cam.quaternion); glow.visible = t > 21.1;
+    bg.material.uniforms.uLift.value = 1 + 0.8 * Stage.hit('impact', t, 0.9) + 0.25 * Stage.hit('kick', t, 0.2);
+    G.bloom.strength = 0.5 - 0.12 * smoothstep(15.5, 17.5, t) + 0.25 * Stage.hit('impact', t, 0.8);
+    post.uniforms.uFrame.value = i;
+    G.render();
+
+    // captions: letters settle in, lift away before each morph
+    for (const c of caps) {
+      const on = t > c.t0 - 0.1 && t < c.t1 + 1.2;
+      const anim = (chars, delay, step) => chars.forEach((ch, k) => {
+        if (!on) { ch.style.opacity = 0; return; }
+        const a = prog(t, c.t0 + delay + k * step, 0.9, E.outQuart), out = prog(t, c.t1 + k * step * 0.35, 0.7, E.inCubic), v = a * (1 - out);
+        ch.style.opacity = v.toFixed(3);
+        ch.style.transform = `translateY(${((1 - a) * 26 - out * 14).toFixed(2)}px)`;
+        ch.style.filter = v > 0.995 ? 'none' : `blur(${((1 - a) * 8 + out * 6).toFixed(2)}px)`;
+      });
+      anim(c.nm, 0, 0.06); anim(c.eq, 0.35, 0.018);
+    }
+  }
+});
+</script>
+</body>
+</html>

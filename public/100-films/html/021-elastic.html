@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 021 — Elastic</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<style>
+  #bg { position: absolute; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse 72% 64% at 50% 50%, #181916 0%, #0c0d0b 80%); }
+  #type { position: absolute; left: 0; top: 0; z-index: 2; }
+  .word { position: absolute; left: 0; top: 0; }
+  .g { position: absolute; left: 0; top: 0; display: block; white-space: pre;
+    font-family: "Big Shoulders Display Variable"; font-size: 400px; line-height: 1; font-weight: 400;
+    font-kerning: none; color: #efece2; }
+  #axis { position: absolute; left: 96px; right: 96px; top: 82px; height: 40px; z-index: 4; display: flex; align-items: center;
+    font-family: "JetBrains Mono Variable"; font-weight: 500; font-size: 30px; letter-spacing: 0.2em; color: rgba(239, 236, 226, .6); }
+  #axr { flex: 1; height: 2px; margin: 0 40px 0 34px; background: rgba(239, 236, 226, .26); position: relative; }
+  #axr i { position: absolute; top: -7px; width: 2px; height: 16px; margin-left: -1px; background: rgba(239, 236, 226, .3); }
+  #axk { position: absolute; left: 0; top: -10px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: #efece2; }
+  #axv { width: 3.4ch; text-align: right; letter-spacing: 0.08em; color: rgba(239, 236, 226, .86); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg"></div>
+  <div id="type"></div>
+  <div id="axis"><span>WGHT</span><div id="axr"><div id="axk"></div></div><span id="axv">100</span></div>
+</div>
+<script>
+/* Nº 021 — ELASTIC
+ * One word treated as a rubber band of fixed length. Every glyph is its own DOM span whose "wght" axis, scale and
+ * skew are recomputed from t each frame; the layout engine below re-fits the seven letters to a constant width,
+ * so whatever one letter gains its neighbours give up.
+ * 8 bars at 120 bpm (2 s each):  1–2 weight breathes on the kick · 3–4 single letters fire on the hats ·
+ * 5–6 five offset rows, a weight wave rolling through them · bar 6 beat 4 the band is pulled taut ·
+ * bar 7 it snaps into one heavy lockup · bar 8 two last hits and rest. */
+const { ease: E, prog, clamp, clamp01, lerp, TAU } = Stage;
+const PAPER = '#efece2', ACID = '#e3f31f';
+const FAM = '"Big Shoulders Display Variable"', WORD = 'ELASTIC', N = 7, FS = 400;
+const ROWS = 5, INST = 5, HR = 2, HK = 2, ROWPITCH = 190;
+const tint = Stage.color.ramp([PAPER, ACID]);
+
+// ── font metrics (measured in setup): advance per em for each letter at wght 100…900, cap height, baseline
+const ADV = []; let CAP = 0.7, BASE = 300, N900 = 3.5;
+const adv = (i, w) => { const f = clamp((w - 100) / 100, 0, 8), k = Math.min(7, f | 0); return lerp(ADV[i][k], ADV[i][k + 1], f - k); };
+
+// ── envelopes: fast attack, damped ring (the "elastic" response)
+const att = (dt, a) => dt <= 0 ? 0 : 1 - Math.exp(-dt / (a || 0.014));
+const ring = (dt, damp, hz) => dt <= 0 ? 0 : att(dt) * Math.exp(-damp * dt) * Math.cos(TAU * hz * dt);
+function idx(ev, t) { let lo = 0, hi = ev.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ev[m].t <= t + 1e-6) { r = m; lo = m + 1; } else hi = m - 1; } return r; }
+// a hit that travels through the word: odd hits run left→right, even hits right→left (the band flicked from alternate ends)
+function wave(ev, t, i, kd, damp, hz) { let n = idx(ev, t), s = 0; for (let k = 0; k < 4 && n - k >= 0; k++) { const e = ev[n - k]; s += ring(t - e.t - (e.s < 0 ? i : N - 1 - i) * kd, damp, hz) * e.v; } return s; }
+function pulse(ev, t, damp, hz, signed) { let i = idx(ev, t), s = 0; for (let k = 0; k < 4 && i - k >= 0; k++) { const e = ev[i - k]; s += ring(t - e.t, damp, hz) * e.v * (signed ? e.s : 1); } return s; }
+
+// ── section states; the film is a chain of blends between them
+//            cap  width  gapShare baseline instPitch offs wave rest  kick→w kick→squash trig→stretch trig→w trig→width kickTravel skew° stab→x stab→W
+const SA = { cap: 540, W: 1728, gs: 1.0, base: 800, pitch: 2300, offs: 0, wave: 0, rest: 270, kw: 630, ks: 0.10, tz: 0.60, tw: 650, tx: 0, kd: 0.032, sk: 8, jx: 0, jw: 0 };
+const SB = { cap: 380, W: 1696, gs: 0.6, base: 822, pitch: 2300, offs: 0, wave: 0, rest: 230, kw: 190, ks: 0.05, tz: 0.60, tw: 670, tx: 0, kd: 0.02, sk: 8, jx: 0, jw: 32 };
+const SC = { cap: 150, W: 600,  gs: 0.7, base: 615, pitch: 684,  offs: 1, wave: 1, rest: 120, kw: 0,   ks: 0.05, tz: 0.24, tw: 780, tx: 0, kd: 0.014, sk: 9, jx: 14, jw: 0 };
+const ST = { cap: 104, W: 1800, gs: 1.0, base: 592, pitch: 2500, offs: 0, wave: 0, rest: 100, kw: 0,   ks: 0.0,  tz: 0.0,  tw: 0,   tx: 0, kd: 0.014, sk: 2, jx: 0, jw: 0 };
+const SD = { cap: 520, W: 1728, gs: 0.5, base: 792, pitch: 2500, offs: 0, wave: 0, rest: 760, kw: 140, ks: 0.10, tz: 0.20, tw: 140, tx: 0.34, kd: 0.03, sk: 6, jx: 0, jw: -46 };
+const mixS = (a, b, m) => { if (m <= 0) return a; if (m >= 1) return b; const o = {}; for (const k in a) o[k] = lerp(a[k], b[k], m); return o; };
+
+// letters fired by the hats in bars 3–4 (−1: the whole word, softly · −2: the whole word, hard)
+const ORDER = [0, 1, 2, 3, 4, 5, 6, -1, 6, 4, 2, 0, 5, 3, 1, -2];
+// bars 5–6: one accent letter per beat spells the word down and back through the rows  [row, letter]
+const CPATH = [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4], [3, 5], [2, 6]];
+
+let rows = [], trig = [], EV = {}, ul, ax = {};
+const L = Array.from({ length: N }, () => ({ w: 400, ex: 1, ey: 1, c: 0 })), wd = new Float64Array(N);
+
+function place(word, cx, base, cap, W, gs, skew) {
+  const s = cap / (CAP * FS), hx = W / (N900 * FS * s);          // at wght 900 the word fills W exactly, no gaps
+  let tot = 0;
+  for (let i = 0; i < N; i++) { wd[i] = adv(i, L[i].w) * FS * s * hx * L[i].ex; tot += wd[i]; }
+  let gap = 0, k = W / tot;
+  if (tot < W) { gap = (W - tot) * gs / (N - 1); k = (W - gap * (N - 1)) / tot; }
+  let x = cx - W / 2;
+  for (let i = 0; i < N; i++) {
+    const g = word.g[i], l = L[i];
+    g.style.transform = 'translate(' + x.toFixed(2) + 'px,' + (base - BASE).toFixed(2) + 'px) skewX(' + skew.toFixed(2) + 'deg) scale(' + (s * hx * l.ex * k).toFixed(4) + ',' + (s * l.ey).toFixed(4) + ')';
+    g.style.fontVariationSettings = '"wght" ' + l.w.toFixed(1);
+    const col = l.c <= 0.001 ? PAPER : l.c >= 0.999 ? ACID : tint(l.c);
+    if (word.col[i] !== col) { g.style.color = col; word.col[i] = col; }
+    x += wd[i] * k + gap;
+  }
+}
+function show(word, on) { if (word.on !== on) { word.el.style.display = on ? 'block' : 'none'; word.on = on; } }
+
+function accent(t) {
+  if (t >= 4 && t < 8) { const n = idx(EV.hatB, t); if (n >= 0 && ORDER[n] >= 0) return [HR, ORDER[n], clamp01((t - EV.hatB[n].t) / 0.034)]; }
+  else if (t >= 8 && t < 11.5) { const k = Math.floor((t - 8) / 0.5 + 1e-6); if (k < 7) return [CPATH[k][0], CPATH[k][1], clamp01((t - 8 - 0.5 * k) / 0.034)]; }
+  else if (t >= 12 && t < 14.1) { const n = idx(EV.stabD, t); if (n >= 0) return [HR, Math.min(n, N - 1), clamp01((t - EV.stabD[n].t) / 0.034) * (1 - prog(t, 14, 0.09))]; }
+  return null;
+}
+
+Stage.create({
+  no: 21, title: 'Elastic', subtitle: 'variable font · 120 bpm',
+  duration: 16, background: '#0c0d0b', grain: 0.06, vignette: 0.28, poster: 13.4,
+  fonts: ['900 400px "Big Shoulders Display Variable"', '100 400px "Big Shoulders Display Variable"', '500 30px "JetBrains Mono Variable"'],
+  fade: { in: 0.5, out: 0.9, color: '#070806' },
+  slate: { at: 0.7, hold: 3.0, pos: 'bl', color: 'rgba(239,236,226,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 21 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 0.8 });
+    const build = (t) => 0.8 + 0.2 * Math.min(1, t / 12);
+    const kick = M.track('kick', { gain: (t) => 0.95 * build(t), reverb: 0.03 });
+    const snare = M.track('snare', { gain: 0.72, reverb: 0.16 });
+    const clap = M.track('clap', { gain: 0.4, reverb: 0.22 });
+    const hat = M.track('hat', { gain: 0.55, reverb: 0.05 });
+    const shk = M.track('shaker', { gain: 0.3, reverb: 0.05 });
+    const ohat = M.track('ohat', { gain: 0.32, reverb: 0.1 });
+    const bass = M.track('bass', { inst: 'fmbass', gain: (t) => 0.92 * build(t), reverb: 0.03 });
+    const stab = M.track('stab', { gain: 1.0, reverb: 0.2, delay: { time: 0.75, fb: 0.18, mix: 0.1 },
+      params: { wave: 'square', pw: 0.22, voices: 2, detune: 7, spread: 0.5, cutoff: 1900, envAmt: 2.6, fD: 0.085, res: 0.38, D: 0.17, S: 0, R: 0.07 } });
+    const hi = M.track('stabhi', { inst: 'stab', gain: 0.4, reverb: 0.24, pan: 0.15,
+      params: { wave: 'square', pw: 0.22, voices: 2, detune: 7, spread: 0.5, cutoff: 2600, envAmt: 2.4, fD: 0.07, res: 0.3, D: 0.14, S: 0, R: 0.06 } });
+    const riser = M.track('riser', { gain: 0.42, reverb: 0.3 }), boom = M.track('impact', { gain: 0.55, reverb: 0.25 });
+    const crash = M.track('crash', { gain: 0.3, reverb: 0.3 }), wh = M.track('whoosh', { gain: 0.4, reverb: 0.2 });
+    const _ = null, up = (n) => n.replace(/\d/, (d) => +d + 1);
+    const KICK = ['x.....x...x.....', 'x.....x...x.....', 'x.....x...x..x..', 'x.....x...x..x..', 'x..x..x...x..x..', 'x..x..x...x.....', 'x..x..x...x..x..', 'x.....x.........'];
+    const SNARE = ['', '....x.......x...', '....x..o....x...', '....x..o....x..o', '....x..o.o..x...', '....x..o.o......', '....x..o.o..x..o', 'x.....x.........'];
+    const BASS = [
+      ['E2', _, _, _, _, _, 'E2', _, _, _, 'G2', _, _, _, _, _],
+      ['E2', _, _, _, _, _, 'E2', _, _, _, 'G2', _, 'A2', _, 'B2', 'D3'],
+      ['E2', _, _, 'E2', _, _, 'E3', _, _, 'D3', 'E3', _, 'G2', _, 'A2', 'B2'],
+      ['E2', _, _, 'E2', _, 'E3', _, 'D3', _, _, 'B2', 'D3', _, 'A2', 'A#2', 'B2'],
+      ['E2', _, _, 'E2', _, _, 'E3', _, _, 'D3', 'E3', _, 'G2', _, 'A2', 'B2'],
+      ['A2', _, _, 'A2', _, 'A3', _, 'G3', _, _, 'B2', _, 'C3', 'C#3', 'D3', 'D#3'],
+      ['E2', _, _, 'E2', _, _, 'E3', _, 'D3', _, 'E3', _, 'G2', 'A2', 'B2', 'D3'],
+      ['E2', '-', '-', _, _, _, 'E2', '-', '-', '-', '-', '-', _, _, _, _]];
+    const Em7 = ['D4', 'G4', 'B4'], Em9 = ['D4', 'F#4', 'G4', 'B4'], A9 = ['C#4', 'G4', 'B4'], B79 = ['D#4', 'A4', 'D5'];
+    const STAB = [[], [[10, Em7, .5], [13, Em7, .55]],
+      [[2, Em7], [5, Em7], [10, Em7], [13, Em7], [15, Em7, .5]],
+      [[2, Em7], [5, Em7], [8, Em7, .5], [10, Em7], [13, A9], [15, A9, .6]],
+      [[0, Em9, .8], [2, Em7], [5, Em7], [7, Em7, .5], [10, Em7], [13, Em7], [15, Em7, .5]],
+      [[2, A9], [5, A9], [7, A9, .5], [10, A9], [12, B79, .8, .45], [14, B79, .85, .45]],
+      [[0, Em9, .9, .5], [2, Em9], [5, Em9], [7, Em9, .5], [10, Em9], [13, Em9], [15, Em9, .55]],
+      [[0, Em9, .9, .5], [6, Em9, .95, 2.2]]];
+    for (let bar = 0; bar < 8; bar++) {
+      const b = bar * 4;
+      kick.pattern(b, 0.25, KICK[bar], { vel: 0.85 });
+      if (SNARE[bar]) snare.pattern(b, 0.25, SNARE[bar], { vel: bar === 1 ? 0.6 : 0.8 });
+      bass.seq(b, 0.25, BASS[bar], { vels: [0.9, 0.6, 0.7, 0.75, 0.7, 0.75, 0.85, 0.7], gate: bar < 2 ? 1.6 : 0.82 });
+      for (const [st, ch, v, d] of STAB[bar]) { stab.chord(b + st * 0.25, ch, d || 0.22, v || 0.7); if (bar >= 6) hi.chord(b + st * 0.25, ch.map(up), d || 0.22, (v || 0.7) * 0.8); }
+      if (bar >= 2 && bar < 7) hat.pattern(b, 0.25, 'X.x.x.x.x.x.x.x.', { vel: bar < 4 ? 0.7 : 0.6 });
+      if (bar >= 4 && bar < 7) { shk.pattern(b, 0.25, '.x.o.x.o.x.o.x.o', { vel: 0.7 }); clap.pattern(b, 0.25, bar === 5 ? '....x...........' : '....x.......x...', { vel: 0.7 }); }
+    }
+    ohat.hit(15.5, 0.6, 0.5); ohat.hit(27.5, 0.6, 0.5);
+    [0.4, 0.52, 0.66, 0.82].forEach((v, k) => snare.hit(23 + k * 0.25, v, 0.25));        // fill while the band is pulled taut
+    wh.hit(15, 0.7, 1.4);                                                                   // one word becomes five rows
+    riser.hit(21, 0.8, 3); boom.hit(24, 0.85, 3); crash.hit(24, 0.7, 4); crash.hit(16, 0.4, 3);
+    return M;
+  },
+
+  setup() {
+    // metrics
+    const mc = Stage.buffer(8, 8);
+    for (let i = 0; i < N; i++) { ADV[i] = []; for (let k = 0; k < 9; k++) { mc.font = (100 + k * 100) + ' 1000px ' + FAM; ADV[i][k] = mc.measureText(WORD[i]).width / 1000; } }
+    mc.font = '900 1000px ' + FAM; CAP = mc.measureText('E').actualBoundingBoxAscent / 1000;
+    N900 = 0; for (let i = 0; i < N; i++) N900 += ADV[i][8];
+    const probe = document.createElement('span'); probe.className = 'g'; probe.innerHTML = '<i style="display:inline-block;width:0;height:0;vertical-align:baseline"></i>E';
+    Stage.el.appendChild(probe); BASE = probe.firstChild.offsetTop; probe.remove();
+    // glyph spans: 5 rows × 5 instances × 7 letters; rows[2][2] is the hero
+    const host = document.getElementById('type');
+    for (let r = 0; r < ROWS; r++) {
+      rows[r] = []; trig[r] = Array.from({ length: N }, () => []);
+      for (let k = 0; k < INST; k++) {
+        const el = Stage.div(host, {}, 'word'), g = [];
+        for (let i = 0; i < N; i++) { const s = document.createElement('span'); s.className = 'g'; s.textContent = WORD[i]; s.style.transformOrigin = '0 ' + BASE + 'px'; el.appendChild(s); g.push(s); }
+        rows[r][k] = { el, g, col: new Array(N).fill(PAPER), on: true };
+      }
+    }
+    // events from the score
+    const uniq = (name, v0) => { const out = []; for (const e of Stage.events(name)) { if (out.length && Math.abs(out[out.length - 1].t - e.t) < 1e-4) continue; out.push({ t: e.t, v: Math.min(1, e.vel / v0), s: out.length % 2 ? 1 : -1 }); } return out; };
+    EV.kick = uniq('kick', 0.85); EV.snare = uniq('snare', 0.8); EV.stab = uniq('stab', 0.7);
+    EV.hatB = uniq('hat', 0.7).filter((e) => e.t >= 4 - 1e-4 && e.t < 8 - 1e-4);
+    EV.hatB.forEach((e, n) => { const o = ORDER[n]; if (o >= 0) trig[HR][o].push({ t: e.t, v: 1 }); else for (let i = 0; i < N; i++) trig[HR][i].push({ t: e.t + i * 0.012, v: o === -1 ? 0.4 : 0.85 }); });
+    CPATH.forEach(([r, i], k) => trig[r][i].push({ t: 8 + 0.5 * k, v: 1 }));
+    EV.stabD = EV.stab.filter((e) => e.t >= 12 - 1e-4 && e.t < 14 - 1e-4);                 // bar 7: seven clav chops spell the word
+    EV.stabD.forEach((e, n) => { if (n < N) trig[HR][n].push({ t: e.t, v: 1 }); });
+    ul = Stage.canvas2d({ z: 3 });
+    ax.el = document.getElementById('axis'); ax.knob = document.getElementById('axk'); ax.val = document.getElementById('axv');
+    const rail = document.getElementById('axr'); ax.len = rail.offsetWidth;
+    for (let k = 0; k < 9; k++) { const tk = document.createElement('i'); tk.style.left = (k / 8 * 100) + '%'; rail.insertBefore(tk, ax.knob); }
+  },
+
+  frame(t) {
+    // ── section blends
+    const mB = prog(t, 3.82, 0.4, E.swift), p = prog(t, 8, 0.62, E.outExpo), q = prog(t, 11.5, 0.5, E.outCubic);
+    const dD = t - 12, inD = dD >= 0, zf = inD ? prog(t, 12, 0.1, E.outCubic) : 0;
+    const z = inD ? 1 - Math.exp(-7.5 * dD) * Math.cos(TAU * 2.3 * dD) : 0;                 // the snap: overshoots, then settles
+    let S = mixS(mixS(mixS(mixS(SA, SB, mB), SC, p), ST, q), SD, zf);
+    if (inD) {
+      S = Object.assign({}, S);
+      S.cap = lerp(ST.cap, SD.cap, z); S.W = lerp(ST.W, SD.W, zf) - 430 * Math.max(0, z - 1);
+      S.rest += 140 * prog(t, 14.75, 0.3, E.outCubic);
+    }
+    const inC = t >= 8 && !inD;
+    const snr = pulse(EV.snare, t, 7, 3, true), jolt = pulse(EV.stab, t, 9, 4.5);
+    const acc = accent(t);
+    let heroW = 0;
+
+    for (let r = 0; r < ROWS; r++) {
+      const odd = r % 2 ? 1 : -1;
+      const rp = inC ? ROWPITCH + 730 * (1 - prog(t, 8 + Math.abs(r - HR) * 0.03, 0.62, E.outExpo)) + 1000 * prog(t, 11.5, 0.42, E.inCubic) : 0;
+      const base = S.base + (r - HR) * rp;
+      const off = S.offs * ((r % 2 ? 0.5 : 0) * S.pitch + (r === HR ? 0 : odd * 22 * (t - 8))) + S.jx * jolt * odd;
+      const skew = S.sk * snr * (inC ? odd : -1);
+      for (let k = 0; k < INST; k++) {
+        const word = rows[r][k], hero = r === HR && k === HK;
+        const cx = 960 + off + (k - HK) * S.pitch, W = S.W + (hero || inC ? S.jw * jolt : 0);
+        const vis = hero || (inC && cx + W / 2 > -40 && cx - W / 2 < 1960);
+        show(word, vis); if (!vis) continue;
+        for (let i = 0; i < N; i++) {
+          const l = L[i], j = k * N + i;
+          const tk = t - (inC ? r * 0.02 : 0), kp = 1.3 * wave(EV.kick, tk, i, S.kd, 6.5, 2.4);
+          const kb = S.kw > 0 ? 1.25 * wave(EV.kick, tk, i, S.kd, 4.6, 1.25) : 0;                  // weight breathes slower than the squash
+          const wv = S.wave > 0 ? S.wave * Math.pow(0.5 + 0.5 * Math.cos(TAU * ((t - 8) - (j - 17) * 0.05 - r * 0.125)), 2) : 0;
+          let zs = 0, we = 0;
+          if (k === HK) for (const e of trig[r][i]) { const dt = t - e.t; if (dt > 0 && dt < 2.5) { zs += 1.25 * ring(dt, 5.5, 1.7) * e.v; we += att(dt) * Math.exp(-dt / 0.26) * e.v; } }
+          l.w = clamp(S.rest + S.kw * (kb > 0 ? kb : kb * 0.6) + 780 * wv + S.tw * we, 100, 900);
+          l.ey = 1 - S.ks * kp + S.tz * zs + 0.14 * wv;
+          l.ex = 1 + S.tx * we;
+          l.c = acc && k === HK && acc[0] === r && acc[1] === i ? acc[2] : 0;
+          if (hero) heroW += l.w / N;
+        }
+        place(word, cx, base, S.cap, W, S.gs, skew);
+      }
+    }
+
+    // ── the axis readout (hidden while the rows fill the frame)
+    const av = (1 - prog(t, 7.9, 0.3, E.inCubic)) + prog(t, 12.14, 0.6, E.outExpo);
+    ax.el.style.transform = 'translateY(' + ((1 - av) * -70).toFixed(2) + 'px)'; ax.el.style.opacity = clamp01(av * 1.4).toFixed(3);
+    ax.knob.style.transform = 'translateX(' + ((heroW - 100) / 800 * ax.len).toFixed(2) + 'px)';
+    ax.val.textContent = String(Math.round(heroW));
+
+    // ── the band: acid underline, plucked by the drums
+    const c = ul; c.clearRect(0, 0, 1920, 1080);
+    let u0 = 0, u1 = 0, y = 0, a1 = 0, a2 = 0, a3 = 0;
+    if (t < 4) {
+      u1 = prog(t, 0.1, 0.9, E.outExpo); u0 = 0; u1 *= 1 - prog(t, 3.66, 0.34, E.inCubic); y = SA.base + 74;
+      a1 = 30 * pulse(EV.kick, t, 5, 4.5); a2 = 22 * pulse(EV.snare, t, 6, 6.5, true); a3 = 16 * jolt;
+    } else if (t >= 14) {
+      u0 = 0; u1 = prog(t, 14.0, 0.34, E.outExpo); y = SD.base + 74;
+      a1 = 34 * ring(t - 14.03, 5, 5) + 52 * ring(t - 14.75, 2.7, 4.6); a2 = 18 * pulse(EV.snare, t, 6, 6.5, true); a3 = 10 * jolt;
+    }
+    if (u1 - u0 > 0.002) {
+      c.strokeStyle = ACID; c.lineWidth = 14; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath();
+      for (let n = 0; n <= 96; n++) {
+        const u = lerp(u0, u1, n / 96), x = 103 + 1714 * u, d = a1 * Math.sin(Math.PI * u) + a2 * Math.sin(TAU * u) + a3 * Math.sin(3 * Math.PI * u);
+        if (n) c.lineTo(x, y + d); else c.moveTo(x, y + d);
+      }
+      c.stroke();
+    }
+  }
+});
+</script>
+</body>
+</html>

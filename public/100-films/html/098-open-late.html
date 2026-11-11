@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 098 — Open Late</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 098 — OPEN LATE
+ * A neon sign warms up on a wet brick wall. Every tube is a spline with two electrodes: when it strikes, the
+ * discharge spreads inward from both ends, flutters by a few percent for half a second, and settles as the
+ * gas warms. The wall is lit, not fogged: the tubes are drawn small into a light buffer, blurred, and
+ * multiplied by the bricks' own colour before being added, so mortar stays dark and wet edges pick up the
+ * colour. Arrow first, then OPEN letter by letter; LATE needs two soft tries before it catches; the white
+ * frame last; later the P sags and recovers. No strobing — every change is a smooth envelope.
+ * Six bars at 90 bpm (2.67 s each), F♯ minor. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 4 * 60 / 90, HT = 208;
+const MAG = [255, 52, 140], CYAN = [40, 226, 255], WARM = [255, 226, 186];
+const GLYPH = {
+  O: [[[0.6, 0.14], [0.38, 0.03], [0.14, 0.2], [0.06, 0.56], [0.2, 0.9], [0.44, 0.98], [0.66, 0.76], [0.7, 0.42], [0.58, 0.14], [0.42, 0.2], [0.4, 0.36]]], P: [[[0.14, 1.0], [0.17, 0.5], [0.2, 0.08], [0.44, 0.02], [0.64, 0.14], [0.64, 0.36], [0.44, 0.52], [0.24, 0.48]]],
+  E: [[[0.64, 0.16], [0.44, 0.03], [0.22, 0.12], [0.18, 0.32], [0.4, 0.47], [0.18, 0.56], [0.08, 0.78], [0.26, 0.97], [0.48, 0.94], [0.66, 0.8]]], N: [[[0.08, 1.0], [0.13, 0.5], [0.2, 0.04], [0.34, 0.42], [0.5, 0.97], [0.58, 0.5], [0.66, 0.04]]],
+  L: [[[0.5, 0.12], [0.36, 0.02], [0.24, 0.18], [0.21, 0.58], [0.12, 0.88], [0.28, 0.98], [0.52, 0.95], [0.68, 0.86]]], A: [[[0.04, 1.0], [0.2, 0.52], [0.38, 0.03], [0.5, 0.5], [0.6, 1.0]], [[0.16, 0.66], [0.34, 0.61], [0.54, 0.66]]], T: [[[0.04, 0.12], [0.26, 0.04], [0.5, 0.1], [0.74, 0.03]], [[0.4, 0.1], [0.38, 0.55], [0.33, 0.98]]]
+};
+const ADV = { O: 0.84, P: 0.78, E: 0.8, N: 0.84, L: 0.8, A: 0.76, T: 0.82 };
+const TUBES = []; let TID = 0;
+function tube(cps, col, ts, o = {}) { const g = (i) => cps[Math.max(0, Math.min(cps.length - 1, i))], pts = []; for (let i = 0; i < cps.length - 1; i++) for (let k = 0; k < 14; k++) { const u = k / 14, a = g(i - 1), b = g(i), c = g(i + 1), d = g(i + 2); pts.push([0, 1].map((q) => 0.5 * (2 * b[q] + (c[q] - a[q]) * u + (2 * a[q] - 5 * b[q] + 4 * c[q] - d[q]) * u * u + (3 * b[q] - a[q] - 3 * c[q] + d[q]) * u * u * u))); } pts.push(cps[cps.length - 1]);
+  const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); TUBES.push(Object.assign({ pts, cum, L: cum[cum.length - 1], col, ts, id: ++TID }, o)); }
+function wordTubes(str, cx, top, ts, step, o) { const tot = [...str].reduce((a, ch) => a + ADV[ch], 0) * HT; let x = cx - tot / 2 - 0.06 * HT; [...str].forEach((ch, i) => { GLYPH[ch].forEach((st, k) => tube(st.map(([u, v]) => [x + (u + (1 - v) * 0.16) * HT, top + v * HT]), MAG, ts + i * step + k * 0.07, Object.assign({ ch }, typeof o === 'function' ? o(ch, i) : o))); x += ADV[ch] * HT; }); }
+// arrow, OPEN, LATE (two soft tries first), frame
+tube([[520, 906], [900, 900], [1290, 906]], CYAN, BAR); tube([[1236, 858], [1300, 880], [1366, 906], [1300, 932], [1236, 954]], CYAN, BAR + 0.2);
+wordTubes('OPEN', 960, 250, 2 * BAR, 0.18, (ch) => ({ dim: ch === 'P' })); wordTubes('LATE', 960, 524, 3.5 * BAR, 0.12, (ch, i) => ({ pre: [[3 * BAR + 0.08 + i * 0.04, 0.2, 0.42], [3 * BAR + 0.78 + i * 0.03, 0.24, 0.5]] }));
+{ const x0 = 470, x1 = 1450, y0 = 186, y1 = 806, r = 70, c = []; const arc = (cx, cy, a0) => { for (let k = 0; k <= 4; k++) { const a = a0 + k * Math.PI / 8; c.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } }; c.push([1330, y0], [1100, y0], [800, y0], [x0 + r, y0]); arc(x0 + r, y0 + r, -Math.PI / 2 - 0 + 0 - 0); c.length -= 5; for (let k = 0; k <= 4; k++) { const a = -Math.PI / 2 - k * Math.PI / 8; c.push([x0 + r + r * Math.cos(a), y0 + r + r * Math.sin(a)]); } c.push([x0, 500], [x0, y1 - r]); for (let k = 0; k <= 4; k++) { const a = Math.PI - k * Math.PI / 8; c.push([x0 + r + r * Math.cos(a), y1 - r + r * Math.sin(a)]); } c.push([960, y1], [x1 - r, y1]); for (let k = 0; k <= 4; k++) { const a = Math.PI / 2 - k * Math.PI / 8; c.push([x1 - r + r * Math.cos(a), y1 - r + r * Math.sin(a)]); } c.push([x1, 500], [x1, y0 + r]); for (let k = 0; k <= 4; k++) { const a = 0 - k * Math.PI / 8; c.push([x1 - r + r * Math.cos(a), y0 + r + r * Math.sin(a)]); } c.push([1392, y0]); tube(c, WARM, 4 * BAR, { thin: 1 }); }
+function state(tb, t) {
+  let I = 0, sp = 0; const d = t - tb.ts;
+  if (d >= 0) { sp = clamp01(d / (tb.thin ? 0.9 : 0.45)); I = (0.7 + 0.3 * smoothstep(0, 2.4, d)) * (1 + 0.12 * Math.exp(-d / 0.6) * Stage.noise2(t * 16, tb.id * 3.1)); }
+  for (const [tp, w, amp] of tb.pre || []) { const g = Math.exp(-Math.pow((t - tp) / w, 2)); if (amp * g > I) { I = amp * g; sp = Math.max(sp, 0.3 + 0.45 * g); } }
+  if (tb.dim) I *= 1 - 0.58 * win(t, 13.1, 14.3, 0.3, 0.6) * (0.86 + 0.14 * Stage.noise2(t * 11, 5.5));
+  return [I, sp];
+}
+function range(c, tb, a, b, k = 1) { if (b <= a) return; c.beginPath(); let st = false; for (let i = 1; i < tb.pts.length; i++) { const l0 = tb.cum[i - 1], l1 = tb.cum[i]; if (l1 < a || l0 > b) continue; const u0 = clamp01((a - l0) / (l1 - l0)), u1 = clamp01((b - l0) / (l1 - l0)), p = tb.pts[i - 1], q = tb.pts[i]; if (!st) { c.moveTo(lerp(p[0], q[0], u0) * k, lerp(p[1], q[1], u0) * k); st = true; } c.lineTo(lerp(p[0], q[0], u1) * k, lerp(p[1], q[1], u1) * k); } c.stroke(); }
+let ctx, dark, alb, glow, lit;
+
+Stage.create({
+  no: 98, title: 'Open Late', subtitle: 'a sign warms up · 90 bpm',
+  duration: 16, background: '#07060a', grain: 0.05, poster: 12.2,
+  fade: { in: 1.0, out: 1.4 },
+  slate: { at: 0.6, hold: 1.8, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 90, duration: 16, seed: 98, swing: 0.12 });
+    M.master({ reverb: { decay: 2.6, size: 1.0, damp: 0.5 }, fadeIn: 0.5, fadeOut: 1.8 });
+    const ep = M.track('epiano', { reverb: 0.4, gain: 0.62, chorus: 0.5, lowpass: 3600 }), lead = M.track('softlead', { reverb: 0.45, gain: 0.3, delay: { time: 0.75, fb: 0.3, mix: 0.25 }, lowpass: 3000 }), kick = M.track('softkick', { reverb: 0.06, gain: 0.6 }), br = M.track('brush', { reverb: 0.25, gain: 0.34 }), air = M.track('air', { reverb: 0.3, gain: 0.12 }), hum = M.track('organ', { reverb: 0.2, gain: (t) => 0.02 + 0.05 * smoothstep(2.6, 11, t), lowpass: 500 }), tk = M.track('tick', { reverb: 0.3, gain: 0.5, humanize: 0 }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 }), gl = M.track('glass', { reverb: 0.6, gain: 0.3 });
+    const bars = [['F#1', ['A3', 'C#4', 'E4', 'G#4']], ['D2', ['A3', 'C#4', 'F#4', 'A4']], ['B1', ['A3', 'C#4', 'D4', 'F#4']], ['C#2', ['B3', 'F4', 'G#4', 'C#5']], ['F#1', ['A3', 'C#4', 'E4', 'G#4']], ['D2', ['A3', 'C#4', 'E4', 'F#4']]];
+    bars.forEach(([r, ch], i) => { const b = i * 4; ep.chord(b, ch, 2.6, 0.5); if (i > 0) { ep.chord(b + 2.5, ch.slice(1), 1.2, 0.36); sub.note(b, r, 2.2, 0.6); sub.note(b + 2.5, r, 1, 0.45); kick.pattern(b, 0.5, 'x....x..', { vel: 0.8 }); br.pattern(b, 0.5, '..x.x.xx', { vel: 0.5 }); br.hit(b + 1, 0.6); br.hit(b + 3, 0.6); } });
+    air.hit(0, 0.6, 24); hum.chord(3.5, ['B1', 'B2'], 21, 0.6);
+    // every strike is a small click, pitched by colour
+    TUBES.forEach((tb) => { tk.hit(M.b(tb.ts), tb.thin ? 0.9 : 0.6, 0.04, { tone: tb.col === CYAN ? 2400 : tb.col === WARM ? 1500 : 3200, pan: clamp01(tb.pts[0][0] / W) * 1.2 - 0.6 }); (tb.pre || []).forEach(([tp]) => tk.hit(M.b(tp), 0.22, 0.03, { tone: 4200 })); });
+    gl.chord(16, ['F#5', 'C#6', 'G#6'], 5, 0.5); tk.hit(M.b(13.1), 0.3, 0.03, { tone: 5000 }); tk.hit(M.b(14.2), 0.4, 0.04, { tone: 3200 });
+    [[8, 'C#5', 1.5], [9.5, 'E5', 0.5], [10, 'F#5', 2], [12, 'G#5', 1.5], [13.5, 'F#5', 0.5], [14, 'F5', 2], [16, 'A5', 1.5], [17.5, 'G#5', 0.5], [18, 'F#5', 1], [19, 'E5', 1], [20, 'C#5', 1.5], [21.5, 'E5', 0.5], [22, 'F#5', 2]].forEach(([b, n, d]) => lead.note(b, n, d, 0.5));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 }); alb = Stage.buffer(W, H); dark = Stage.buffer(W, H); glow = Stage.buffer(W / 2, H / 2); lit = Stage.buffer(W, H);
+    // bricks: what the wall looks like in good light
+    const a = alb, r = Stage.rng(98), BW = 124, BH = 46, M = 7; a.fillStyle = '#322c2c'; a.fillRect(0, 0, W, H);
+    for (let j = -1; j < H / BH + 1; j++) for (let i = -1; i < W / BW + 1; i++) { const x = i * BW + (j % 2 ? BW / 2 : 0) + (r() - 0.5) * 3, y = j * BH, v = r(), cr = lerp(98, 150, v), cg = lerp(52, 82, v) + 10 * r(), cb = lerp(44, 66, v) + 8 * r(); a.fillStyle = `rgb(${cr | 0},${cg | 0},${cb | 0})`; a.beginPath(); a.roundRect(x + M / 2, y + M / 2, BW - M, BH - M, 3); a.fill();
+      const g = a.createLinearGradient(0, y, 0, y + BH); g.addColorStop(0, 'rgba(255,240,230,.34)'); g.addColorStop(0.16, 'rgba(255,240,230,0)'); g.addColorStop(0.8, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.3)'); a.fillStyle = g; a.fillRect(x + M / 2, y + M / 2, BW - M, BH - M); }
+    for (let i = 0; i < 26000; i++) { a.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,230,210'},${0.04 + 0.1 * r()})`; a.fillRect(r() * W, r() * H, 1 + 2 * r(), 1 + 2 * r()); }
+    for (let i = 0; i < 46; i++) { const x = r() * W, w = 6 + 40 * r(), y = r() * 400, g = a.createLinearGradient(0, y, 0, y + 300 + 500 * r()); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.3, `rgba(255,255,255,${0.06 + 0.1 * r()})`); g.addColorStop(1, 'rgba(255,255,255,0)'); a.fillStyle = g; a.fillRect(x, y, w, 900); }
+    // hardware: conduit, junction box, the feed down to the arrow, standoffs under every tube
+    const pipe = (x0, y0, x1, y1, w) => { a.strokeStyle = '#2a2c30'; a.lineWidth = w + 5; a.lineCap = 'butt'; a.beginPath(); a.moveTo(x0 + 5, y0 + 6); a.lineTo(x1 + 5, y1 + 6); a.stroke(); const g = a.createLinearGradient(x0 - w, 0, x0 + w, 0); g.addColorStop(0, '#5c6068'); g.addColorStop(0.4, '#a6acb6'); g.addColorStop(1, '#4a4e56'); a.strokeStyle = x0 === x1 ? g : '#7c828c'; a.lineWidth = w; a.beginPath(); a.moveTo(x0, y0); a.lineTo(x1, y1); a.stroke(); };
+    pipe(1362, 0, 1362, 150, 22); pipe(1520, 150, 1520, 906, 12); pipe(1392, 150, 1520, 150, 12); pipe(1366, 906, 1520, 906, 12); a.fillStyle = '#2a2c30'; a.fillRect(1326, 146, 86, 62); a.fillStyle = '#868c96'; a.fillRect(1322, 140, 84, 60); a.fillStyle = '#5a5e66'; for (const [x, y] of [[1330, 148], [1396, 148], [1330, 190], [1396, 190]]) { a.beginPath(); a.arc(x, y, 3.5, 0, TAU); a.fill(); }
+    for (const tb of TUBES) for (let s = 26; s < tb.L - 20; s += 150) { let i = 1; while (i < tb.pts.length - 1 && tb.cum[i] < s) i++; const p = tb.pts[i]; a.fillStyle = 'rgba(0,0,0,.5)'; a.beginPath(); a.arc(p[0] + 4, p[1] + 6, 9, 0, TAU); a.fill(); a.fillStyle = '#b9bec8'; a.beginPath(); a.arc(p[0], p[1], 7, 0, TAU); a.fill(); }
+    // the same wall at night: almost nothing, a little cold light from the street
+    const d = dark; d.drawImage(a.canvas, 0, 0); d.fillStyle = 'rgba(5,5,12,.9)'; d.fillRect(0, 0, W, H); const sl = d.createRadialGradient(200, -100, 100, 200, -100, 1500); sl.addColorStop(0, 'rgba(120,150,220,.16)'); sl.addColorStop(1, 'rgba(120,150,220,0)'); d.globalCompositeOperation = 'lighter'; d.fillStyle = sl; d.fillRect(0, 0, W, H); d.globalCompositeOperation = 'multiply'; d.drawImage(a.canvas, 0, 0); d.globalCompositeOperation = 'source-over'; d.fillStyle = 'rgba(4,4,10,.35)'; d.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx, z = 1 + 0.085 * E.inOutSine(prog(t, 4 * BAR, 16 - 4 * BAR)); c.setTransform(z, 0, 0, z, 960 * (1 - z), 540 * (1 - z)); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.filter = 'none';
+    c.drawImage(dark.canvas, 0, 0);
+    const ST = TUBES.map((tb) => state(tb, t)); let tot = 0;
+    // light buffer: lit stretches of every tube, half size
+    const g = glow; g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.fillRect(0, 0, W / 2, H / 2); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round'; g.lineJoin = 'round';
+    TUBES.forEach((tb, i) => { const [I, sp] = ST[i]; if (I <= 0.01) return; tot += I * tb.L; g.strokeStyle = `rgb(${tb.col.map((v) => Math.round(v * Math.min(1, I))).join(',')})`; g.lineWidth = tb.thin ? 7 : 9; const h = sp * tb.L / 2; range(g, tb, 0, h, 0.5); range(g, tb, tb.L - h, tb.L, 0.5); }); tot /= TUBES.reduce((s, tb) => s + tb.L, 0);
+    // the wall under that light: blurred light × brick colour
+    const l = lit; l.globalCompositeOperation = 'source-over'; l.filter = 'none'; l.fillStyle = '#000'; l.fillRect(0, 0, W, H); l.globalCompositeOperation = 'lighter'; l.filter = 'blur(64px)'; l.drawImage(g.canvas, 0, 0, W, H); l.drawImage(g.canvas, 0, 0, W, H); l.drawImage(g.canvas, 0, 0, W, H); l.filter = 'blur(22px)'; l.drawImage(g.canvas, 0, 0, W, H); l.filter = 'none'; l.globalCompositeOperation = 'multiply'; l.drawImage(alb.canvas, 0, 0);
+    c.globalCompositeOperation = 'lighter'; c.drawImage(l.canvas, 0, 0); c.globalCompositeOperation = 'source-over';
+    // tubes: cold glass, then the lit stretches with a hot core; black boots on the electrodes
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    TUBES.forEach((tb, i) => { const [I, sp] = ST[i], w = tb.thin ? 8 : 11; c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = w; c.save(); c.translate(5, 8); range(c, tb, 0, tb.L); c.restore(); c.strokeStyle = 'rgba(86,80,92,.95)'; range(c, tb, 0, tb.L); c.strokeStyle = 'rgba(255,255,255,.16)'; c.lineWidth = 2; c.save(); c.translate(-1.5, -2.5); range(c, tb, 0, tb.L); c.restore();
+      if (I > 0.01) { const h = sp * tb.L / 2, k = Math.min(1, I), col = tb.col.map((v) => Math.round(lerp(v, 255, 0.22))); c.strokeStyle = `rgba(${col.join(',')},${0.35 + 0.65 * k})`; c.lineWidth = w; range(c, tb, 0, h); range(c, tb, tb.L - h, tb.L); c.strokeStyle = `rgba(255,255,255,${0.9 * k})`; c.lineWidth = w * 0.42; range(c, tb, 0, h); range(c, tb, tb.L - h, tb.L); }
+      for (const [p, q] of [[tb.pts[0], tb.pts[2]], [tb.pts[tb.pts.length - 1], tb.pts[tb.pts.length - 3]]]) { const a = Math.atan2(q[1] - p[1], q[0] - p[0]); c.strokeStyle = '#0c0b0e'; c.lineWidth = w + 3; c.lineCap = 'butt'; c.beginPath(); c.moveTo(p[0] - Math.cos(a) * 8, p[1] - Math.sin(a) * 8); c.lineTo(p[0] + Math.cos(a) * 14, p[1] + Math.sin(a) * 14); c.stroke(); c.lineCap = 'round'; } });
+    // halo in the wet air
+    c.globalCompositeOperation = 'lighter'; c.filter = 'blur(13px)'; c.globalAlpha = 0.85; c.drawImage(g.canvas, 0, 0, W, H); c.filter = 'blur(44px)'; c.globalAlpha = 0.5; c.drawImage(g.canvas, 0, 0, W, H); c.filter = 'none'; c.globalAlpha = 1;
+    // drizzle: visible mostly where the sign lights it
+    c.lineCap = 'round'; for (let i = 0; i < 220; i++) { const zz = 0.5 + hash(i, 1), x = Stage.mod(hash(i, 2) * 2100 - t * 60 * zz, 2100) - 90, y = Stage.mod(hash(i, 3) * 1300 + t * 980 * zz, 1300) - 110, d2 = Math.pow((x - 960) / 760, 2) + Math.pow((y - 540) / 520, 2), a = 0.035 + 0.3 * tot * Math.exp(-d2 * 1.4), mixc = y > 800 ? CYAN : MAG; c.strokeStyle = `rgba(${Math.round(lerp(255, mixc[0], 0.35))},${Math.round(lerp(255, mixc[1], 0.35))},${Math.round(lerp(255, mixc[2], 0.35))},${a})`; c.lineWidth = 1 + zz; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 3 * zz, y + 44 * zz); c.stroke(); }
+    c.globalCompositeOperation = 'source-over';
+  }
+});
+</script>
+</body>
+</html>

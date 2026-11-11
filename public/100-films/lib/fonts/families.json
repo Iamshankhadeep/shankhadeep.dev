@@ -1,0 +1,146 @@
+[
+ {
+  "family": "Archivo Variable",
+  "weights": "100 900",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Big Shoulders Display Variable",
+  "weights": "100 900",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Bricolage Grotesque Variable",
+  "weights": "200 800",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Cormorant Garamond Variable",
+  "weights": "300 700",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Fraunces Variable",
+  "weights": "100 900",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Instrument Sans Variable",
+  "weights": "400 700",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Inter Variable",
+  "weights": "100 900",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "JetBrains Mono Variable",
+  "weights": "100 800",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Manrope Variable",
+  "weights": "200 800",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Newsreader Variable",
+  "weights": "200 800",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Noto Serif JP Variable",
+  "weights": "200 900",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Playfair Display Variable",
+  "weights": "400 900",
+  "italic": true,
+  "variable": true
+ },
+ {
+  "family": "Space Grotesk Variable",
+  "weights": "300 700",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Syne Variable",
+  "weights": "400 800",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Unbounded Variable",
+  "weights": "200 900",
+  "italic": false,
+  "variable": true
+ },
+ {
+  "family": "Anton",
+  "weights": "400",
+  "italic": false,
+  "variable": false
+ },
+ {
+  "family": "Bebas Neue",
+  "weights": "400",
+  "italic": false,
+  "variable": false
+ },
+ {
+  "family": "DM Serif Display",
+  "weights": "400",
+  "italic": true,
+  "variable": false
+ },
+ {
+  "family": "IBM Plex Mono",
+  "weights": "100, 200, 300, 400, 500, 600, 700",
+  "italic": true,
+  "variable": false
+ },
+ {
+  "family": "Instrument Serif",
+  "weights": "400",
+  "italic": true,
+  "variable": false
+ },
+ {
+  "family": "Italiana",
+  "weights": "400",
+  "italic": false,
+  "variable": false
+ },
+ {
+  "family": "Major Mono Display",
+  "weights": "400",
+  "italic": false,
+  "variable": false
+ },
+ {
+  "family": "Space Mono",
+  "weights": "400, 700",
+  "italic": true,
+  "variable": false
+ },
+ {
+  "family": "Zen Kaku Gothic New",
+  "weights": "400, 700",
+  "italic": false,
+  "variable": false
+ }
+]

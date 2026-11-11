@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 075 — Year in Numbers</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 075 — YEAR IN NUMBERS
+ * An annual-report dashboard for an invented coffee roaster, and the satisfaction of charts drawing well.
+ * The numbers agree with each other: twelve monthly figures sum to the 1,284,500 in the hero counter, which is
+ * 18 % over last year's 1,088,559; four quarters make $21.2M; the channel mix makes 100 %. Each chart gets
+ * its own bar of music — and the line chart is the tune: the pluck sequence in bars 3–4 is the monthly data
+ * mapped onto a G-minor scale. Ten bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, MINT = '#6ee7b7', SEC = '#8f9bd8', INK = '#ebe8e1', GREY = '#8a9099', CARD = '#1b1e23';
+const MONTH = [82, 79, 91, 96, 102, 108, 104, 99, 112, 121, 138, 152.5], LAST = [71, 70, 76, 83, 85, 92, 90, 84, 93, 101, 116, 127.559], TOTAL = 1284500, QTR = [4.1, 5.0, 5.2, 6.9];
+const MIX = [['Subscriptions', 46, MINT], ['Cafés', 31, SEC], ['Retail', 23, '#4a5160']];
+const ORIGIN = [['Guji, Ethiopia', 312, '+24%'], ['Huila, Colombia', 268, '+19%'], ['Antigua, Guatemala', 201, '+11%'], ['Nyeri, Kenya', 154, '+31%']];
+const G = { hero: [64, 150, 560, 370], line: [648, 150, 1208, 370], bars: [64, 544, 440, 472], donut: [528, 544, 400, 472], table: [952, 544, 480, 472], map: [1456, 544, 400, 472] };
+const ORDER = ['hero', 'line', 'bars', 'donut', 'table', 'map'];
+const fmt = (n) => Math.round(n).toLocaleString('en-US');
+let bg, ctx, NZ;
+// the monthly curve as a dense polyline (Catmull–Rom), in 0..1 chart space
+const CURVE = ((v) => { const out = [], g = (i) => v[Math.max(0, Math.min(11, i))]; for (let i = 0; i < 11; i++) for (let k = 0; k < 24; k++) { const u = k / 24, a = g(i - 1), b = g(i), c = g(i + 1), d = g(i + 2); out.push([(i + u) / 11, 0.5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u)]); } out.push([1, v[11]]); return out; });
+const CUR = CURVE(MONTH), PRE = CURVE(LAST);
+
+Stage.create({
+  no: 75, title: 'Year in Numbers', subtitle: 'an annual report that adds up · 120 bpm',
+  duration: 20, background: '#111315', grain: 0.035, poster: 18.6,
+  fonts: ['700 92px "Inter Variable"', '600 26px "Inter Variable"', '500 15px "Inter Variable"', '600 13px "JetBrains Mono Variable"'],
+  fade: { in: 0.6, out: 1.0 },
+  slate: { at: 19.9, hold: 0.05, pos: 'bl', color: 'rgba(0,0,0,0)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 75 });
+    M.master({ reverb: { decay: 1.4, size: 0.8, damp: 0.5 }, fadeOut: 1.2 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.58 }), hat = M.track('hat', { reverb: 0.08, gain: 0.2 }), plk = M.track('pluck', { reverb: 0.3, gain: 0.85, humanize: 0, params: { decay: 0.5, bright: 0.6 }, delay: { time: 0.75, fb: 0.35, mix: 0.25 } }), sub = M.track('sub', { reverb: 0.04, gain: 0.28, duck: { by: 'kick', depth: 0.5 } });
+    const tk = M.track('tick', { reverb: 0.12, gain: 0.34, humanize: 0 }), pad = M.track('pad', { reverb: 0.5, gain: 0.5, lowpass: 2600 }), stab = M.track('stab', { reverb: 0.3, gain: 0.5 }), clap = M.track('clap', { reverb: 0.3, gain: 0.5 }), ris = M.track('riser', { reverb: 0.3, gain: 0.16 }), bell = M.track('glass', { reverb: 0.5, gain: 0.4 });
+    const sc = S.scale('G3', 'minor', 3), roots = ['G1', 'Eb1', 'Bb1', 'F1'];
+    for (let bar = 0; bar < 10; bar++) { const b = bar * 4; pad.chord(b, [['G3', 'Bb3', 'D4', 'F4'], ['Eb3', 'G3', 'Bb3', 'D4'], ['Bb2', 'D3', 'F3', 'A3'], ['F3', 'A3', 'C4', 'Eb4']][bar % 4], 4, 0.4);
+      if (bar >= 1 && bar < 9) { kick.pattern(b, 1, 'xxxx', { vel: 0.9 }); hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.5 }); sub.note(b, roots[bar % 4], 3.6, 0.7); }
+      if (bar >= 4 && bar < 9) plk.seq(b, 0.5, [0, 4, 7, 4, 9, 7, 4, 2].map((d) => sc[d + (bar % 2 ? 2 : 0)]), { vel: 0.42, dur: 0.3 }); }
+    // counter: sixteenth ticks, climbing
+    for (let i = 0; i < 30; i++) tk.hit(4 + i * 0.25, 0.3 + 0.02 * i, 0.04, { tone: 1800 + 90 * i });
+    // the line chart, played: each month a note, pitch by value
+    MONTH.forEach((v, i) => plk.note(8 + i * (7.2 / 11), sc[Math.round((v - 79) / 73.5 * 14)], 0.5, 0.6));
+    QTR.forEach((v, i) => stab.chord(16.4 + i * 0.36, [sc[i * 2], sc[i * 2 + 2], sc[i * 2 + 4]], 0.25, 0.5 + 0.1 * i));
+    ris.hit(20, 0.6, 3.2); ORIGIN.forEach((o, i) => tk.hit(24.2 + i * 0.6, 0.7, 0.05, { tone: 2600 + 300 * i })); [0, 1, 2, 3, 4, 5, 6].forEach((i) => bell.note(28.4 + i * 0.3, sc[7 + [0, 2, 4, 7, 4, 9, 11][i]], 0.8, 0.34));
+    [32, 33, 34, 35].forEach((b, i) => bell.note(b, sc[14 - i * 2], 1, 0.4)); clap.hit(36, 0.9); stab.chord(36, ['G3', 'Bb3', 'D4', 'A4'], 1.5, 0.8); sub.note(36, 'G1', 3, 0.8); kick.hit(36, 1);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 }); NZ = Stage.makeNoise(75);
+    const g = bg.createRadialGradient(W / 2, 300, 100, W / 2, H / 2, 1300); g.addColorStop(0, '#191c20'); g.addColorStop(1, '#0d0f11'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+    bg.fillStyle = 'rgba(255,255,255,.045)'; for (let y = 64; y < H; y += 48) for (let x = 64; x < W; x += 48) bg.fillRect(x, y, 2, 2);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H); c.textBaseline = 'alphabetic';
+    const T = (font, col, align = 'left') => { c.font = font; c.fillStyle = col; c.textAlign = align; };
+    const hl = (k) => { const t0 = 16 + k * 0.5; return t < t0 ? 0 : Math.exp(-(t - t0) * 2.2); };       // highlight pulses, bar 9
+    // header
+    const ha = prog(t, 0.2, 0.7, E.outCubic); c.globalAlpha = ha; c.fillStyle = MINT; c.beginPath(); c.arc(84, 96, 18, 0, TAU); c.fill(); c.strokeStyle = '#111315'; c.lineWidth = 3; c.lineCap = 'round'; c.beginPath(); c.moveTo(76, 104); c.quadraticCurveTo(84, 84, 94, 88); c.quadraticCurveTo(92, 100, 78, 102); c.stroke();
+    T('600 26px "Inter Variable"', INK); c.fillText('Fernway Roasters', 116, 105); const nw = c.measureText('Fernway Roasters').width; T('500 15px "Inter Variable"', GREY); c.fillText('Year in Numbers  ·  FY 25', 116 + nw + 22, 104);
+    for (const [label, x] of [['Jan – Dec', 1660], ['All regions', 1770]]) { T('500 15px "Inter Variable"', GREY, 'center'); const w = c.measureText(label).width + 28; c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 1; c.beginPath(); c.roundRect(x - w / 2, 80, w, 32, 16); c.stroke(); c.fillText(label, x, 101); }
+    c.globalAlpha = 1;
+    // cards
+    const A = {}; ORDER.forEach((k, i) => { const a = prog(t, 0.35 + i * 0.16, 0.65, E.outCubic), [x, y, w, h] = G[k]; A[k] = a; if (a <= 0) return; c.globalAlpha = a; c.save(); c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = 30; c.shadowOffsetY = 12; c.fillStyle = CARD; c.beginPath(); c.roundRect(x, y + 26 * (1 - a), w, h, 22); c.fill(); c.restore(); c.strokeStyle = 'rgba(255,255,255,.06)'; c.lineWidth = 1; c.beginPath(); c.roundRect(x + 0.5, y + 26 * (1 - a) + 0.5, w - 1, h - 1, 22); c.stroke(); });
+    const title = (k, s, sub) => { const [x, y] = G[k]; c.globalAlpha = A[k]; T('600 13px "JetBrains Mono Variable"', GREY); c.fillText(s.toUpperCase().split('').join('  '), x + 32, y + 48); if (sub) { T('500 15px "Inter Variable"', GREY, 'right'); c.fillText(sub, x + G[k][2] - 32, y + 48); } };
+
+    // ── hero counter ──
+    { const [x, y, w] = G.hero; title('hero', 'Bags shipped'); const p = prog(t, 2.0, 1.9, E.outCubic), val = TOTAL * p; T('700 92px "Inter Variable"', INK); c.fillText(fmt(val), x + 30, y + 170);
+      T('500 15px "Inter Variable"', GREY); c.fillText('vs ' + fmt(1088559) + ' last year', x + 34, y + 208);
+      // twelve small monthly ticks fill as the counter rolls
+      MONTH.forEach((v, i) => { const on = clamp01(p * 12 - i), bh = 20 + 70 * (v - 70) / 82.5; c.fillStyle = 'rgba(255,255,255,.06)'; c.beginPath(); c.roundRect(x + 34 + i * 41.4, y + 330 - bh, 28, bh, 6); c.fill(); if (on > 0) { c.fillStyle = i === 11 ? MINT : Stage.color.alpha(SEC, 0.75); c.beginPath(); c.roundRect(x + 34 + i * 41.4, y + 330 - bh * on, 28, bh * on, 6); c.fill(); } });
+      // +18% badge lands last
+      const b = prog(t, 18.0, 0.45, E.outBack); if (b > 0) { const bx = x + w - 96, by = y + 204; c.save(); c.translate(bx, by); c.scale(lerp(2.1, 1, b), lerp(2.1, 1, b)); c.globalAlpha = Math.min(1, b * 2); c.fillStyle = MINT; c.beginPath(); c.roundRect(-58, -22, 116, 44, 22); c.fill(); T('700 24px "Inter Variable"', '#0f1f18', 'center'); c.font = '700 24px "Inter Variable"'; c.fillText('+18%', 0, 9); c.restore(); const rp = prog(t, 18.0, 0.9, E.outCubic); if (rp < 1) { c.globalAlpha = 0.6 * (1 - rp); c.strokeStyle = MINT; c.lineWidth = 2; c.beginPath(); c.roundRect(bx - 58 - 30 * rp, by - 22 - 30 * rp, 116 + 60 * rp, 44 + 60 * rp, 22 + 30 * rp); c.stroke(); } }
+    }
+    // ── monthly line ──
+    { const [x, y, w, h] = G.line; title('line', 'Monthly shipments, thousand bags', '— this year   ··· last year'); c.globalAlpha = A.line; const x0 = x + 70, x1 = x + w - 44, y0 = y + 84, y1 = y + h - 54, Y = (v) => y1 - (v - 60) / 100 * (y1 - y0);
+      for (const v of [60, 85, 110, 135, 160]) { c.strokeStyle = 'rgba(255,255,255,.055)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x0, Y(v)); c.lineTo(x1, Y(v)); c.stroke(); T('500 15px "Inter Variable"', GREY, 'right'); c.fillText(String(v), x0 - 14, Y(v) + 5); }
+      'JFMAMJJASOND'.split('').forEach((m, i) => { T('500 15px "Inter Variable"', GREY, 'center'); c.fillText(m, lerp(x0, x1, i / 11), y1 + 30); });
+      const pl = prog(t, 3.6, 1.2, E.inOutCubic), p = prog(t, 4.0, 3.6, E.inOutSine), path = (cv) => { c.beginPath(); cv.forEach(([u, v], i) => (i ? c.lineTo(lerp(x0, x1, u), Y(v)) : c.moveTo(lerp(x0, x1, u), Y(v)))); };
+      if (pl > 0) { c.save(); c.beginPath(); c.rect(x0 - 4, y0 - 20, (x1 - x0) * pl + 8, y1 - y0 + 40); c.clip(); c.setLineDash([3, 7]); c.strokeStyle = Stage.color.alpha(SEC, 0.8); c.lineWidth = 2; path(PRE); c.stroke(); c.setLineDash([]); c.restore(); }
+      if (p > 0) { const hx = lerp(x0, x1, p), idx = Math.min(CUR.length - 1, Math.round(p * (CUR.length - 1))), hv = CUR[idx][1], hy = Y(hv);
+        c.save(); c.beginPath(); c.rect(x0 - 4, y0 - 30, (x1 - x0) * p + 4, y1 - y0 + 60); c.clip();
+        const ag = c.createLinearGradient(0, y0, 0, y1); ag.addColorStop(0, 'rgba(110,231,183,.22)'); ag.addColorStop(1, 'rgba(110,231,183,0)'); path(CUR); c.lineTo(x1, y1); c.lineTo(x0, y1); c.closePath(); c.fillStyle = ag; c.fill();
+        c.strokeStyle = MINT; c.lineWidth = 3.2; c.lineJoin = 'round'; c.lineCap = 'round'; path(CUR); c.stroke(); c.restore();
+        MONTH.forEach((v, i) => { if (i / 11 <= p + 0.001) { const k = E.outBack(clamp01((p - i / 11) * 11 * 1.5 + 0.2)); c.fillStyle = CARD; c.strokeStyle = MINT; c.lineWidth = 2.4; c.beginPath(); c.arc(lerp(x0, x1, i / 11), Y(v), 5 * k, 0, TAU); c.fill(); c.stroke(); } });
+        const live = p < 1 ? 1 : 0, gl = c.createRadialGradient(hx, hy, 0, hx, hy, 46); gl.addColorStop(0, `rgba(110,231,183,${0.55 * (live + hl(0))})`); gl.addColorStop(1, 'rgba(110,231,183,0)'); c.fillStyle = gl; c.fillRect(hx - 50, hy - 50, 100, 100);
+        c.fillStyle = '#fff'; c.beginPath(); c.arc(hx, hy, 6 + 3 * hl(0), 0, TAU); c.fill();
+        const lab = hv.toFixed(hv % 1 > 0.05 && p >= 1 ? 1 : 0) + 'k'; T('600 15px "Inter Variable"', '#0f1f18', 'center'); c.font = '600 15px "Inter Variable"'; const tw = c.measureText(lab).width + 22, tx = Math.min(hx, x1 - tw / 2 + 10); c.fillStyle = MINT; c.beginPath(); c.roundRect(tx - tw / 2, hy - 46, tw, 28, 14); c.fill(); c.fillStyle = '#0f1f18'; c.fillText(lab, tx, hy - 27); }
+    }
+    // ── revenue by quarter ──
+    { const [x, y, w, h] = G.bars; title('bars', 'Revenue by quarter', '$21.2M'); c.globalAlpha = A.bars; const base = y + h - 70, top = y + 110;
+      QTR.forEach((v, i) => { const p = E.outBack(prog(t, 8.2 + i * 0.18, 0.7)), bh = (base - top) * v / 7.6 * p, bx = x + 44 + i * 94, hi = i === 3; c.fillStyle = 'rgba(255,255,255,.04)'; c.beginPath(); c.roundRect(bx, top, 66, base - top, 12); c.fill();
+        if (p > 0) { c.fillStyle = hi ? MINT : Stage.color.alpha(SEC, 0.55 + 0.1 * i); c.beginPath(); c.roundRect(bx, base - bh, 66, Math.max(1, bh), 12); c.fill(); if (hi && hl(1) > 0.01) { c.strokeStyle = Stage.color.alpha(MINT, hl(1)); c.lineWidth = 3; c.beginPath(); c.roundRect(bx - 7 * (1 - hl(1)) - 4, base - bh - 4 - 7 * (1 - hl(1)), 74 + 14 * (1 - hl(1)), bh + 8 + 14 * (1 - hl(1)), 14); c.stroke(); }
+          T('600 15px "Inter Variable"', hi ? MINT : INK, 'center'); c.fillText('$' + (v * clamp01(p)).toFixed(1) + 'M', bx + 33, base - bh - 12); }
+        T('500 15px "Inter Variable"', GREY, 'center'); c.fillText('Q' + (i + 1), bx + 33, base + 30); });
+    }
+    // ── channel mix ──
+    { const [x, y, w, h] = G.donut; title('donut', 'Channel mix'); c.globalAlpha = A.donut; const cx = x + w / 2, cy = y + 212, R = 104, p = prog(t, 10.0, 1.7, E.inOutCubic); c.strokeStyle = 'rgba(255,255,255,.05)'; c.lineWidth = 30; c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.stroke();
+      let a0 = -TAU / 4; MIX.forEach(([name, pct, col], i) => { const span = TAU * pct / 100, a1 = a0 + span, end = Math.min(a1, -TAU / 4 + TAU * p); if (end > a0) { c.strokeStyle = col; c.lineWidth = 30 + (i === 0 ? 10 * hl(2) : 0); c.lineCap = 'butt'; c.beginPath(); c.arc(cx, cy, R, a0 + 0.012, Math.max(a0 + 0.013, end - 0.012)); c.stroke(); } a0 = a1;
+        const la = prog(t, 10.5 + i * 0.35, 0.5, E.outCubic); c.globalAlpha = A.donut * la; c.fillStyle = col; c.beginPath(); c.roundRect(x + 40, y + 364 + i * 32, 12, 12, 4); c.fill(); T('500 15px "Inter Variable"', INK); c.fillText(name, x + 64, y + 375 + i * 32); T('600 15px "Inter Variable"', i === 0 ? MINT : GREY, 'right'); c.fillText(Math.round(pct * la) + '%', x + w - 40, y + 375 + i * 32); c.globalAlpha = A.donut; });
+      T('700 44px "Inter Variable"', INK, 'center'); c.font = '700 44px "Inter Variable"'; c.fillText(Math.round(46 * clamp01(p * 2.2)) + '%', cx, cy + 10); T('500 15px "Inter Variable"', GREY, 'center'); c.fillText('subscriptions', cx, cy + 34);
+    }
+    // ── top origins ──
+    { const [x, y, w] = G.table; title('table', 'Top origins', 'k bags'); ORIGIN.forEach(([name, bags, ch], i) => { const a = prog(t, 12.1 + i * 0.3, 0.6, E.outCubic), ry = y + 96 + i * 88; if (a <= 0) return; c.globalAlpha = A.table * a; const dx = 18 * (1 - a);
+        if (i === 0 && hl(3) > 0.01) { c.fillStyle = Stage.color.alpha(MINT, 0.12 * hl(3)); c.beginPath(); c.roundRect(x + 16, ry - 30, w - 32, 76, 14); c.fill(); }
+        T('600 17px "Inter Variable"', INK); c.font = '600 17px "Inter Variable"'; c.fillText(name, x + 32 + dx, ry); T('500 15px "Inter Variable"', GREY); c.fillText(Math.round(bags * a) + 'k', x + 32 + dx, ry + 26);
+        // sparkline
+        const sx = x + 232, sw = 130, sp = prog(t, 12.3 + i * 0.3, 0.8, E.inOutCubic); c.strokeStyle = i === 0 ? MINT : SEC; c.lineWidth = 2.2; c.lineJoin = 'round'; c.beginPath(); for (let k = 0; k <= 11; k++) { if (k / 11 > sp) break; const v = 0.25 + 0.5 * (k / 11) * (0.6 + 0.4 * hash(i, 3)) + 0.28 * (NZ.noise2(k * 0.7, i * 9.1)); const px = sx + sw * k / 11, py = ry + 22 - 40 * clamp01(v); k ? c.lineTo(px, py) : c.moveTo(px, py); } c.stroke();
+        T('600 15px "Inter Variable"', MINT, 'right'); c.fillText(ch, x + w - 32 - dx, ry + 6); c.strokeStyle = 'rgba(255,255,255,.05)'; c.lineWidth = 1; if (i < 3) { c.beginPath(); c.moveTo(x + 32, ry + 52); c.lineTo(x + w - 32, ry + 52); c.stroke(); } });
+    }
+    // ── dot map ──
+    { const [x, y, w, h] = G.map; title('map', 'Delivered to', '214 cities'); const cols = 24, rows = 22, sx = (w - 64) / (cols - 1), sy = (h - 130) / (rows - 1), sweep = prog(t, 14.0, 1.6); let hub = 0;
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const land = NZ.fbm2(i * 0.17 + 3.3, j * 0.2 + 1.7, 3) + 0.22 * Math.cos((i - 12) * 0.22) - 0.08 > 0.02, px = x + 32 + i * sx, py = y + 88 + j * sy, on = clamp01(sweep * (cols + 6) - i - hash(i, j) * 3); if (!land) { c.globalAlpha = A.map * 0.5; c.fillStyle = 'rgba(255,255,255,.05)'; c.beginPath(); c.arc(px, py, 1.6, 0, TAU); c.fill(); continue; }
+        const isHub = hash(i * 31 + j, 7) < 0.065; c.globalAlpha = A.map * lerp(0.25, 1, on); c.fillStyle = isHub && on > 0.5 ? MINT : on > 0 ? 'rgba(200,206,220,.5)' : 'rgba(255,255,255,.1)'; c.beginPath(); c.arc(px, py, isHub && on > 0.5 ? 4.2 : 2.6, 0, TAU); c.fill();
+        if (isHub && on >= 1) { hub++; const ph = Stage.mod((t - 14.6) * 0.7 + hash(i, j + 5), 1), big = hl(4); c.globalAlpha = A.map * (1 - ph) * 0.7; c.strokeStyle = MINT; c.lineWidth = 1.5; c.beginPath(); c.arc(px, py, 4 + 16 * ph + 10 * big, 0, TAU); c.stroke(); } }
+    }
+    c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

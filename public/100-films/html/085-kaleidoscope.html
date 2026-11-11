@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 085 — Kaleidoscope</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 085 — KALEIDOSCOPE
+ * A kaleidoscope turned slowly by hand. The frame is folded into mirrored wedges (6-fold, then 8, then 12,
+ * then back to 6); what the mirrors repeat is a slowly drifting sheet of stained glass — animated Voronoi
+ * shards in four jewel colours with dark leading between them and a bevel of light on each edge. The mirror
+ * seams themselves catch a thin highlight. The music is two instruments playing the same six-note cell,
+ * one of them slipping an eighth-note against the other every two bars, so the pattern they make together
+ * keeps turning too. Nine bars at 108 bpm (2.22 s each), E lydian. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 4 * 60 / 108;
+let sh;
+
+const FRAG = `
+uniform float uN1, uN2, uMix, uTurn, uScale, uBreath;
+uniform vec2 uDrift;
+const vec3 GARNET = vec3(0.56, 0.08, 0.16), TEAL = vec3(0.05, 0.47, 0.47), AMBER = vec3(0.90, 0.62, 0.14), IVORY = vec3(0.95, 0.90, 0.80);
+vec3 jewel(float h) { return h < 0.3 ? GARNET : (h < 0.58 ? TEAL : (h < 0.82 ? AMBER : IVORY)); }
+// one look through the tube with n mirrors
+vec3 look(vec2 p, float n) {
+  float r = length(p), a = atan(p.y, p.x) + uTurn, w = PI / n;
+  a = mod(a, 2.0 * w); float am = abs(a - w);                 // fold into one wedge, mirrored
+  vec2 q = r * vec2(cos(am), sin(am));
+  // the glass behind the mirrors drifts and breathes
+  vec2 s = rot(0.35) * q * uScale * (1.0 + 0.06 * uBreath) + uDrift;
+  vec2 ip = floor(s), fp = fract(s); float d1 = 9.0, d2 = 9.0; vec2 id = vec2(0.0), dv = vec2(0.0);
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 g = vec2(float(i), float(j)), h = hash22(ip + g), o = 0.5 + 0.38 * sin(uTime * 0.35 + 6.2831 * h), v = g + o - fp; float d = dot(v, v);
+    if (d < d1) { d2 = d1; d1 = d; id = ip + g; dv = v; } else if (d < d2) d2 = d;
+  }
+  d1 = sqrt(d1); d2 = sqrt(d2); float edge = d2 - d1, hh = hash21(id + 7.3);
+  vec3 col = jewel(hh);
+  col *= 0.62 + 0.55 * smoothstep(0.75, 0.0, d1);                          // glass is brighter toward the middle of a pane
+  col += 0.10 * (fbm(s * 2.5 + hh * 9.0) - 0.5);                             // seeds and ripples in the glass
+  col = mix(col, col * vec3(1.12, 1.06, 0.94), smoothstep(0.2, 0.9, fbm(s * 0.35 + 3.0)));
+  // bevel: light from the upper left catches one side of every pane
+  float lit = dot(normalize(dv + 1e-4), normalize(vec2(-0.6, 0.8)));
+  col += 0.22 * smoothstep(0.16, 0.03, edge) * smoothstep(0.0, 0.7, lit);
+  col *= smoothstep(0.012, 0.055, edge);                                      // leading
+  // mirror seams: a hairline of dark with a highlight beside it
+  float seam = min(am, w - am) * r;
+  col *= 0.55 + 0.45 * smoothstep(0.0, 0.006, seam);
+  col += vec3(1.0, 0.95, 0.85) * 0.16 * smoothstep(0.014, 0.004, seam) * smoothstep(0.0, 0.004, seam);
+  return col;
+}
+void main() {
+  vec2 p = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  vec3 col = look(p, uN1); if (uMix > 0.001) col = mix(col, look(p, uN2), uMix);
+  // the eyepiece: a soft centre glow, a gentle vignette
+  float r = length(p); col *= 1.0 + 0.25 * exp(-r * r * 6.0); col *= 1.0 - 0.55 * smoothstep(0.35, 1.05, r);
+  col = pow(max(col, 0.0), vec3(0.95));
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+Stage.create({
+  no: 85, title: 'Kaleidoscope', subtitle: 'six, eight, twelve mirrors · 108 bpm',
+  duration: 20, background: '#0a0608', grain: 0.04, poster: 14.6,
+  fade: { in: 1.0, out: 1.6 },
+  slate: { at: 0.6, hold: 2.8, pos: 'bl', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 85 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.4 }, fadeOut: 2.0 });
+    const mar = M.track('marimba', { reverb: 0.35, gain: 0.7, pan: -0.4, humanize: 0 }), gls = M.track('glass', { reverb: 0.5, gain: 0.42, pan: 0.4, humanize: 0 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.5 }), sub = M.track('sub', { reverb: 0.05, gain: 0.3 }), bell = M.track('bell', { reverb: 0.7, gain: 0.34 });
+    const cell = ['E4', 'B4', 'F#4', 'A#4', 'G#4', 'B4'];           // E lydian: the raised fourth is the colour
+    // marimba: the cell in steady eighths. glass: the same cell, slipping one eighth later every two bars.
+    for (let e = 0; e < 68; e++) { const b = e * 0.5; mar.note(b, cell[e % 6], 0.4, e % 6 === 0 ? 0.6 : 0.42); const slip = Math.floor(b / 8); if (e >= 8) gls.note(b, S.midi(cell[(e + 6 - slip) % 6]) + 12, 0.5, 0.4); }
+    [['E2', ['E3', 'B3', 'F#4', 'G#4']], ['E2', ['E3', 'A#3', 'D#4', 'G#4']], ['F#2', ['F#3', 'C#4', 'E4', 'A#4']], ['E2', ['E3', 'B3', 'D#4', 'G#4']], ['C#2', ['C#3', 'G#3', 'B3', 'E4']], ['F#2', ['F#3', 'A#3', 'C#4', 'E4']], ['B1', ['B2', 'F#3', 'A#3', 'D#4']], ['E2', ['E3', 'B3', 'F#4', 'A#4']], ['E2', ['E3', 'B3', 'E4', 'G#4']]].forEach(([r, ch], i) => { pad.chord(i * 4, ch, 4.2, 0.5); sub.note(i * 4, r, 3.8, 0.5); });
+    // the mirrors change on bars 4, 7 and 9
+    [[12, ['B5', 'F#6']], [24, ['E6', 'A#6', 'B6']], [32, ['E5', 'B5']]].forEach(([b, ns]) => ns.forEach((n, k) => bell.note(b + k * 0.12, n, 3, 0.5)));
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    // 6 → 8 at bar 4, → 12 at bar 7, → 6 at bar 9; each change is a short dissolve
+    const steps = [[0, 6], [3 * BAR, 8], [6 * BAR, 12], [8 * BAR, 6]]; let k = 0; while (k < steps.length - 1 && t >= steps[k + 1][0]) k++;
+    const mix = k > 0 ? 1 - E.inOutCubic(clamp01((t - steps[k][0]) / 0.9)) : 0;
+    const still = 1 - smoothstep(17.6, 19.6, t), tt = t - 0.5 * smoothstep(17.6, 20, t) * (t - 17.6);          // the hand slows at the end
+    sh.draw(t, { uN1: steps[k][1], uN2: k > 0 ? steps[k - 1][1] : 6, uMix: mix, uTurn: 0.09 * tt + 0.05 * Math.sin(tt * 0.5), uScale: lerp(4.4, 6.2, smoothstep(6, 15, t)), uBreath: Math.sin(tt * 0.9), uDrift: [0.22 * tt + 0.3 * Math.sin(tt * 0.31), 0.13 * tt + 0.3 * Math.cos(tt * 0.23)] });
+  }
+});
+</script>
+</body>
+</html>

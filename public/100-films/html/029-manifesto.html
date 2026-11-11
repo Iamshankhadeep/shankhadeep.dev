@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 029 — Manifesto</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 029 — MANIFESTO
+ * A design manifesto as a rapid sequence of Swiss-grid posters: eight imperatives, one per bar, each with its own
+ * layout on the same 12-column grid; bar 9 replays all eight as tiles; bar 10 leaves the last one alone.
+ * Ten bars at 120 bpm (2 s each). Red, black, off-white. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, BAR = 2, M0 = 96, COL = (W - 2 * M0) / 12;
+const RED = '#e2231a', K = '#111110', P = '#f2efe8';
+const SANS = '"Archivo Variable"', MONO = '"JetBrains Mono Variable"';
+const LINES = ['Remove until it breaks.', 'Then put one thing back.', 'Align everything. Then break one line.', 'Motion is meaning, or it is noise.', 'Let the grid do the shouting.', 'Colour is a decision, not a mood.', 'If it needs explaining, redraw it.', 'Ship the simple one.'];
+let ctx;
+const col = (n) => M0 + n * COL;
+function T(c, s, x, y, size, color, o) { o = o || {}; c.font = `${o.w || 800} ${size}px ${o.f || SANS}`; c.fillStyle = color; c.textAlign = o.a || 'left'; c.textBaseline = 'alphabetic'; if (o.ls) c.letterSpacing = o.ls; c.fillText(s, x, y); c.letterSpacing = '0px'; }
+function head(c, n, fg, u) {      // running furniture common to every poster
+  const a = prog(u, 0.1, 0.5, E.outCubic); c.globalAlpha = a;
+  T(c, String(n + 1).padStart(2, '0') + ' / 08', col(0), 132, 22, fg, { f: MONO, w: 500, ls: '3px' }); T(c, 'A SHORT MANIFESTO FOR MAKING THINGS', W - M0, 132, 22, fg, { f: MONO, w: 500, a: 'right', ls: '3px' });
+  c.fillStyle = fg; c.fillRect(M0, 152, (W - 2 * M0) * prog(u, 0, 0.6, E.outExpo), 3); c.globalAlpha = 1;
+}
+// eight layouts. u = seconds into the bar; each draws on a clipped, already-filled page
+const POSTERS = [
+  (c, u) => { c.fillStyle = P; c.fillRect(0, 0, W, H); head(c, 0, K, u); const a = prog(u, 0, 0.7, E.outExpo);
+    T(c, 'Remove', col(0) - 12, 520 + (1 - a) * 160, 330, K, { w: 900, ls: '-12px' }); T(c, 'until it', col(0), 760 + (1 - prog(u, 0.12, 0.7, E.outExpo)) * 160, 210, K, { w: 300, ls: '-6px' });
+    T(c, 'breaks.', col(5) + 40, 960 + (1 - prog(u, 0.24, 0.7, E.outExpo)) * 160, 210, RED, { w: 900, ls: '-6px' }); const b = prog(u, 0.9, 0.25, E.outBack); c.fillStyle = P; c.save(); c.translate(col(8) + 100, 900); c.rotate(-0.09 * b); c.fillRect(-300, -4 - 8 * b, 620, 8 + 16 * b); c.restore(); },
+  (c, u) => { c.fillStyle = K; c.fillRect(0, 0, W, H); head(c, 1, P, u);
+    for (let i = 0; i < 5; i++) { const a = prog(u, 0.06 * i, 0.6, E.outExpo); T(c, 'Then put one thing back.', col(0) + (1 - a) * -900, 330 + i * 150, 132, i === 3 ? RED : 'rgba(242,239,232,.16)', { w: 800, ls: '-4px' }); }
+    const d = prog(u, 0.7, 0.5, E.outBack); c.fillStyle = RED; c.beginPath(); c.arc(W - M0 - 70, 330 + 3 * 150 - 46, 34 * d, 0, 6.283); c.fill(); },
+  (c, u) => { c.fillStyle = P; c.fillRect(0, 0, W, H); head(c, 2, K, u); c.strokeStyle = 'rgba(226,35,26,.5)'; c.lineWidth = 1.5; const g = prog(u, 0, 0.6, E.outCubic); for (let i = 0; i <= 12; i++) { c.beginPath(); c.moveTo(col(i), 190); c.lineTo(col(i), 190 + (H - 290) * g); c.stroke(); }
+    ['Align', 'everything.', 'Then break', 'one line.'].forEach((s, i) => { const a = prog(u, 0.1 + i * 0.09, 0.6, E.outExpo), brk = i === 3 ? prog(u, 1.0, 0.35, E.outBack) : 0; c.save(); c.translate(col(i === 3 ? 2 : 2) + brk * 210, 400 + i * 172 + (1 - a) * 120); c.rotate(brk * -0.045); c.globalAlpha = a; T(c, s, 0, 0, 170, i === 3 ? RED : K, { w: i === 3 ? 900 : 700, ls: '-6px' }); c.restore(); }); c.globalAlpha = 1; },
+  (c, u) => { c.fillStyle = RED; c.fillRect(0, 0, W, H); head(c, 3, P, u); const a = prog(u, 0, 0.8, E.outExpo);
+    c.save(); c.translate(col(1) + 30, H - 96); c.rotate(-Math.PI / 2); T(c, 'Motion', (1 - a) * -700, 0, 232, K, { w: 900, ls: '-8px' }); c.restore();
+    T(c, 'is meaning,', col(4), 470 + (1 - prog(u, 0.15, 0.7, E.outExpo)) * 140, 176, P, { w: 300, ls: '-5px' }); T(c, 'or it is', col(4), 690 + (1 - prog(u, 0.25, 0.7, E.outExpo)) * 140, 176, P, { w: 300, ls: '-5px' });
+    const n = prog(u, 0.35, 0.7, E.outExpo); c.save(); c.translate(col(4) + 6 * Math.sin(u * 60) * (1 - prog(u, 0.6, 0.9)), 930 + (1 - n) * 140); T(c, 'noise.', 0, 0, 230, K, { w: 900, ls: '-7px' }); c.restore(); },
+  (c, u) => { c.fillStyle = P; c.fillRect(0, 0, W, H); head(c, 4, K, u); c.fillStyle = K; for (let r = 0; r < 6; r++) for (let i = 0; i < 12; i++) { const a = prog(u, 0.02 * (i + r * 2), 0.45, E.outBack); c.fillRect(col(i) + 8, 220 + r * 62 + 4, (COL - 16) * a, 8); }
+    T(c, 'Let the grid', col(0) - 6, 780 + (1 - prog(u, 0.2, 0.7, E.outExpo)) * 150, 236, K, { w: 900, ls: '-9px' }); T(c, 'do the shouting.', col(0), 960 + (1 - prog(u, 0.32, 0.7, E.outExpo)) * 150, 150, RED, { w: 400, ls: '-4px' }); },
+  (c, u) => { c.fillStyle = K; c.fillRect(0, 0, W, H); head(c, 5, P, u); const a = prog(u, 0, 0.75, E.inOutCubic); c.fillStyle = RED; c.fillRect(col(6), 190, 6 * COL + M0, (H - 190) * a);
+    T(c, 'Colour', col(0) - 8, 480 + (1 - prog(u, 0.1, 0.7, E.outExpo)) * 130, 250, P, { w: 900, ls: '-9px' }); T(c, 'is a decision,', col(0), 640 + (1 - prog(u, 0.2, 0.7, E.outExpo)) * 130, 120, P, { w: 300, ls: '-3px' });
+    c.save(); c.beginPath(); c.rect(col(6), 190, 6 * COL + M0, (H - 190) * a); c.clip(); T(c, 'not a', col(6) + 40, 780, 190, K, { w: 300, ls: '-5px' }); T(c, 'mood.', col(6) + 34, 980, 250, K, { w: 900, ls: '-9px' }); c.restore(); },
+  (c, u) => { c.fillStyle = P; c.fillRect(0, 0, W, H); head(c, 6, K, u); const a = prog(u, 0, 0.7, E.outExpo);
+    T(c, 'If it needs', col(0) - 6, 420 + (1 - a) * 130, 200, K, { w: 800, ls: '-7px' }); T(c, 'explaining,', col(0) - 6, 620 + (1 - prog(u, 0.1, 0.7, E.outExpo)) * 130, 200, K, { w: 800, ls: '-7px' });
+    const s = prog(u, 0.75, 0.4, E.inOutCubic); c.strokeStyle = RED; c.lineWidth = 16; c.beginPath(); c.moveTo(col(0) - 10, 556); c.lineTo(col(0) - 10 + 1100 * s, 548); c.stroke();
+    c.save(); c.translate(col(5), 900); c.rotate(-0.05); T(c, 'redraw it.', 0, (1 - prog(u, 0.95, 0.5, E.outBack)) * 220, 230, RED, { w: 900, ls: '-8px' }); c.restore(); },
+  (c, u) => { c.fillStyle = RED; c.fillRect(0, 0, W, H); head(c, 7, P, u); const a = prog(u, 0, 0.8, E.outExpo);
+    T(c, 'Ship', col(0) - 14, 640 + (1 - a) * 200, 520, P, { w: 900, ls: '-22px' }); T(c, 'the simple one.', col(0), 880 + (1 - prog(u, 0.2, 0.7, E.outExpo)) * 160, 164, K, { w: 400, ls: '-5px' }); }
+];
+
+Stage.create({
+  no: 29, title: 'Manifesto', subtitle: 'eight posters · 120 bpm',
+  duration: 20, background: P, grain: 0.05, poster: 1.6,
+  fonts: [`900 100px ${SANS}`, `800 100px ${SANS}`, `700 100px ${SANS}`, `400 100px ${SANS}`, `300 100px ${SANS}`, `500 22px ${MONO}`],
+  fade: { in: 0.3, out: 0.9, color: RED, inColor: P },
+  slate: { at: 17.0, hold: 2.2, pos: 'br', color: 'rgba(242,239,232,.95)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 29 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 1.4 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.8 }), clap = M.track('clap', { reverb: 0.25, gain: 0.7 }), hat = M.track('hat', { reverb: 0.05, gain: 0.4 });
+    const bass = M.track('bass', { reverb: 0.03, gain: 0.55, params: { cutoff: 520, envAmt: 2.2 }, duck: { by: 'kick', depth: 0.4 } });
+    const stab = M.track('stab', { reverb: 0.3, gain: 1.4, params: { cutoff: 1700 }, delay: { time: 0.75, fb: 0.25, mix: 0.16 } }), wh = M.track('whoosh', { reverb: 0.3, gain: 0.5, params: { f1: 6000 } });
+    const lead = M.track('pluck', { reverb: 0.3, gain: 1.2, params: { decay: 1.0, bright: 0.6 } }), crash = M.track('crash', { reverb: 0.4, gain: 0.35 });
+    const ch = [['E3', 'G3', 'B3', 'D4'], ['C3', 'E3', 'G3', 'B3'], ['G3', 'B3', 'D4', 'F#4'], ['D3', 'F#3', 'A3', 'C4']], rt = ['E1', 'C1', 'G1', 'D1'];
+    for (let bar = 0; bar < 10; bar++) {
+      const b = bar * 4, k = bar % 4;
+      stab.chord(b, ch[k], 0.35, 0.9);                                             // one hit per poster
+      if (bar > 0) wh.hit(b - 0.9, 0.7, 1.1);
+      if (bar < 9) { kick.pattern(b, 0.5, bar < 1 ? 'x.......' : 'x..x..x.', { vel: 0.9 }); if (bar >= 1) clap.pattern(b, 0.5, '..x...x.', { vel: 0.7 }); if (bar >= 2) hat.pattern(b, 0.25, 'x.xxx.xxx.xxx.xx', { vel: 0.55 }); bass.seq(b, 0.5, [rt[k], null, rt[k], rt[k], null, rt[k], S.midi(rt[k]) + 12, null], { vel: 0.85, gate: 0.8 }); if (bar >= 2) { stab.chord(b + 1.5, ch[k], 0.25, 0.55); stab.chord(b + 3, ch[k], 0.25, 0.5); } if (bar >= 4) lead.seq(b, 0.5, [ch[k][3] + 12, null, ch[k][2] + 12, ch[k][3] + 12, null, ch[k][1] + 12, null, ch[k][2] + 12], { vel: 0.6 }); }
+      if (bar === 8) for (let i = 0; i < 8; i++) stab.chord(b + i * 0.5, ch[i % 4], 0.2, 0.6 + 0.04 * i);
+    }
+    crash.hit(36, 0.9); bass.note(36, 'E1', 3.5, 0.9); stab.chord(36, ['E3', 'B3', 'E4', 'G4', 'B4'], 3, 0.9);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; c.setTransform(2, 0, 0, 2, 0, 0); c.globalAlpha = 1;
+    const bar = Math.min(9, Math.floor(t / BAR)), u = t - bar * BAR;
+    const page = (i, uu) => POSTERS[i](c, uu);
+    if (bar < 8) {
+      // whip transition: the new poster slides in over the old one on the downbeat
+      const wp = bar === 0 ? 1 : prog(u, 0, 0.26, E.outExpo);
+      if (wp < 1) page(bar - 1, BAR + u);
+      c.save(); c.beginPath(); const dir = bar % 3; if (dir === 0) c.rect(0, 0, W * wp, H); else if (dir === 1) c.rect(0, H * (1 - wp), W, H * wp); else c.rect(W * (1 - wp), 0, W * wp, H); c.clip(); page(bar, u); c.restore();
+    } else if (bar === 8) {
+      // all eight at once, as tiles on the grid, arriving one per eighth note
+      c.fillStyle = K; c.fillRect(0, 0, W, H);
+      const MM = 56, tw = (W - 2 * MM - 3 * 24) / 4, th = tw * 9 / 16, y0 = (H - 2 * th - 24) / 2;
+      for (let i = 0; i < 8; i++) { const a = prog(u, i * 0.25, 0.3, E.outBack); if (a <= 0) continue; const x = MM + (i % 4) * (tw + 24), y = y0 + Math.floor(i / 4) * (th + 24); c.save(); c.translate(x + tw / 2, y + th / 2); c.scale(a * tw / W, a * tw / W); c.translate(-W / 2, -H / 2); c.beginPath(); c.rect(0, 0, W, H); c.clip(); page(i, 1.9); c.restore(); }
+    } else {
+      // the last statement, alone
+      const z = prog(u, 0, 0.5, E.outExpo); c.fillStyle = K; c.fillRect(0, 0, W, H);
+      c.save(); c.translate(W / 2, H / 2); c.scale(lerp(0.23, 1, z), lerp(0.23, 1, z)); c.translate(-W / 2 + lerp(735, 0, z) / lerp(0.23, 1, z) * 0, -H / 2); c.beginPath(); c.rect(0, 0, W, H); c.clip(); page(7, 1.9 + u * 0.01); c.restore();
+    }
+  }
+});
+</script>
+</body>
+</html>

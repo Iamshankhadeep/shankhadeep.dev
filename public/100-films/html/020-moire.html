@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 020 — Moiré</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 020 — MOIRÉ
+ * Two fine line gratings slide over one another; the beating you see is the beating you hear.
+ * Concentric circles under parallel lines, then under a second set of circles whose centre drifts away and
+ * returns. The gratings are evaluated analytically and supersampled 16×, so the only pattern on screen is the
+ * interference itself. Five bars at 60 bpm (4 s each); the drones are pairs of sines detuned by the same amounts. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+
+const FRAG = `
+uniform float uA, uB, uC, uAng, uSep, uWipe, uDisc;
+const vec2 CEN = vec2(960., 540.); const float RAD = 452.;
+float lines(float x, float period, float w, float aa){ float d = abs(fract(x / period) - .5) * period; return clamp((w * .5 - d) / aa + .5, 0., 1.); }
+vec3 sampleAt(vec2 p){
+  vec2 q = p - CEN; float r = length(q);
+  vec3 paper = vec3(.948, .934, .898), ink = vec3(.075, .072, .078), red = vec3(.640, .110, .090);
+  float inside = smoothstep(RAD + .75, RAD - .75, r);
+  vec3 col = paper;
+  // the red disc lies under both gratings
+  vec2 dc = q - vec2(120., -40.);
+  col = mix(col, red, smoothstep(170.75, 169.25, length(dc)) * uDisc * inside);
+  float aa = .8;
+  float a = lines(r, 8.6, 3.0, aa) * uA * step(r, uWipe);
+  vec2 rq = rot(uAng) * q;
+  float b = lines(rq.x, 8.92, 3.0, aa) * uB;
+  float c = lines(length(q - vec2(uSep, uSep * .22)), 8.6, 3.0, aa) * uC;
+  float k = 1. - (1. - a) * (1. - b) * (1. - c);
+  col = mix(col, ink, k * inside);
+  // a hairline rim
+  col = mix(col, ink, smoothstep(1.4, .4, abs(r - RAD - 9.)) * .55 * uA);
+  return col;
+}
+void main(){
+  vec2 fc = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec3 acc = vec3(0.);
+  for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) acc += sampleAt(fc + (vec2(float(i), float(j)) + .5) / 4. - .5);
+  vec3 col = acc / 16.;
+  vec2 v = vUv - .5; col *= 1. - .22 * dot(v, v);
+  fragColor = vec4(col, 1.);
+}`;
+// separation of the two circle sets (px) and rotation of the line grating, as functions of time
+const sepAt = (t) => 74 * prog(t, 11.6, 4.2, E.inOutSine) * (1 - prog(t, 16.2, 3.0, E.inOutCubic));
+const angAt = (t) => lerp(0.085, -0.03, prog(t, 4, 8, E.inOutSine));
+let sh;
+
+Stage.create({
+  no: 20, title: 'Moiré', subtitle: 'two gratings · 60 bpm',
+  duration: 20, background: '#f2eee5', grain: 0.035, poster: 14.4,
+  fade: { in: 1.0, out: 1.4, color: '#f2eee5' },
+  slate: { at: 0.9, hold: 3.2, color: 'rgba(20,20,22,.86)' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 20, seed: 20 });
+    M.master({ reverb: { decay: 4.5, size: 1.3, damp: 0.5 }, fadeIn: 1.2, fadeOut: 3.0, saturate: 0.1 });
+    // each drone is two sine voices a few cents apart: the beat you hear is their difference frequency
+    const mk = (name, cents, pan) => M.track(name, { inst: 'sine', reverb: 0.4, gain: 0.55, pan, params: { voices: 2, detune: cents, spread: 0.9, A: 1.6, R: 2.6, S: 1, gain: 0.7 } });
+    const d0 = mk('d0', 0.01, 0), d1 = mk('d1', 5, 0), d2 = mk('d2', 11, 0), d3 = mk('d3', 24, 0), d4 = mk('d4', 2, 0);
+    const fifth = M.track('fifth', { inst: 'sine', reverb: 0.5, gain: 0.3, params: { voices: 2, detune: 3, spread: 1, A: 2.5, R: 3, S: 1 } });
+    const sub = M.track('sub', { reverb: 0.1, gain: 0.5, params: { A: 1.5, R: 2.5 } }), bell = M.track('chime', { reverb: 0.8, gain: 0.7 });
+    d0.note(0, 'A3', 4.5, 0.7); d1.note(4, 'A3', 4.5, 0.7); d2.note(8, 'A3', 4.4, 0.7); d3.note(12, 'A3', 4.6, 0.75); d4.note(16, 'A3', 4, 0.7);
+    fifth.note(4, 'E4', 12, 0.6); fifth.note(12, 'C#5', 5, 0.4); sub.note(2, 'A1', 16, 0.7);
+    bell.note(4, 'A5', 3, 0.5); bell.note(12, 'E6', 3, 0.5); bell.note(16, 'A5', 3, 0.4);
+    return M;
+  },
+
+  setup() { sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    sh.draw(t, {
+      uA: prog(t, 0.4, 1.2, E.outCubic), uWipe: 470 * prog(t, 0.5, 3.2, E.inOutCubic),
+      uB: prog(t, 4, 1.8, E.inOutSine) * (1 - prog(t, 10.4, 2.0, E.inOutSine)), uAng: angAt(t),
+      uC: prog(t, 10.2, 2.0, E.inOutSine) * (1 - prog(t, 18.9, 1.0, E.inOutSine)), uSep: sepAt(t),
+      uDisc: prog(t, 2.6, 2.0, E.inOutSine)
+    });
+  }
+});
+</script>
+</body>
+</html>

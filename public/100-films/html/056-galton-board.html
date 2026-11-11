@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 056 — Galton Board</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 056 — GALTON BOARD
+ * A thousand beads, fourteen rows of brass pegs, a coin-flip at every peg. Each bead's whole journey is decided
+ * before the film starts (release time, fourteen lefts-or-rights, its resting slot in the bin), so any frame can
+ * be drawn from the clock alone. One bead, a trickle, a pour — and the bins draw the bell curve; a red normal
+ * curve lands on it. Peg contacts are the percussion. Ten bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, NB = 1000, ROWS = 14, SX = 56, SY = 36, CX = 960, Y0 = 150, PEG = 5, BR = 4.2;
+const HOP = 0.118, DROP = 0.34, BIN_TOP = Y0 + ROWS * SY + 6, FLOOR = 1002, ACROSS = 6, PITCH = 8.7, ROWH = 7.6, GRAV = 2600;
+const SIM = plan();
+let bg, ctx;
+
+function plan() {
+  let best = null;
+  for (let seed = 1; seed <= 60; seed++) {      // choose the fairest of sixty honest thousand-bead runs
+    const r = Stage.rng(560 + seed), beads = [], counts = new Array(ROWS + 1).fill(0);
+    for (let b = 0; b < NB; b++) { const dirs = []; let k = 0; for (let j = 0; j < ROWS; j++) { const d = r() < 0.5 ? 0 : 1; dirs.push(d); k += d; } counts[k]++; beads.push({ dirs, k, jx: (r() - 0.5) * 9, jb: 7 + r() * 9, jt: r() }); }
+    let chi = 0; for (let k = 0; k <= ROWS; k++) { const e = NB * binom(ROWS, k) / Math.pow(2, ROWS); chi += (counts[k] - e) * (counts[k] - e) / e; }
+    if (!best || chi < best.chi) best = { chi, beads, counts };
+  }
+  const { beads } = best;
+  // release times: one bead, a trickle, a pour, and one last bead
+  beads.forEach((b, i) => {
+    if (i === 0) b.t0 = 0.75; else if (i < 34) b.t0 = 3.2 + 2.8 * Math.pow((i - 1) / 33, 0.6); else if (i < NB - 1) b.t0 = 6.0 + 9.3 * ((i - 34) / (NB - 35)) + (b.jt - 0.5) * 0.02; else b.t0 = 16.25;
+    b.tLeave = b.t0 + DROP + ROWS * HOP;
+  });
+  // resting slots, in order of leaving the last peg
+  const fill = new Array(ROWS + 1).fill(0), order = beads.map((b, i) => i).sort((a, c) => beads[a].tLeave - beads[c].tLeave);
+  for (const i of order) {
+    const b = beads[i], idx = fill[b.k]++, row = Math.floor(idx / ACROSS), perm = [2, 4, 1, 3, 0, 5].map((v) => (v + row * 5) % ACROSS), col = perm[idx % ACROSS];
+    b.rx = CX + (b.k - ROWS / 2) * SX + (col - (ACROSS - 1) / 2) * PITCH + (row % 2 ? 1.4 : -1.4); b.ry = FLOOR - BR - 1 - row * ROWH;
+    b.x14 = CX + (b.k - ROWS / 2) * SX; b.y14 = Y0 + ROWS * SY - PEG - BR; b.fall = Math.sqrt(2 * Math.max(10, b.ry - b.y14) / GRAV); b.tRest = b.tLeave + b.fall;
+  }
+  return best;
+}
+function binom(n, k) { let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
+// where bead b is at time t (null before release)
+function where(b, t) {
+  const u = t - b.t0; if (u < 0) return null;
+  const topY = Y0 - PEG - BR;
+  if (u < DROP) { const q = u / DROP; return [CX + b.jx * 0.5, topY - 190 * (1 - q * q), 0]; }
+  const h = (u - DROP) / HOP;
+  if (h < ROWS) {
+    const j = Math.floor(h), q = h - j; let k = 0; for (let i = 0; i < j; i++) k += b.dirs[i];
+    const x0 = CX + (k - j / 2) * SX, x1 = x0 + (b.dirs[j] - 0.5) * SX, y0 = Y0 + j * SY - PEG - BR;
+    const y1 = j === ROWS - 1 ? b.y14 : y0 + SY, wob = b.jx * 0.35 * Math.sin(Math.PI * q) * (j % 2 ? 1 : -1);
+    return [lerp(x0, x1, q) + wob, lerp(y0, y1, q) - (b.jb + 3 * hash(j, b.jx * 100)) * 4 * q * (1 - q), 1];
+  }
+  const v = t - b.tLeave;
+  if (v < b.fall) { const q = v / b.fall; return [lerp(b.x14, b.rx, E.outQuad(Math.min(1, q * 1.5))), b.y14 + (b.ry - b.y14) * q * q, 2]; }
+  const s = v - b.fall, bounce = Math.exp(-s * 16) * Math.abs(Math.sin(s * 34)) * 5;
+  return [b.rx, b.ry - bounce, 3];
+}
+
+Stage.create({
+  no: 56, title: 'Galton Board', subtitle: 'a thousand coin-flips · 120 bpm',
+  duration: 20, background: '#1d1916', grain: 0.045, poster: 15.2,
+  fonts: ['500 17px "JetBrains Mono Variable"', '600 13px "JetBrains Mono Variable"', 'italic 400 30px "Fraunces Variable"'],
+  fade: { in: 0.7, out: 1.0 },
+  slate: { at: 0.7, hold: 2.8, pos: 'bl', color: 'rgba(240,228,206,.86)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 56 });
+    M.master({ reverb: { decay: 1.6, size: 0.8, damp: 0.5 }, fadeOut: 1.2 });
+    const tk = M.track('tick', { reverb: 0.22, gain: 0.5, humanize: 0 }), land = M.track('woodblock', { reverb: 0.25, gain: 0.3 });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 0.85, pan: -0.2, params: { decay: 0.7, bright: 0.5 }, delay: { time: 0.75, fb: 0.25, mix: 0.18 } }), mar = M.track('marimba', { reverb: 0.3, gain: 0.8, pan: 0.2 });
+    const bass = M.track('bass', { reverb: 0.05, gain: 0.5, lowpass: 600 }), sh = M.track('shaker', { reverb: 0.15, gain: 0.26 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.55 }), bell = M.track('glass', { reverb: 0.6, gain: 0.5 });
+    // peg contacts: every one for the first bead, a thin sample of the rest
+    SIM.beads.forEach((b, i) => {
+      let k = 0;
+      for (let j = 0; j < ROWS; j++) {
+        const t = b.t0 + DROP + j * HOP; if (i === 0 || i === NB - 1 || hash(i * 17 + j, 3) < (i < 34 ? 0.3 : 0.03)) tk.hit(M.b(t), i === 0 || i === NB - 1 ? 0.7 : 0.25 + 0.3 * hash(i, j), 0.05, { tone: 1700 + 170 * j + 500 * hash(i, 9), pan: clamp01(0.5 + (k - j / 2) / 9) * 2 - 1 });
+        k += b.dirs[j];
+      }
+      if (i === 0 || i === NB - 1 || hash(i, 21) < 0.06) land.hit(M.b(b.tRest), i === 0 || i === NB - 1 ? 0.7 : 0.35, 0.1, { pan: (b.k - 7) / 8 });
+    });
+    const ch = [['G2', ['G3', 'B3', 'D4', 'F#4']], ['E2', ['G3', 'B3', 'D4', 'E4']], ['C2', ['G3', 'C4', 'E4', 'B4']], ['D2', ['A3', 'D4', 'F#4', 'A4']]];
+    const riff = ['G4', null, 'B4', 'D5', null, 'B4', 'A4', null, 'G4', null, 'D5', 'E5', null, 'D5', 'B4', null];
+    for (let bar = 1; bar < 10; bar++) {
+      const b = bar * 4, c = ch[(bar - 1) % 4], full = bar >= 3 && bar <= 7;
+      if (bar >= 2 && bar <= 8) { mar.chord(b, c[1], 0.5, 0.42); mar.chord(b + 1.5, c[1], 0.4, 0.34); if (full) mar.chord(b + 2.5, c[1].slice(1), 0.4, 0.3); }
+      if (bar >= 1 && bar <= 8) plk.seq(b, 0.25, riff.map((n, i) => (bar === 1 && i % 2 ? null : n)), { vel: 0.5, dur: 0.3 });
+      if (bar >= 2 && bar <= 8) { bass.note(b, c[0], 1.3, 0.7); bass.note(b + 2.5, c[0], 0.9, 0.55); }
+      if (bar >= 2 && bar <= 8) sh.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.5 });
+      if (full) kick.pattern(b, 1, 'x.x.', { vel: 0.7 });
+    }
+    // the curve lands
+    bell.chord(31.5, ['G4', 'B4', 'D5', 'A5'], 5, 0.45); mar.chord(36, ['G3', 'D4', 'G4', 'B4'], 3, 0.5); bass.note(36, 'G1', 3, 0.7); plk.note(37.5, 'D5', 1, 0.4); plk.note(38, 'G5', 1.5, 0.4);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1, dpr: 2 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const c = bg, bx = CX - 500, bw = 1000, by = 34, bh = 1012;
+    // the wall behind, then the board with its shadow
+    const wg = c.createRadialGradient(CX, 440, 100, CX, 540, 1250); wg.addColorStop(0, '#3a322b'); wg.addColorStop(1, '#151210'); c.fillStyle = wg; c.fillRect(0, 0, W, H);
+    c.save(); c.shadowColor = 'rgba(0,0,0,.55)'; c.shadowBlur = 60; c.shadowOffsetY = 24; c.fillStyle = '#5a3d28'; c.beginPath(); c.roundRect(bx - 16, by - 16, bw + 32, bh + 32, 20); c.fill(); c.restore();
+    const fr = c.createLinearGradient(bx, 0, bx + bw, 0); fr.addColorStop(0, '#6b4a31'); fr.addColorStop(0.5, '#7a5639'); fr.addColorStop(1, '#5c3f29'); c.fillStyle = fr; c.beginPath(); c.roundRect(bx - 16, by - 16, bw + 32, bh + 32, 20); c.fill();
+    const cg = c.createLinearGradient(0, by, 0, by + bh); cg.addColorStop(0, '#f4ecd9'); cg.addColorStop(1, '#e9dfc8'); c.fillStyle = cg; c.beginPath(); c.roundRect(bx, by, bw, bh, 8); c.fill();
+    c.save(); c.beginPath(); c.roundRect(bx, by, bw, bh, 8); c.clip(); c.strokeStyle = 'rgba(60,40,20,.35)'; c.lineWidth = 14; c.shadowColor = 'rgba(40,25,10,.5)'; c.shadowBlur = 22; c.strokeRect(bx - 7, by - 7, bw + 14, bh + 14); c.restore();
+    // paper tooth
+    const r = Stage.rng(56); for (let i = 0; i < 5000; i++) { c.fillStyle = `rgba(120,96,60,${0.03 + 0.04 * r()})`; c.fillRect(bx + r() * bw, by + r() * bh, 1 + r() * 2, 1); }
+    // chute
+    c.strokeStyle = '#8a6a3c'; c.lineWidth = 4; c.lineCap = 'round'; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(CX + s * 150, by + 4); c.lineTo(CX + s * 15, Y0 - 50); c.lineTo(CX + s * 15, Y0 - 26); c.stroke(); }
+    // pegs: shadow, brass, glint
+    for (let j = 0; j < ROWS; j++) for (let i = 0; i <= j; i++) {
+      const x = CX + (i - j / 2) * SX, y = Y0 + j * SY;
+      c.fillStyle = 'rgba(70,50,25,.28)'; c.beginPath(); c.ellipse(x + 3.5, y + 5, PEG + 1, PEG, 0, 0, TAU); c.fill();
+      const g = c.createRadialGradient(x - 1.6, y - 1.8, 0.4, x, y, PEG); g.addColorStop(0, '#fff0c0'); g.addColorStop(0.45, '#d9a94e'); g.addColorStop(1, '#8a5f1e'); c.fillStyle = g; c.beginPath(); c.arc(x, y, PEG, 0, TAU); c.fill();
+    }
+    // bins
+    c.strokeStyle = '#8a6a3c'; c.lineWidth = 3; c.lineCap = 'round';
+    for (let k = 0; k <= ROWS + 1; k++) { const x = CX + (k - ROWS / 2 - 0.5) * SX; c.strokeStyle = 'rgba(70,50,25,.2)'; c.beginPath(); c.moveTo(x + 2.5, BIN_TOP + 10); c.lineTo(x + 2.5, FLOOR + 2); c.stroke(); c.strokeStyle = '#96743f'; c.beginPath(); c.moveTo(x, BIN_TOP + 8); c.lineTo(x, FLOOR); c.stroke(); }
+    c.strokeStyle = '#96743f'; c.lineWidth = 4; c.beginPath(); c.moveTo(CX - (ROWS / 2 + 0.5) * SX - 6, FLOOR + 2); c.lineTo(CX + (ROWS / 2 + 0.5) * SX + 6, FLOOR + 2); c.stroke();
+    // engraved labels
+    c.fillStyle = 'rgba(90,66,36,.62)'; c.font = '600 13px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    for (let k = 0; k <= ROWS; k++) c.fillText(String(k), CX + (k - ROWS / 2) * SX, FLOOR + 24);
+    c.textAlign = 'left'; c.fillText('F I G .  5 6', bx + 44, by + 62); c.fillText('1 4   R O W S   ·   p = ½', bx + 44, by + 84);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    let landed = 0, released = 0;
+    // beads: resting ones first, flying ones on top
+    const fly = [];
+    for (const b of SIM.beads) {
+      const p = where(b, t); if (!p) continue; released++;
+      if (p[2] === 3) { landed++; bead(c, p[0], p[1], 1); } else fly.push(p);
+    }
+    for (const p of fly) { c.fillStyle = 'rgba(60,45,25,.16)'; c.beginPath(); c.arc(p[0] + 3, p[1] + 4.5, BR, 0, TAU); c.fill(); }
+    for (const p of fly) bead(c, p[0], p[1], 1.08);
+    // the normal curve lands on the histogram
+    const cp = prog(t, 15.4, 2.0, E.inOutCubic);
+    if (cp > 0) {
+      const mu = ROWS / 2, sg = Math.sqrt(ROWS) / 2, xa = CX - (ROWS / 2 + 0.5) * SX, xb = CX + (ROWS / 2 + 0.5) * SX;
+      const yOf = (x) => { const k = (x - CX) / SX + mu, e = NB * Math.exp(-0.5 * ((k - mu) / sg) ** 2) / (sg * Math.sqrt(TAU)); return FLOOR - 2 - (e / ACROSS) * ROWH - BR; };
+      c.save(); c.beginPath(); c.rect(xa, 0, (xb - xa) * cp, H); c.clip();
+      c.strokeStyle = 'rgba(200,52,40,.92)'; c.lineWidth = 2.6; c.lineJoin = 'round'; c.beginPath(); for (let x = xa; x <= xb; x += 4) { const y = yOf(x); x === xa ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke(); c.restore();
+      const hx = xa + (xb - xa) * cp; if (cp < 1) { c.fillStyle = '#c83428'; c.beginPath(); c.arc(hx, yOf(hx), 4.5, 0, TAU); c.fill(); }
+      const la = prog(t, 17.2, 0.8); if (la > 0) { c.fillStyle = `rgba(190,48,36,${0.9 * la})`; c.font = 'italic 400 30px "Fraunces Variable"'; c.textAlign = 'left'; c.fillText('normal', CX + 2.2 * SX, yOf(CX + 1.5 * SX) - 26); }
+    }
+    // counter
+    const on = prog(t, 0.6, 0.8); c.fillStyle = `rgba(74,54,30,${0.85 * on})`; c.font = '500 17px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.textBaseline = 'alphabetic';
+    c.fillText('n = ' + String(released).padStart(4, '0'), CX + 456, 96); c.fillStyle = `rgba(74,54,30,${0.5 * on})`; c.fillText('at rest  ' + String(landed).padStart(4, '0'), CX + 456, 120);
+  }
+});
+function bead(c, x, y, s) {
+  const r = BR * s; c.fillStyle = '#3d5f86'; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+  c.fillStyle = '#7fa6cf'; c.beginPath(); c.arc(x - r * 0.25, y - r * 0.28, r * 0.52, 0, TAU); c.fill();
+  c.fillStyle = 'rgba(240,248,255,.9)'; c.beginPath(); c.arc(x - r * 0.36, y - r * 0.4, r * 0.2, 0, TAU); c.fill();
+}
+</script>
+</body>
+</html>

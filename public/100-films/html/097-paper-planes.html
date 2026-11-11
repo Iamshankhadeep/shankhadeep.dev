@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 097 — Paper Planes</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 097 — PAPER PLANES
+ * A doodle escapes the margin. Everything on the page is a list of pen strokes; a stroke is a polyline whose
+ * points are nudged by a pixel or so, and the nudge is re-rolled twelve times a second — so the drawings
+ * "boil" like hand-drawn animation shot on twos, while the camera and the plane's flight run at the full
+ * sixty. A ballpoint draws a plane and labels it (the letters are a tiny single-stroke alphabet, written out
+ * stroke by stroke with the pen lifting between them); the plane launches along one long spline with two
+ * loop-the-loops, leaving a dashed trail, past clouds, mountains and a sun that are scribbled in just ahead
+ * of it — and leaves the page. Nine bars at 108 bpm (2.22 s each), G major. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BEAT = 60 / 108, INK = '#2140b0', T_GO = 8 * BEAT, T_OUT = 15.6;
+let ctx, T = 0, HEAD = null, SID = 0;
+// ── strokes ──
+const mk = (pts, w) => { const d = [pts[0]]; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 20)); for (let k = 1; k <= n; k++) d.push([lerp(a[0], b[0], k / n), lerp(a[1], b[1], k / n)]); } const cum = [0]; for (let i = 1; i < d.length; i++) cum.push(cum[i - 1] + Math.hypot(d[i][0] - d[i - 1][0], d[i][1] - d[i - 1][1])); return { pts: d, cum, L: Math.max(1, cum[cum.length - 1]), id: ++SID, w: (w || 3.2) * (0.92 + 0.16 * hash(SID, 5)) }; };
+function ink(c, s, p, xf) {
+  if (p <= 0) return null; const bf = Math.floor(T * 12), tgt = s.L * Math.min(1, p); let head = null; c.beginPath();
+  for (let i = 0; i < s.pts.length; i++) { let x = s.pts[i][0], y = s.pts[i][1]; if (i && s.cum[i] > tgt) { const u = (tgt - s.cum[i - 1]) / (s.cum[i] - s.cum[i - 1]); x = lerp(s.pts[i - 1][0], x, u); y = lerp(s.pts[i - 1][1], y, u); if (xf) [x, y] = xf(x, y); c.lineTo(x, y); head = [x, y]; break; }
+    if (xf) [x, y] = xf(x, y); x += (hash(i, s.id * 57 + bf) - 0.5) * 2.6; y += (hash(i + 500, s.id * 57 + bf) - 0.5) * 2.6; i ? c.lineTo(x, y) : c.moveTo(x, y); head = [x, y]; }
+  c.lineWidth = s.w; c.stroke(); return head;
+}
+const mkD = (strokes, t0, t1) => { const travel = strokes.map((s, i) => (i ? Math.hypot(s.pts[0][0] - strokes[i - 1].pts[strokes[i - 1].pts.length - 1][0], s.pts[0][1] - strokes[i - 1].pts[strokes[i - 1].pts.length - 1][1]) / 2.4 : 0)); return { strokes, travel, total: strokes.reduce((a, s) => a + s.L, 0) + travel.reduce((a, b) => a + b, 0), t0, t1 }; };
+function doodle(c, D, t, pen) {
+  if (t < D.t0) return; const p = clamp01((t - D.t0) / (D.t1 - D.t0)); let e = p * D.total;
+  for (let i = 0; i < D.strokes.length; i++) { const s = D.strokes[i], tr = D.travel[i]; if (e < tr) { if (pen && p < 1) { const pv = D.strokes[i - 1].pts, a = pv[pv.length - 1], b = s.pts[0]; HEAD = [lerp(a[0], b[0], e / tr), lerp(a[1], b[1], e / tr), 1]; } return; } e -= tr; const q = e / s.L, h = ink(c, s, q) || s.pts[0]; if (q < 1) { if (pen) HEAD = [h[0], h[1], 0]; return; } e -= s.L; }
+}
+// ── a small single-stroke alphabet (x: 0–0.56, y: 0 = ascender, 1 = baseline) ──
+const LET = {
+  a: [[[0.46, 0.52], [0.28, 0.45], [0.1, 0.62], [0.1, 0.86], [0.28, 1], [0.46, 0.86]], [[0.47, 0.45], [0.47, 0.92], [0.54, 1]]], d: [[[0.46, 0.56], [0.28, 0.45], [0.1, 0.62], [0.1, 0.86], [0.28, 1], [0.46, 0.86]], [[0.47, 0], [0.47, 1]]],
+  e: [[[0.1, 0.72], [0.47, 0.7], [0.43, 0.5], [0.26, 0.45], [0.1, 0.62], [0.12, 0.9], [0.3, 1], [0.48, 0.9]]], h: [[[0.1, 0], [0.1, 1]], [[0.1, 0.64], [0.28, 0.45], [0.45, 0.56], [0.45, 1]]],
+  l: [[[0.18, 0], [0.18, 0.9], [0.28, 1]]], n: [[[0.1, 0.45], [0.1, 1]], [[0.1, 0.64], [0.28, 0.45], [0.45, 0.56], [0.45, 1]]], p: [[[0.1, 0.45], [0.1, 1.42]], [[0.1, 0.6], [0.28, 0.45], [0.47, 0.6], [0.47, 0.85], [0.28, 1], [0.1, 0.88]]],
+  r: [[[0.1, 0.45], [0.1, 1]], [[0.1, 0.64], [0.26, 0.47], [0.42, 0.5]]], t: [[[0.22, 0.1], [0.22, 0.9], [0.34, 1]], [[0.06, 0.45], [0.42, 0.45]]], w: [[[0.02, 0.45], [0.14, 1], [0.28, 0.6], [0.42, 1], [0.54, 0.45]]], '!': [[[0.18, 0], [0.18, 0.7]], [[0.18, 0.93], [0.19, 0.97]]]
+};
+function word(str, x, y, size) { const out = []; let cx = x; for (const ch of str) { if (ch !== ' ') { const dy = (hash(out.length, 7) - 0.5) * size * 0.06; for (const st of LET[ch]) out.push(mk(st.map(([u, v]) => [cx + u * size + (v - 1) * size * -0.12, y + (v - 1) * size + dy]), 3)); } cx += size * (ch === ' ' ? 0.4 : ch === 'l' || ch === '!' ? 0.36 : ch === 'w' ? 0.66 : 0.6); } return out; }
+// ── the flight path: one spline, two loops ──
+const PATH = (() => { const cp = [[540, 760], [640, 692], [726, 626]], loop = (cx, cy, r) => { for (let a = 90; a >= -270; a -= 30) cp.push([cx + r * Math.cos(a * Math.PI / 180), cy + r * Math.sin(a * Math.PI / 180)]); };
+  loop(810, 470, 126); cp.push([960, 606], [1090, 652], [1210, 690]); loop(1340, 520, 152); cp.push([1490, 698], [1590, 640], [1664, 520], [1704, 390], [1750, 270], [1840, 160], [2010, 50]);
+  const dense = [], g = (i) => cp[Math.max(0, Math.min(cp.length - 1, i))]; for (let i = 0; i < cp.length - 1; i++) for (let k = 0; k < 24; k++) { const u = k / 24, a = g(i - 1), b = g(i), c = g(i + 1), d = g(i + 2); dense.push([0, 1].map((q) => 0.5 * (2 * b[q] + (c[q] - a[q]) * u + (2 * a[q] - 5 * b[q] + 4 * c[q] - d[q]) * u * u + (3 * b[q] - a[q] - 3 * c[q] + d[q]) * u * u * u))); }
+  const out = [dense[0]]; let acc = 0; for (let i = 1; i < dense.length; i++) { let a = dense[i - 1], b = dense[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]); while (acc + d >= 4) { const u = (4 - acc) / d; a = [lerp(a[0], b[0], u), lerp(a[1], b[1], u)]; out.push(a); d = Math.hypot(b[0] - a[0], b[1] - a[1]); acc = 0; } acc += d; } return out; })();
+const PL = (PATH.length - 1) * 4, at = (s) => { const f = clamp01(s / PL) * (PATH.length - 1), i = Math.min(PATH.length - 2, Math.floor(f)), u = f - i; return [lerp(PATH[i][0], PATH[i + 1][0], u), lerp(PATH[i][1], PATH[i + 1][1], u)]; };
+const planeS = (t) => { const u = clamp01((t - T_GO) / (T_OUT - T_GO)); return PL * (0.8 * u + 0.2 * u * u); };
+// ── the drawings ──
+const PLANE = [[[-70, -32], [94, 0], [-62, 20], [-44, 2], [-70, -32]], [[94, 0], [-44, 2]], [[-44, 2], [-30, 36], [22, 7]]];
+const P0 = [540, 760], A0 = -0.52, xfP = (x, y, s, a, px, py) => [px + (x * Math.cos(a) - y * Math.sin(a)) * s, py + (x * Math.sin(a) + y * Math.cos(a)) * s];
+const circle = (cx, cy, r, n = 28, a0 = 0, sweep = TAU) => Array.from({ length: n + 1 }, (_, i) => [cx + r * Math.cos(a0 + sweep * i / n), cy + r * Math.sin(a0 + sweep * i / n)]);
+const cloud = (cx, cy, w, h, sd) => [mk(Array.from({ length: 65 }, (_, i) => { const a = i / 64 * TAU + 2.2, top = Math.sin(a) < 0.25, b = 1 + (top ? 0.24 : 0.07) * Math.abs(Math.sin(a * 3.2 + sd)); return [cx + Math.cos(a) * w * b, cy + Math.sin(a) * h * b * (top ? 1 : 0.62)]; }))];
+const star = (x, y, r) => [mk([[x - r, y], [x + r, y]], 2.6), mk([[x, y - r], [x, y + r]], 2.6), mk([[x - r * 0.5, y - r * 0.5], [x + r * 0.5, y + r * 0.5]], 2.2), mk([[x + r * 0.5, y - r * 0.5], [x - r * 0.5, y + r * 0.5]], 2.2)];
+const D_INTRO = mkD([...PLANE.map((st) => mk(st.map(([x, y]) => xfP(x, y, 2, A0, P0[0], P0[1])))), ...word('paper plane', 372, 944, 62)], 0.5, 3.95);
+const D_END = mkD([...word('the end', 330, 262, 66), mk(Array.from({ length: 41 }, (_, i) => { const a = Math.PI + i / 40 * TAU; return [652 + 1.5 * 16 * Math.pow(Math.sin(a), 3), 232 - 1.5 * (13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a))]; }), 3.6)], 16.5, 18.5);
+const DOODLES = [
+  mkD([mk([[420, 640], [470, 596], [540, 578], [606, 590]]), mk([[606, 590], [578, 570]]), mk([[606, 590], [584, 612]])], 3.7, 4.3),
+  mkD(star(388, 520, 16), 4.9, 5.2), mkD(cloud(1060, 296, 118, 54, 1), 5.2, 6.3), mkD(star(760, 190, 18), 6.0, 6.3),
+  mkD(word('whee!', 430, 408, 70), 6.7, 7.5), mkD(cloud(1086, 672, 104, 48, 2.4), 6.9, 7.8), mkD(star(930, 830, 15), 7.5, 7.8), mkD(star(1250, 252, 14), 8.3, 8.6),
+  mkD([mk([[1010, 952], [1110, 838], [1160, 884], [1250, 790], [1330, 890], [1400, 842], [1470, 934], [1560, 852], [1680, 952]]), mk([[1084, 868], [1102, 880], [1114, 864], [1130, 880], [1140, 868]], 2.6), mk([[1222, 824], [1240, 838], [1254, 820], [1270, 838], [1284, 826]], 2.6), mk([[1540, 876], [1556, 886], [1566, 872], [1580, 884]], 2.6),
+    ...[0, 1, 2, 3, 4].map((k) => mk([[1272 + k * 13, 838 + k * 14], [1254 + k * 15, 872 + k * 13]], 2.2)), ...[0, 1, 2, 3].map((k) => mk([[1582 + k * 16, 892 + k * 13], [1566 + k * 18, 920 + k * 9]], 2.2)), mk([[980, 960], [1160, 966], [1340, 958], [1520, 966], [1710, 960]], 2.6)], 8.6, 10.6),
+  mkD(cloud(1500, 560, 96, 44, 4.1), 10.8, 11.7),
+  mkD([mk(circle(1560, 215, 58, 30, -1.2)), ...Array.from({ length: 12 }, (_, k) => { const a = k * TAU / 12 + 0.1, r1 = k % 2 ? 100 : 112; return mk([[1560 + Math.cos(a) * 74, 215 + Math.sin(a) * 74], [1560 + Math.cos(a) * r1, 215 + Math.sin(a) * r1]], 2.8); }), mk(circle(1540, 202, 5, 8), 3), mk(circle(1582, 202, 5, 8), 3), mk(circle(1561, 216, 28, 12, 0.5, 2.14))], 11.3, 12.9),
+  mkD(star(1790, 560, 16), 12.6, 12.9)
+];
+
+Stage.create({
+  no: 97, title: 'Paper Planes', subtitle: 'a doodle leaves the page · 108 bpm',
+  duration: 20, background: '#fbf8ef', grain: 0.05, poster: 11.2,
+  fade: { in: 0.5, out: 1.2, color: '#fbf8ef' },
+  slate: { at: 19.9, hold: 0.05, pos: 'bl', color: 'rgba(0,0,0,0)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 97 });
+    M.master({ reverb: { decay: 1.4, size: 0.75, damp: 0.5 }, fadeOut: 1.4 });
+    const uke = M.track('pluck', { reverb: 0.22, gain: 0.5, pan: -0.2, params: { decay: 0.6, bright: 0.6 } }), fl = M.track('flute', { reverb: 0.4, gain: 0.34, pan: 0.2 }), sh = M.track('shaker', { reverb: 0.1, gain: 0.2 }), wb = M.track('woodblock', { reverb: 0.2, gain: 0.36 }), bass = M.track('pluck', { reverb: 0.12, gain: 0.8, params: { decay: 0.9, bright: 0.25 } }), wh = M.track('whoosh', { reverb: 0.3, gain: 0.3 }), cel = M.track('celesta', { reverb: 0.5, gain: 0.5 }), scr = M.track('shaker', { reverb: 0.05, gain: 0.12, pan: -0.3 });
+    const CH = { G: ['G4', 'B4', 'D5', 'G5'], Em: ['G4', 'B4', 'E5', 'G5'], C: ['G4', 'C5', 'E5', 'G5'], D: ['A4', 'D5', 'F#5', 'A5'] }, RT = { G: 'G2', Em: 'E2', C: 'C3', D: 'D3' };
+    const strum = (b, ch, v, up) => ch.forEach((n, i) => uke.note(b + (up ? ch.length - 1 - i : i) * 0.028, n, 0.5, v * (up ? 0.75 : 1)));
+    // bars 1–2: the pen works; a few picked notes
+    ['G4', 'B4', 'D5', 'B4', 'E4', 'G4', 'B4', 'D5'].forEach((n, i) => uke.note(i, n, 0.9, 0.5)); for (let k = 0; k < 28; k++) scr.hit(0.9 + k * 0.22 + 0.06 * Math.sin(k * 2.3), 0.3 + 0.2 * hash(k, 1), 0.05);
+    wh.hit(7.6, 0.7, 1.2); [0, 1, 2, 3].forEach((k) => fl.note(7.5 + k * 0.125, ['D5', 'G5', 'B5', 'D6'][k], 0.14, 0.5));
+    ['G', 'Em', 'C', 'D', 'G', 'C', 'G'].forEach((n, i) => { const b = 8 + i * 4, c = i === 5 ? null : CH[n]; if (i < 6) { if (i === 5) { strum(b, CH.C, 0.6); strum(b + 1, CH.C, 0.5); strum(b + 1.5, CH.C, 0.5, 1); strum(b + 2, CH.D, 0.6); strum(b + 3, CH.D, 0.5); strum(b + 3.5, CH.D, 0.5, 1); bass.note(b, 'C3', 1.5, 0.7); bass.note(b + 2, 'D3', 1.5, 0.7); } else { strum(b, c, 0.6); strum(b + 1, c, 0.5); strum(b + 1.5, c, 0.5, 1); strum(b + 2.5, c, 0.5, 1); strum(b + 3, c, 0.55); strum(b + 3.5, c, 0.5, 1); bass.note(b, RT[n], 1.5, 0.7); bass.note(b + 2, S.midi(RT[n]) + 7, 1.2, 0.5); } sh.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.45 }); wb.pattern(b, 1, '.x.x', { vel: 0.6 }); } else { strum(b, CH.G, 0.7); bass.note(b, 'G2', 3, 0.8); } });
+    [[8, 'D5', .5], [9, 'G5', .5], [9.5, 'B5', 1], [10.5, 'A5', .5], [11, 'G5', 1], [12, 'E5', .5], [12.5, 'G5', .5], [13, 'B5', 1], [14, 'A5', .5], [14.5, 'G5', .5], [15, 'E5', 1], [16, 'C6', 1], [17, 'B5', .5], [17.5, 'A5', .5], [18, 'G5', 1], [19, 'E5', .5], [19.5, 'G5', .5], [20, 'A5', 1], [21, 'F#5', .5], [21.5, 'A5', .5], [22, 'D6', 1.5], [23.5, 'C6', .5],
+     [24, 'B5', 1], [25, 'D6', .5], [25.5, 'B5', .5], [26, 'G5', 1], [27, 'A5', .5], [27.5, 'B5', .5], [28, 'C6', 1], [29, 'E6', 1], [30, 'D6', 1.5], [31.5, 'F#5', .5], [32, 'G5', 3]].forEach(([b, n, d]) => fl.note(b, n, d * 0.92, 0.55));
+    wh.hit(M.b(T_OUT) - 0.6, 0.5, 1.2); cel.note(M.b(18.45), 'B6', 1, 0.5); cel.note(M.b(18.45) + 0.15, 'D7', 1.5, 0.5);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1, dpr: 2 }); },
+
+  frame(t) {
+    const c = ctx; T = t; HEAD = null; c.setTransform(2, 0, 0, 2, 0, 0); c.fillStyle = '#fbf8ef'; c.fillRect(0, 0, W, H);
+    // where the plane is
+    const flying = t >= T_GO, s = planeS(t), pp = flying ? at(s) : P0, pa = flying ? (() => { const a = at(s - 6), b = at(s + 6); return Math.atan2(b[1] - a[1], b[0] - a[0]); })() : A0;
+    // camera: close on the drawing, back to the whole page, then leaning a little toward the plane
+    const back = E.inOutCubic(prog(t, 3.5, 2.0)), follow = smoothstep(T_GO, T_GO + 1.5, t) * (1 - smoothstep(T_OUT - 1.2, T_OUT + 0.8, t)), z = lerp(1.5, 1.03, back) + 0.03 * smoothstep(15, 20, t), fx = lerp(640, 960, back) + (pp[0] - 960) * 0.05 * follow, fy = lerp(790, 540, back) + (pp[1] - 540) * 0.05 * follow;
+    c.translate(960, 540); c.scale(z, z); c.translate(-fx, -fy);
+    // the page: rules, margin, punched holes
+    c.strokeStyle = 'rgba(118,160,214,.5)'; c.lineWidth = 1.5; c.beginPath(); for (let y = 108; y < H + 200; y += 54) { c.moveTo(-200, y); c.lineTo(W + 200, y); } c.stroke();
+    c.strokeStyle = 'rgba(226,96,96,.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(236, -200); c.lineTo(236, H + 200); c.moveTo(243, -200); c.lineTo(243, H + 200); c.stroke();
+    for (const y of [176, 540, 904]) { c.fillStyle = 'rgba(60,50,40,.18)'; c.beginPath(); c.arc(120, y + 3, 19, 0, TAU); c.fill(); c.fillStyle = '#3a3836'; c.beginPath(); c.arc(118, y, 18, 0, TAU); c.fill(); c.fillStyle = 'rgba(255,255,255,.07)'; c.beginPath(); c.arc(121, y + 4, 14, 0, TAU); c.fill(); }
+    // ink
+    c.strokeStyle = INK; c.globalAlpha = 0.9; c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const D of DOODLES) doodle(c, D, t, false);
+    if (t < 3.95) doodle(c, D_INTRO, t, true); else for (const st of D_INTRO.strokes.slice(3)) ink(c, st, 1);
+    doodle(c, D_END, t, true);
+    // dashed trail
+    if (flying) { const bf = Math.floor(t * 12); c.lineWidth = 2.8; c.beginPath(); for (let k = 0; k * 46 + 28 < s - 54; k++) for (let j = 0; j < 3; j++) { const p = at(k * 46 + j * 14), x = p[0] + (hash(k * 3 + j, 900 + bf) - 0.5) * 2, y = p[1] + (hash(k * 3 + j, 1900 + bf) - 0.5) * 2; j ? c.lineTo(x, y) : c.moveTo(x, y); } c.stroke(); }
+    // the plane: the drawing itself, shrinking to flying size, then following the path
+    if (t >= 3.95 && t < T_OUT + 0.3) { const sc = lerp(2, 1.12, E.inOutCubic(prog(t, 3.95, 0.4))), wind = t < T_GO ? -26 * Math.sin(Math.PI * clamp01((t - 4.0) / (T_GO - 4.0))) * smoothstep(4.0, T_GO, t) : 0, a = pa + (flying ? 0.05 * Math.sin(t * 7) : 0.1 * Math.sin(Math.PI * clamp01((t - 4.0) / 0.44)) * -1), px = pp[0] + Math.cos(A0) * wind, py = pp[1] + Math.sin(A0) * wind;
+      if (!PLANE.S) PLANE.S = PLANE.map((st) => mk(st)); for (const st of PLANE.S) ink(c, st, 1, (x, y) => xfP(x, y, sc, a, px, py)); }
+    c.globalAlpha = 1;
+    // the pen
+    let pen = null; const cap = D_INTRO.strokes[D_INTRO.strokes.length - 1].pts, capEnd = cap[cap.length - 1], hs = D_END.strokes[0].pts[0], he = D_END.strokes[D_END.strokes.length - 1].pts[0];
+    if (t < 0.5) { const u = E.outCubic(t / 0.5), p0 = D_INTRO.strokes[0].pts[0]; pen = [lerp(p0[0] + 300, p0[0], u), lerp(p0[1] + 500, p0[1], u), 1 - u]; } else if (HEAD) pen = HEAD;
+    else if (t >= 3.95 && t < 4.6) { const u = E.inCubic((t - 3.95) / 0.65); pen = [capEnd[0] + 500 * u, capEnd[1] + 600 * u, 1]; } else if (t >= 16.0 && t < 16.5) { const u = E.outCubic((t - 16.0) / 0.5); pen = [lerp(hs[0] + 500, hs[0], u), lerp(hs[1] + 400, hs[1], u), 1 - u]; } else if (t >= 18.5 && t < 19.3) { const u = E.inCubic((t - 18.5) / 0.8); pen = [he[0] + 500 * u, he[1] + 500 * u, 1]; }
+    if (pen) { const lift = (pen[2] || 0) * 10, x = pen[0], y = pen[1] - lift, a = -0.92, dx = Math.cos(a), dy = Math.sin(a); c.lineCap = 'round';
+      c.strokeStyle = 'rgba(60,50,40,.14)'; c.lineWidth = 22; c.beginPath(); c.moveTo(x + 26 + lift, y + 10 + lift); c.lineTo(x + 26 + lift + dx * 330, y + 10 + lift + dy * 330); c.stroke();
+      c.strokeStyle = '#c9ced8'; c.lineWidth = 6; c.beginPath(); c.moveTo(x, y); c.lineTo(x + dx * 26, y + dy * 26); c.stroke();
+      c.strokeStyle = '#2f55d0'; c.lineWidth = 20; c.beginPath(); c.moveTo(x + dx * 34, y + dy * 34); c.lineTo(x + dx * 330, y + dy * 330); c.stroke(); c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 5; c.beginPath(); c.moveTo(x + dx * 40 - 5, y + dy * 40 - 4); c.lineTo(x + dx * 322 - 5, y + dy * 322 - 4); c.stroke();
+      c.strokeStyle = '#e9edf5'; c.lineWidth = 21; c.lineCap = 'butt'; c.beginPath(); c.moveTo(x + dx * 60, y + dy * 60); c.lineTo(x + dx * 96, y + dy * 96); c.stroke(); c.strokeStyle = '#16297a'; c.lineWidth = 22; c.beginPath(); c.moveTo(x + dx * 300, y + dy * 300); c.lineTo(x + dx * 338, y + dy * 338); c.stroke(); }
+    c.setTransform(2, 0, 0, 2, 0, 0);
+    // a soft falloff toward the corners, like a desk lamp
+    const g = c.createRadialGradient(900, 480, 300, 960, 540, 1250); g.addColorStop(0, 'rgba(120,100,70,0)'); g.addColorStop(1, 'rgba(120,100,70,.16)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  }
+});
+</script>
+</body>
+</html>

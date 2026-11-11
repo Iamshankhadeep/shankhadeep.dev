@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 059 — Flow Field</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 059 — FLOW FIELD
+ * Thousands of particles follow an invisible field and leave a painting behind. The field is the curl of a
+ * smooth angle field — slow noise plus one large off-centre vortex with a little inflow — so the strokes comb
+ * into fibres and gather along its ridges. Four inks are assigned by region so colour masses form; the last strokes are the
+ * darkest. The page accumulates (stateful): nothing is ever erased. Seven bars at 84 bpm (2.86 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, X0 = 120, X1 = 1800, Y0 = 84, Y1 = 924, SWX = 1225, SWY = 452;
+const NZ = Stage.makeNoise(59);
+const INKS = ['#27376b', '#b4532c', '#c8973a', '#74896a', '#191e36'];
+function dir(x, y) {
+  const th = 0.3 + 2.5 * NZ.noise2(x / 840, y / 840) + 0.55 * NZ.noise2(x / 310 + 9.2, y / 310 + 4.1);
+  const dx = x - SWX, dy = y - SWY, r = Math.hypot(dx, dy) || 1, g = Math.exp(-(r * r) / (2 * 350 * 350));
+  const vx = Math.cos(th) * (1 - 0.92 * g) + (-dy / r) * 1.5 * g - (dx / r) * 0.3 * g, vy = Math.sin(th) * (1 - 0.92 * g) + (dx / r) * 1.5 * g - (dy / r) * 0.3 * g, l = Math.hypot(vx, vy) || 1;
+  return [vx / l, vy / l];
+}
+// colour regions: a slow noise, cut at its quartiles so the four inks share the page evenly
+const regionVal = (x, y) => NZ.fbm2(x / 760 + 3.1, y / 760 + 7.7, 2) + 0.35 * Math.sin(Math.atan2(y - SWY, x - SWX) * 2 + Math.hypot(x - SWX, y - SWY) / 260);
+const QT = (() => { const v = []; for (let y = Y0; y < Y1; y += 24) for (let x = X0; x < X1; x += 24) v.push(regionVal(x, y)); v.sort((a, b) => a - b); return [v[Math.floor(v.length * 0.27)], v[Math.floor(v.length * 0.5)], v[Math.floor(v.length * 0.74)]]; })();
+let bg, ink, cap, rnd, parts, frameNo, total;
+
+function spawn(t) {
+  const r = rnd, late = t > 15.2;
+  let x, y; for (let tries = 0; tries < 6; tries++) { x = lerp(X0 - 20, X1 + 20, r()); y = lerp(Y0 - 20, Y1 + 20, r()); const d = Math.hypot(x - SWX, y - SWY), w = late ? Math.exp(-d * d / (2 * 420 * 420)) : 0.45 + 0.55 * Math.exp(-d * d / (2 * 560 * 560)); if (r() < w) break; }
+  const v = regionVal(x, y) + (r() - 0.5) * 0.16, region = v < QT[0] ? 3 : v < QT[1] ? 2 : v < QT[2] ? 1 : 0, early = t < 5.7;
+  parts.push({ x, y, k: late ? 4 : region, cls: late ? 0 : (r() < 0.3 ? 1 : 0), life: Math.round(early ? 260 + 260 * r() : late ? 200 + 240 * r() : 70 + 190 * r()), sp: 2.2 + 0.6 * r(), flip: 1 });
+  total++;
+}
+
+Stage.create({
+  no: 59, title: 'Flow Field', subtitle: 'four inks on paper · 84 bpm',
+  duration: 20, background: '#efe7d6', grain: 0.06, poster: 17.5, stateful: true,
+  fonts: ['500 14px "JetBrains Mono Variable"'],
+  fade: { in: 0.7, out: 1.2, color: '#efe7d6' },
+  slate: { at: 0.7, hold: 3.0, pos: 'bl', color: 'rgba(40,36,48,.82)', margin: 120 },
+
+  music(S) {
+    const M = S.score({ bpm: 84, duration: 20, seed: 59 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.4 }, fadeOut: 1.8 });
+    const pad = M.track('warmpad', { reverb: 0.6, gain: 0.6 }), arp = M.track('arp', { reverb: 0.4, gain: 0.5, pan: 0.15, delay: { time: 0.75, fb: 0.35, mix: 0.22 }, lowpass: (t) => 1100 + 2600 * smoothstep(3, 13, t) * (1 - smoothstep(16, 19.5, t)) });
+    const br = M.track('brush', { reverb: 0.25, gain: 0.3 }), sub = M.track('sub', { reverb: 0.05, gain: 0.36 }), felt = M.track('felt', { reverb: 0.5, gain: 0.7, pan: -0.2 });
+    const bars = [['Bb1', ['Bb2', 'F3', 'A3', 'C4', 'D4'], ['Bb3', 'D4', 'F4', 'A4', 'C5', 'A4', 'F4', 'D4']], ['G1', ['G2', 'D3', 'F3', 'A3', 'Bb3'], ['G3', 'Bb3', 'D4', 'F4', 'A4', 'F4', 'D4', 'Bb3']], ['Eb2', ['Eb2', 'Bb2', 'D3', 'F3', 'G3'], ['Eb3', 'G3', 'Bb3', 'D4', 'F4', 'D4', 'Bb3', 'G3']], ['F1', ['F2', 'C3', 'D3', 'G3', 'A3'], ['F3', 'A3', 'C4', 'D4', 'G4', 'D4', 'C4', 'A3']],
+      ['Bb1', ['Bb2', 'F3', 'A3', 'C4', 'D4'], ['Bb3', 'D4', 'F4', 'A4', 'C5', 'D5', 'C5', 'A4']], ['Eb2', ['Eb2', 'Bb2', 'D3', 'F3', 'G3'], ['Eb4', 'G4', 'Bb4', 'D5', 'F5', 'D5', 'Bb4', 'G4']], ['Bb1', ['Bb2', 'F3', 'C4', 'D4', 'A4'], ['Bb3', 'F4', 'C5', 'D5']]];
+    bars.forEach((b, i) => {
+      const t = i * 4; pad.chord(t, b[1], 4, i === 0 ? 0.4 : 0.5); if (i >= 1) sub.note(t, b[0], 3.7, 0.6);
+      if (i >= 1 && i < 6) arp.seq(t, 0.5, b[2], { vel: 0.5, dur: 0.6 }); if (i === 6) b[2].forEach((n, j) => arp.note(t + j * 1, n, 1.5, 0.4 - 0.05 * j));
+      if (i >= 2 && i < 6) br.pattern(t, 0.5, 'x.xxx.xx', { vel: 0.5 });
+    });
+    [[8, 'D5', 1.5], [9.5, 'F5', 1], [10.5, 'G5', 1.5], [12, 'A5', 2], [14.5, 'G5', 1], [15.5, 'F5', 0.5], [16, 'D5', 2], [18.5, 'C5', 1], [19.5, 'D5', 0.5], [20, 'F5', 2], [22, 'G5', 1], [23, 'Bb5', 1], [24, 'A5', 3]].forEach(([b, n, d]) => felt.note(b, n, d, 0.42));
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ink = Stage.canvas2d({ z: 2, dpr: 2 }); cap = Stage.canvas2d({ z: 3, dpr: 2 });
+    const c = bg, g = c.createRadialGradient(960, 500, 200, 960, 540, 1250); g.addColorStop(0, '#f3ecdc'); g.addColorStop(1, '#e6dcc7'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const r = Stage.rng(590); for (let i = 0; i < 9000; i++) { c.fillStyle = `rgba(${r() < 0.5 ? '120,100,70' : '255,250,240'},${0.03 + 0.05 * r()})`; c.fillRect(r() * W, r() * H, 1 + r() * 3, 1); }
+  },
+
+  reset() { rnd = Stage.rng(59); parts = []; frameNo = 0; total = 0; if (ink) { ink.clearRect(0, 0, W, H); } },
+
+  frame(t) {
+    const c = ink; if (!rnd) { rnd = Stage.rng(59); parts = []; frameNo = 0; total = 0; }
+    // how many new strokes start this frame
+    const rate = t < 1.2 ? 0 : t < 5.7 ? lerp(1.2, 3.2, (t - 1.2) / 4.5) : t < 15.2 ? lerp(6, 17, smoothstep(5.7, 10, t)) * (1 - 0.55 * smoothstep(12.5, 15.2, t)) : t < 18.0 ? 2.6 : 0;
+    let n = Math.floor(rate) + (rnd() < rate % 1 ? 1 : 0); while (n-- > 0) spawn(t);
+    c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip(); c.lineCap = 'round'; c.lineJoin = 'round';
+    // one path per ink and weight
+    for (let k = 0; k < 5; k++) for (let cls = 0; cls < 2; cls++) {
+      c.beginPath(); let any = false;
+      for (const p of parts) {
+        if (p.k !== k || p.cls !== cls) continue; any = true; c.moveTo(p.x, p.y);
+        for (let s = 0; s < 3; s++) { const d = dir(p.x, p.y); p.x += d[0] * p.sp; p.y += d[1] * p.sp; c.lineTo(p.x, p.y); p.life--; }
+        if (p.life <= 0 || p.x < X0 - 30 || p.x > X1 + 30 || p.y < Y0 - 30 || p.y > Y1 + 30 || Math.hypot(p.x - SWX, p.y - SWY) < 10) p.dead = true;
+      }
+      if (!any) continue;
+      c.strokeStyle = INKS[k]; c.globalAlpha = k === 4 ? 0.5 : t < 5.7 ? 0.42 : cls ? 0.3 : 0.17; c.lineWidth = k === 4 ? 0.9 : cls ? 1.5 : 0.8; c.stroke();
+    }
+    c.restore(); parts = parts.filter((p) => !p.dead); frameNo++;
+    // caption in the margin
+    const m = cap; m.clearRect(0, 0, W, H); const on = prog(t, 4.2, 1.0) * (1 - prog(t, 18.8, 1.0));
+    m.font = '500 14px "JetBrains Mono Variable"'; m.textBaseline = 'alphabetic'; m.textAlign = 'right'; m.fillStyle = `rgba(40,36,48,${0.6 * on})`;
+    m.fillText('S T R O K E S   ' + String(total).padStart(5, '0'), X1, 968);
+    INKS.slice(0, 4).forEach((col, i) => { m.fillStyle = Stage.color.alpha(col, 0.9 * on); m.fillRect(X1 - 250 - i * 22, 956, 14, 14); });
+    if (t > 15.2) { m.fillStyle = Stage.color.alpha(INKS[4], 0.9 * on * prog(t, 15.2, 0.6)); m.fillRect(X1 - 250 - 4 * 22, 956, 14, 14); }
+  }
+});
+</script>
+</body>
+</html>

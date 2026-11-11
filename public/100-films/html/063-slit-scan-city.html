@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 063 — Slit-Scan City</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/063-skyline.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 063 — SLIT-SCAN CITY
+ * One generated photograph of an invented skyline at night, played like an instrument. A fragment shader
+ * resamples it three ways: rows dragged sideways into streaks on every kick; the towers swaying as a shear
+ * wave that the water repeats a moment late; and, for two bars, every light pulled straight up (and its
+ * reflection straight down) into a curtain of streaks — a long exposure with the camera tilting. Then it all
+ * lets go and the city is sharp again. Eight bars at 120 bpm (2 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+let sh, img;
+
+const FRAG = `
+uniform sampler2D uImg;
+uniform float uKick, uSmear, uCurtain, uCurtainLag, uWarp, uZoom, uBar;
+const float HZ = 0.336;          // horizon, in image uv measured from the bottom
+vec3 img(vec2 p) { return texture(uImg, clamp(p, vec2(0.002), vec2(0.998))).rgb; }
+void main() {
+  // cover-fit a 2:1 photograph into 16:9, with a slow push toward the tallest tower
+  float asp = (uRes.x / uRes.y) / 2.0;
+  vec2 p = (vUv - 0.5) / uZoom; p.x *= asp; p += vec2(0.5 + 0.012 * (uZoom - 1.0) * 6.0, 0.5 - 0.035 * (uZoom - 1.0) * 6.0);
+  bool water = p.y < HZ;
+  float h = abs(p.y - HZ);
+  // 1 · shear wave: towers sway from the waterline up; the reflection repeats it later
+  float ph = uTime * PI - h * 9.0 - (water ? 1.1 : 0.0);
+  p.x += uWarp * 0.045 * sin(ph) * smoothstep(0.0, 0.5, h) * (water ? 1.25 : 1.0);
+  // 2 · rows dragged sideways on the kick (bands of rows, re-dealt every bar)
+  float band = smoothstep(0.3, 0.8, vnoise(vec2(p.y * 7.0 + (water ? 3.0 : 0.0), uBar * 7.3))) * smoothstep(0.0, 0.03, h);
+  float a = uSmear * (0.18 + 0.82 * uKick) * band * 0.13 * (water ? 1.3 : 1.0);
+  float dirn = mod(uBar, 2.0) < 0.5 ? 1.0 : -1.0;
+  vec3 col = img(p), mx = col; float wsum = 1.0;
+  if (a > 0.0005) {
+    float hj = hash21(gl_FragCoord.xy * 1.37) / 48.0;
+    for (int i = 1; i <= 48; i++) { float k = float(i) / 48.0 - hj, w = 1.0 - 0.8 * k; vec3 s = img(p + vec2(dirn * a * k, 0.0)); col += s * w; wsum += w; mx = max(mx, s * (1.0 - 0.55 * k)); }
+    col = mix(col / wsum, mx, 0.5);
+  }
+  // 3 · the curtain: every light pulled up into the sky, every reflection down into the water
+  float L = water ? uCurtainLag * (0.46 + 0.16 * uKick) : uCurtain * (0.56 + 0.16 * uKick);
+  if (L > 0.002) {
+    vec3 st = vec3(0.0), ac = vec3(0.0); float jit = (hash21(gl_FragCoord.xy * 0.73) - 0.5) / 110.0;
+    for (int i = 0; i < 110; i++) {
+      float k = (float(i) + 0.5) / 110.0 + jit; vec2 q = p;
+      q.y = water ? min(HZ - 0.004, p.y + L * k) : max(HZ + 0.004, p.y - L * k);
+      // drift each streak's source sideways a hair so the curtain shimmers instead of freezing
+      q.x += 0.0025 * sin(uTime * 2.3 + p.x * 60.0) * k;
+      vec3 s = img(q); float lum = dot(s, vec3(0.3, 0.55, 0.15));
+      vec3 c2 = s * smoothstep(0.22, 0.7, lum) * pow(1.0 - k, 1.35); st = max(st, c2); ac += c2;
+    }
+    st = mix(st, ac / 110.0 * 5.0, 0.45);
+    col = max(col, st * 1.12) + st * 0.22;
+  }
+  // grade: keep the blues deep, let the ambers glow
+  col = pow(col, vec3(1.06)) * 1.04;
+  vec2 v = vUv - 0.5; col *= 1.0 - 0.42 * dot(v, v) * 1.6;
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+Stage.create({
+  no: 63, title: 'Slit-Scan City', subtitle: 'one photograph, played · 120 bpm',
+  duration: 16, background: '#040818', grain: 0.04, poster: 9.3,
+  fade: { in: 0.9, out: 1.2 },
+  slate: { at: 0.7, hold: 2.6, pos: 'bl', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 63 });
+    M.master({ reverb: { decay: 2.6, size: 1.0, damp: 0.45 }, fadeOut: 1.6 });
+    const pad = M.track('pad', { reverb: 0.6, gain: 0.5 }), arp = M.track('arp', { reverb: 0.3, gain: 0.74, pan: 0.15, delay: { time: 0.75, fb: 0.38, mix: 0.25 }, lowpass: (t) => 900 + 5200 * smoothstep(4, 10, t) * (1 - smoothstep(12, 14.5, t)), duck: { by: 'softkick', depth: 0.35 } });
+    const reese = M.track('reese', { reverb: 0.08, gain: 0.27, lowpass: (t) => 260 + 900 * smoothstep(7, 9, t) * (1 - smoothstep(12, 13.5, t)), duck: { by: 'softkick', depth: 0.5 } }), kick = M.track('softkick', { reverb: 0.05, gain: 0.85 });
+    const hat = M.track('hat', { reverb: 0.1, gain: 0.42 }), ris = M.track('riser', { reverb: 0.4, gain: 0.3 }), imp = M.track('impact', { reverb: 0.5, gain: 0.45 }), bell = M.track('glass', { reverb: 0.65, gain: 0.4 }), clap = M.track('clap', { reverb: 0.3, gain: 0.26 });
+    const bars = [['D2', ['D3', 'A3', 'E4', 'F4']], ['D2', ['D3', 'A3', 'E4', 'F4']], ['Bb1', ['Bb2', 'F3', 'A3', 'D4']], ['C2', ['C3', 'G3', 'Bb3', 'E4']], ['D2', ['D3', 'A3', 'C4', 'F4']], ['Bb1', ['Bb2', 'F3', 'A3', 'D4']], ['G1', ['G2', 'D3', 'F3', 'Bb3']], ['D2', ['D3', 'A3', 'E4', 'F4']]];
+    const pat = [0, 1, 2, 3, 2, 1, 3, 2, 0, 2, 3, 1, 2, 3, 1, 2];
+    bars.forEach(([root, ch], i) => {
+      const b = i * 4; pad.chord(b, ch, 4, i < 2 ? 0.45 : 0.5);
+      if (i >= 2 && i < 7) { pat.forEach((k, s) => arp.note(b + s * 0.25, S.midi(ch[k]) + 12, 0.22, s % 4 === 0 ? 0.55 : 0.4)); reese.note(b, root, 3.8, 0.7); }
+      if (i === 2 || i === 3) { kick.pattern(b, 1, 'x.x.', { vel: 0.9 }); hat.pattern(b, 0.5, '..x...x.', { vel: 0.4 }); }
+      if (i === 4 || i === 5) { kick.pattern(b, 1, 'xxxx', { vel: 0.95 }); hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.5 }); clap.pattern(b, 1, '.x.x', { vel: 0.5 }); }
+      if (i === 6) kick.pattern(b, 1, 'x.x.', { vel: 0.8 });
+    });
+    [[0, 'A5'], [1.5, 'F5'], [3, 'E5'], [4, 'D5'], [5.5, 'F5'], [7, 'A5']].forEach(([b, n]) => bell.note(b, n, 2, 0.4));
+    ris.hit(12, 0.7, 4); imp.hit(16, 0.8, 3); imp.hit(24, 0.5, 2);
+    bell.chord(28, ['D5', 'A5', 'E6'], 4, 0.4); reese.note(28, 'D1', 3, 0.4);
+    return M;
+  },
+
+  async setup() { img = await Stage.image('063-skyline'); sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const cur = (x) => prog(x, 7.7, 0.55, E.outCubic) * (1 - prog(x, 11.9, 1.25, E.inOutCubic));
+    sh.draw(t, {
+      uImg: img, uKick: Stage.hit('softkick', t, 0.26), uBar: Math.floor(t / 2),
+      uSmear: win(t, 4, 8.1, 0.25, 0.5) + 0.3 * win(t, 8, 13.6, 0.5, 0.8), uWarp: win(t, 3.6, 13.4, 2.2, 1.2),
+      uCurtain: cur(t), uCurtainLag: cur(t - 0.3), uZoom: lerp(1.0, 1.13, E.inOutSine(clamp01(t / 16)))
+    });
+  }
+});
+</script>
+</body>
+</html>

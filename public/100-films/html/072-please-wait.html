@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 072 — Please Wait</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 072 — PLEASE WAIT
+ * Nine loading spinners perform as a tiny orchestra. Each tile is wired to one instrument and moves only when
+ * its part plays — the orbit steps on marimba notes, the bars jump on woodblock hits, the digit flips on the
+ * clap, the liquid rises a notch per kick — so the picture is the score. One loader alone, then two more a
+ * bar until all nine groove; on the downbeat of bar 8 everything finishes at once. Eight bars at 120 bpm. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, TILE = 264, GAP = 32, GX = (W - 3 * TILE - 2 * GAP) / 2, GY = 78, T_DONE = 14, MINT = '#7df2c4';
+// tile → instrument, and the bar it joins
+const PART = [['marimba', 1], ['tick', 3], ['pluck', 2], ['clap', 3], ['kick', 5], ['woodblock', 2], ['bass', 4], ['kalimba', 5], ['shaker', 4]];
+let bg, ctx;
+const ev = (n) => Stage.events(n) || [], cnt = (n, t) => Stage.count(n, t), since = (n, t) => { const e = Stage.lastEvent(n, t); return e ? t - e.t : 9; };
+
+const LOADERS = {
+  // orbiting dots: the bright head steps one place per note
+  marimba(c, t) { const k = cnt('marimba', t), a = (k - 1 + E.outCubic(clamp01(since('marimba', t) / 0.16))) * TAU / 8 - TAU / 4; for (let i = 0; i < 8; i++) { const an = a - i * TAU / 8, f = 1 - i / 8; c.fillStyle = i === 0 ? MINT : `rgba(255,255,255,${0.2 + 0.8 * f * f})`; c.beginPath(); c.arc(Math.cos(an) * 62, Math.sin(an) * 62, 5 + 9 * f, 0, TAU); c.fill(); } },
+  // drawing circle: one sixteenth of the ring per tick
+  tick(c, t) { const k = cnt('tick', t), n = k % 16, p = (n + E.outCubic(clamp01(since('tick', t) / 0.08)) - 1) / 16, wrap = n === 0 && k > 0 ? clamp01(since('tick', t) / 0.12) : 0; c.strokeStyle = 'rgba(255,255,255,.2)'; c.lineWidth = 10; c.beginPath(); c.arc(0, 0, 62, 0, TAU); c.stroke(); const end = -TAU / 4 + TAU * (n === 0 && k > 0 ? 1 : clamp01(p)), start = -TAU / 4 + TAU * wrap; c.strokeStyle = '#fff'; c.lineCap = 'round'; c.beginPath(); c.arc(0, 0, 62, start, Math.max(start, end)); c.stroke(); c.fillStyle = MINT; c.beginPath(); c.arc(Math.cos(end) * 62, Math.sin(end) * 62, 9, 0, TAU); c.fill(); },
+  // morphing square: each note turns it an eighth and swaps square for circle
+  pluck(c, t) { const k = cnt('pluck', t), p = E.outBack(clamp01(since('pluck', t) / 0.22)), m = k % 2 ? p : 1 - p, rot = (k - 1 + p) * TAU / 8, s = 104 + 14 * Math.exp(-since('pluck', t) * 9); c.save(); c.rotate(rot); c.fillStyle = '#fff'; c.beginPath(); c.roundRect(-s / 2, -s / 2, s, s, lerp(14, s / 2, clamp01(m))); c.fill(); c.fillStyle = MINT; c.beginPath(); c.arc(0, 0, 11, 0, TAU); c.fill(); c.restore(); },
+  // flip digit: one up per clap
+  clap(c, t) { const k = cnt('clap', t), p = clamp01(since('clap', t) / 0.2), d = p < 0.5 && k > 0 ? (k - 1) % 10 : k % 10, sy = k > 0 ? Math.abs(Math.cos(Math.PI * p)) : 1; c.save(); c.scale(1, Math.max(0.04, sy)); c.fillStyle = '#fff'; c.beginPath(); c.roundRect(-58, -76, 116, 152, 18); c.fill(); c.fillStyle = '#1b3fb8'; c.font = '700 112px "JetBrains Mono Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(d), 0, 6); c.restore(); c.fillStyle = '#2148c9'; c.fillRect(-58, -2, 116, 4); c.fillStyle = MINT; c.fillRect(-70, -3, 10, 6); c.fillRect(60, -3, 10, 6); },
+  // liquid fill: a notch per kick, with slosh
+  kick(c, t) { const k = cnt('kick', t), n = k % 8, lv = (n === 0 && k > 0 ? 8 * (1 - E.inCubic(clamp01(since('kick', t) / 0.3))) : n - 1 + E.outCubic(clamp01(since('kick', t) / 0.2))) / 8, sl = 9 * Math.exp(-since('kick', t) * 4), R = 66; c.save(); c.beginPath(); c.arc(0, 0, R, 0, TAU); c.clip(); const y0 = R - 2 * R * clamp01(lv); c.fillStyle = '#fff'; c.beginPath(); c.moveTo(-R, R); for (let x = -R; x <= R; x += 6) c.lineTo(x, y0 + sl * Math.sin(x * 0.06 + t * 14) + 2 * Math.sin(x * 0.11 - t * 5)); c.lineTo(R, R); c.closePath(); c.fill(); c.restore(); c.strokeStyle = '#fff'; c.lineWidth = 7; c.beginPath(); c.arc(0, 0, R + 6, 0, TAU); c.stroke(); c.fillStyle = MINT; c.beginPath(); c.arc(0, -R - 6, 8, 0, TAU); c.fill(); },
+  // bouncing bars: each hit kicks the next bar
+  woodblock(c, t) { const e = ev('woodblock'), k = cnt('woodblock', t); for (let i = 0; i < 5; i++) { let last = -9; for (let j = k - 1; j >= 0 && j > k - 6; j--) if (j % 5 === i) { last = e[j].t; break; } const h = 26 + 96 * Math.exp(-(t - last) * 4.5); c.fillStyle = (k - 1) % 5 === i && k > 0 ? MINT : '#fff'; c.beginPath(); c.roundRect(-78 + i * 34, 62 - h, 20, h, 10); c.fill(); } },
+  // stacking blocks: one per bass note, three high, then away
+  bass(c, t) { const k = cnt('bass', t), n = k % 4, p = clamp01(since('bass', t) / 0.26); for (let i = 0; i < 3; i++) { let y = 44 - i * 42, a = 1; if (n === 0 && k > 0) { a = 1 - p; y += 30 * E.inCubic(p); } else if (i >= n) continue; else if (i === n - 1) y -= 90 * (1 - E.outBounce(p)); c.globalAlpha *= a; c.fillStyle = i === 2 ? MINT : '#fff'; c.beginPath(); c.roundRect(-58 + i * 6, y - 16, 116 - i * 12, 32, 9); c.fill(); c.globalAlpha /= Math.max(a, 1e-3); } c.fillStyle = 'rgba(255,255,255,.3)'; c.fillRect(-74, 66, 148, 4); },
+  // typing ellipsis: a dot per note, cleared at the bar line
+  kalimba(c, t) { const e = ev('kalimba'), bar = Math.floor(t / 2); let n = 0, last = -9; for (const x of e) if (x.t <= t && Math.floor(x.t / 2 + 1e-6) === bar) { n++; last = x.t; } for (let i = 0; i < 3; i++) { const on = i < n, p = on && i === n - 1 ? E.outBack(clamp01((t - last) / 0.2)) : on ? 1 : 0; c.fillStyle = on ? '#fff' : 'rgba(255,255,255,.2)'; c.beginPath(); c.arc(-46 + i * 46, 0, on ? 15 * p : 7, 0, TAU); c.fill(); } if (Math.floor(t * 4) % 2 === 0) { c.fillStyle = MINT; c.fillRect(-46 + Math.min(3, n) * 46 - 8, -24, 6, 48); } },
+  // pendulum: side to side on the shaker
+  shaker(c, t) { const k = cnt('shaker', t), p = E.inOutSine(clamp01(since('shaker', t) / 0.24)), tgt = k % 2 ? 0.62 : -0.62, a = k === 0 ? 0 : lerp(-tgt, tgt, p), px = Math.sin(a) * 118, py = -70 + Math.cos(a) * 118; c.strokeStyle = '#fff'; c.lineWidth = 6; c.lineCap = 'round'; c.beginPath(); c.moveTo(0, -70); c.lineTo(px, py); c.stroke(); c.fillStyle = '#fff'; c.beginPath(); c.arc(0, -70, 8, 0, TAU); c.fill(); c.fillStyle = MINT; c.beginPath(); c.arc(px, py, 19, 0, TAU); c.fill(); c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = 3; c.beginPath(); c.arc(0, -70, 118, Math.PI / 2 - 0.62, Math.PI / 2 + 0.62); c.stroke(); }
+};
+
+Stage.create({
+  no: 72, title: 'Please Wait', subtitle: 'nine loaders, one groove · 120 bpm',
+  duration: 16, background: '#1f47c8', grain: 0.035, poster: 11.2,
+  fonts: ['700 112px "JetBrains Mono Variable"', '600 12px "JetBrains Mono Variable"', '600 34px "Manrope Variable"'],
+  fade: { in: 0.5, out: 0.9, color: '#1a3db0' },
+  slate: { at: 0.5, hold: 2.6, pos: 'bl', color: 'rgba(255,255,255,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 16, seed: 72 });
+    M.master({ reverb: { decay: 1.2, size: 0.7, damp: 0.5 }, fadeOut: 0.6 });
+    const T = { marimba: M.track('marimba', { reverb: 0.3, gain: 0.8, pan: -0.3, humanize: 0 }), tick: M.track('tick', { reverb: 0.15, gain: 0.3, humanize: 0, params: { tone: 3400 } }), pluck: M.track('pluck', { reverb: 0.25, gain: 0.8, pan: 0.3, humanize: 0 }), clap: M.track('clap', { reverb: 0.25, gain: 0.5, humanize: 0 }),
+      kick: M.track('kick', { reverb: 0.05, gain: 0.75, humanize: 0 }), woodblock: M.track('woodblock', { reverb: 0.2, gain: 0.5, pan: 0.4, humanize: 0 }), bass: M.track('bass', { reverb: 0.05, gain: 0.6, humanize: 0, lowpass: 700 }), kalimba: M.track('kalimba', { reverb: 0.4, gain: 0.8, pan: -0.15, humanize: 0 }), shaker: M.track('shaker', { reverb: 0.12, gain: 0.3, pan: -0.4, humanize: 0 }) };
+    const from = Object.fromEntries(PART), chords = [['C2', ['C4', 'E4', 'G4'], ['E5', 'G5', 'C6']], ['A1', ['C4', 'E4', 'A4'], ['E5', 'A5', 'C6']], ['F1', ['C4', 'F4', 'A4'], ['F5', 'A5', 'C6']], ['G1', ['B3', 'D4', 'G4'], ['D5', 'G5', 'B5']]];
+    const mel = [['C5', 'E5', 'G5', 'E5', 'A5', 'G5', 'E5', 'D5'], ['C5', 'E5', 'A5', 'E5', 'C6', 'A5', 'E5', 'C5'], ['F5', 'A5', 'C6', 'A5', 'F5', 'A5', 'G5', 'F5'], ['G5', 'B5', 'D6', 'B5', 'G5', 'D5', 'E5', 'G5']];
+    for (let bar = 0; bar < 7; bar++) {
+      const b = bar * 4, ch = chords[bar % 4], on = (n) => bar + 1 >= from[n];
+      if (on('marimba')) mel[bar % 4].forEach((n, i) => T.marimba.note(b + i * 0.5, n, 0.4, i % 2 ? 0.45 : 0.6));
+      if (on('pluck')) [0, 1, 2, 3].forEach((i) => T.pluck.note(b + i + 0.5, ch[1][i % 3], 0.4, 0.55));
+      if (on('woodblock')) T.woodblock.pattern(b, 0.5, 'x..x..x.', { vel: 0.7 });
+      if (on('tick')) T.tick.pattern(b, 0.25, 'xxxxxxxxxxxxxxxx', { vel: 0.5 });
+      if (on('clap')) T.clap.pattern(b, 1, '.x.x', { vel: 0.8 });
+      if (on('bass')) { T.bass.note(b, ch[0], 0.8, 0.8); T.bass.note(b + 1.5, ch[0], 0.4, 0.6); T.bass.note(b + 2, S.midi(ch[0]) + 12, 0.8, 0.7); T.bass.note(b + 3.5, S.midi(ch[0]) + 7, 0.4, 0.6); }
+      if (on('shaker')) T.shaker.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.5 });
+      if (on('kick')) T.kick.pattern(b, 1, 'xxxx', { vel: 0.9 });
+      if (on('kalimba')) ch[2].forEach((n, i) => T.kalimba.note(b + i, n, 0.8, 0.6));
+    }
+    // done: one chord, everyone lands together
+    const fin = M.track('vibes', { reverb: 0.5, gain: 0.6 }); fin.chord(28, ['C4', 'G4', 'C5', 'E5', 'G5'], 4, 0.6); const fk = M.track('softkick', { reverb: 0.1, gain: 0.7 }); fk.hit(28, 1); const fb = M.track('sub', { reverb: 0.05, gain: 0.4 }); fb.note(28, 'C2', 2, 0.7); const fc = M.track('celesta', { reverb: 0.5, gain: 0.5 }); fc.note(29.25, 'G6', 1, 0.5); fc.note(29.5, 'C7', 2, 0.5);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    const g = bg.createRadialGradient(W / 2, H * 0.42, 100, W / 2, H / 2, 1200); g.addColorStop(0, '#2a57e0'); g.addColorStop(0.6, '#1f47c8'); g.addColorStop(1, '#14329a'); bg.fillStyle = g; bg.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    PART.forEach(([name, bar], i) => {
+      const col = i % 3, row = Math.floor(i / 3), cx = GX + col * (TILE + GAP) + TILE / 2, cy = GY + row * (TILE + GAP) + TILE / 2;
+      const tIn = (bar - 1) * 2, intro = prog(t, 0.15 + i * 0.05, 0.5, E.outCubic), live = t >= tIn && t < T_DONE, wake = prog(t, tIn - 0.12, 0.3, E.outCubic), pulse = live ? Math.exp(-since(name, t) * 9) : 0, done = prog(t, T_DONE + i * 0.03, 0.4, E.outCubic);
+      c.save(); c.translate(cx, cy + 24 * (1 - intro)); c.globalAlpha = intro; const s = 1 + 0.018 * pulse + 0.05 * Math.sin(Math.PI * clamp01((t - T_DONE) / 0.3)) * (t > T_DONE ? 1 : 0); c.scale(s, s);
+      // tile
+      c.fillStyle = `rgba(255,255,255,${lerp(0.055, 0.115, wake) + 0.03 * pulse})`; c.beginPath(); c.roundRect(-TILE / 2, -TILE / 2, TILE, TILE, 40); c.fill();
+      c.strokeStyle = done > 0 ? Stage.color.alpha(MINT, 0.7 * done) : `rgba(255,255,255,${0.1 + 0.16 * wake})`; c.lineWidth = 1.5; c.stroke();
+      // loader (dim until its part enters), then the check
+      if (done < 1) { c.save(); c.globalAlpha = intro * lerp(0.28, 1, wake) * (1 - done); const k = 1 - 0.3 * done; c.scale(k, k); c.translate(0, -8); LOADERS[name](c, live || t >= T_DONE ? Math.min(t, T_DONE - 0.001) : -1); c.restore(); }
+      if (done > 0) { const pts = [[-44, 2], [-14, 32], [48, -34]], l1 = Math.hypot(30, 30), l2 = Math.hypot(62, 66), L = (l1 + l2) * E.outCubic(done); c.strokeStyle = MINT; c.lineWidth = 13; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); c.moveTo(pts[0][0], pts[0][1] - 8); const u1 = Math.min(1, L / l1); c.lineTo(lerp(pts[0][0], pts[1][0], u1), lerp(pts[0][1], pts[1][1], u1) - 8); if (L > l1) { const u2 = (L - l1) / l2; c.lineTo(lerp(pts[1][0], pts[2][0], u2), lerp(pts[1][1], pts[2][1], u2) - 8); } c.stroke(); }
+      // instrument label
+      c.globalAlpha = intro * lerp(0.35, 0.7, wake); c.fillStyle = '#fff'; c.font = '600 12px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillText(name.toUpperCase().split('').join(' '), -TILE / 2 + 26, TILE / 2 - 24);
+      if (live) { c.fillStyle = MINT; c.globalAlpha = intro * (0.35 + 0.65 * pulse); c.beginPath(); c.arc(TILE / 2 - 30, TILE / 2 - 28, 4, 0, TAU); c.fill(); }
+      c.restore();
+    });
+    // done.
+    const d = prog(t, T_DONE + 0.55, 0.5, E.outCubic); if (d > 0) { c.globalAlpha = d; c.fillStyle = '#fff'; c.font = '600 34px "Manrope Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillText('done.', W / 2, 1010 + 10 * (1 - d)); c.globalAlpha = 1; }
+    else { const w = prog(t, 1.0, 0.6) * (1 - prog(t, T_DONE - 0.2, 0.2)); c.globalAlpha = 0.6 * w; c.fillStyle = '#fff'; c.font = '600 34px "Manrope Variable"'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillText('please wait' + '.'.repeat(1 + Math.floor(t * 2) % 3), W / 2, 1010); c.globalAlpha = 1; }
+  }
+});
+</script>
+</body>
+</html>

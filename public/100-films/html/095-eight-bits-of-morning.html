@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 095 — Eight Bits of Morning</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 095 — EIGHT BITS OF MORNING
+ * An original pixel-art landscape wakes up, the old way. The picture is a 320×180 buffer of palette indices
+ * — sixteen colours, no more — plotted every frame and only then turned into colour. Sunrise never touches
+ * a pixel: it moves the palette (night → dawn → morning). The waterfall and the lake shimmer are palette
+ * cycling: three slots trade places every sixth of a second. The sky gradient is a 4×4 ordered dither between
+ * neighbouring sky slots. Four layers scroll at whole-pixel steps. Scaled ×6 with hard edges.
+ * Ten bars at 150 bpm (1.6 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const PW = 320, PH = 180, BAR = 1.6;
+const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+//           0 sky top   1          2          3          4 horizon  5 far mtn  6 mid mtn  7 near     8 pine hi  9 lake     10 cyc A   11 cyc B   12 cyc C   13 cabin   14 light   15 white
+const NIGHT = ['#0a0e2c', '#101840', '#182456', '#22326a', '#2e4280', '#1b2856', '#131c42', '#090e24', '#152446', '#0f1a46', '#1a2a5e', '#263a76', '#3a528e', '#0b0b1a', '#ffd27a', '#e6eaff'].map(hex);
+const DAWN = ['#262866', '#573a7a', '#a4567a', '#e6886a', '#ffb268', '#49396e', '#312e5a', '#13162e', '#232e4a', '#3a3a76', '#6a4e86', '#ae687e', '#f09e6e', '#1b1322', '#ffd27a', '#fff0e0'].map(hex);
+const DAY = ['#62a8e6', '#8fc2ee', '#bedaf0', '#f4dcc6', '#ffc89e', '#8698c6', '#5c76a6', '#284642', '#4a785a', '#5a92c6', '#80b2e0', '#a6cef0', '#e2f2ff', '#583828', '#fff2b4', '#ffffff'].map(hex);
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const FONT = { G: '01111 10000 10111 10001 01110', O: '01110 10001 10001 10001 01110', D: '11110 10001 10001 10001 11110', M: '10001 11011 10101 10001 10001', R: '11110 10001 11110 10010 10001', N: '10001 11001 10101 10011 10001', I: '11111 00100 00100 00100 11111', ' ': '00000 00000 00000 00000 00000' };
+let ctx, buf, img, IDX, u32;
+// stepped ridge lines: value noise sampled on integers, so scrolling is exact
+const vn = (x, seed) => { const i = Math.floor(x), f = x - i, a = hash(i, seed), b = hash(i + 1, seed); return a + (b - a) * f * f * (3 - 2 * f); };
+const ridge = (x, seed, big, small, bw, sw) => Math.round(big * vn(x / bw, seed) + small * vn(x / sw, seed + 7) + 0.6 * small * Math.abs(((x / (sw * 0.5)) % 2) - 1));
+
+Stage.create({
+  no: 95, title: 'Eight Bits of Morning', subtitle: 'sixteen colours, one sunrise · 150 bpm',
+  duration: 16, background: '#0a0e2c', grain: 0, poster: 13.4,
+  fade: { in: 0.4, out: 0.8 },
+  slate: { at: 0.4, hold: 2.2, pos: 'bl', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 150, duration: 16, seed: 95 });
+    M.master({ reverb: { decay: 0.8, size: 0.5, damp: 0.6 }, fadeOut: 0.6 });
+    const lead = M.track('square', { reverb: 0.12, gain: 0.3, humanize: 0, delay: { time: 0.75, fb: 0.2, mix: 0.12 } }), bass = M.track('tri', { reverb: 0.05, gain: 0.55, humanize: 0 }), arp = M.track('square', { reverb: 0.1, gain: 0.13, pan: 0.3, humanize: 0 }), hat = M.track('hat', { reverb: 0.03, gain: 0.2, humanize: 0 }), sn = M.track('snare', { reverb: 0.06, gain: 0.26, humanize: 0 }), kick = M.track('kick', { reverb: 0.02, gain: 0.5, humanize: 0 });
+    const ch = [['C2', ['C4', 'E4', 'G4']], ['C2', ['C4', 'E4', 'G4']], ['F2', ['C4', 'F4', 'A4']], ['G2', ['B3', 'D4', 'G4']], ['C2', ['C4', 'E4', 'G4']], ['A1', ['C4', 'E4', 'A4']], ['F2', ['C4', 'F4', 'A4']], ['G2', ['B3', 'D4', 'G4']], ['C2', ['C4', 'E4', 'G4']], ['C2', ['C4', 'E4', 'G4']]];
+    const mel = [null, null, ['A5', null, 'C6', 'A5', 'F5', null, 'A5', null], ['G5', null, 'B5', 'D6', 'B5', null, 'G5', null], ['E5', 'G5', 'C6', null, 'E6', null, 'C6', 'G5'], ['A5', 'C6', 'E6', null, 'C6', 'A5', 'E5', null], ['F5', 'A5', 'C6', 'F6', null, 'C6', 'A5', 'C6'], ['G5', 'B5', 'D6', 'G6', null, 'F6', 'D6', 'B5'], ['C6', null, 'G5', 'C6', 'E6', null, 'G6', null], ['C7', null, null, null, null, null, null, null]];
+    ch.forEach(([r, c], i) => {
+      const b = i * 4, quiet = i < 2, m = S.midi(r);
+      if (quiet) { bass.note(b, r, 3.6, 0.5); for (let k = 0; k < 8; k++) arp.note(b + k * 0.5, c[k % 3], 0.2, 0.5); }
+      else if (i < 9) { [0, 1, 2, 3].forEach((q) => { bass.note(b + q, q % 2 ? m + 12 : m, 0.4, 0.7); bass.note(b + q + 0.5, m + 7, 0.3, 0.5); }); for (let k = 0; k < 16; k++) arp.note(b + k * 0.25, S.midi(c[k % 3]) + (k % 6 > 2 ? 12 : 0), 0.12, 0.5); hat.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.45 }); sn.pattern(b, 1, '.x.x', { vel: 0.6 }); kick.pattern(b, 1, 'x.x.', { vel: 0.8 }); }
+      else { bass.note(b, r, 2, 0.7); arp.chord(b, c, 0.5, 0.6); kick.hit(b, 0.9); }
+      if (mel[i]) mel[i].forEach((n, k) => { if (n) lead.note(b + k * 0.5, n, i === 9 ? 2 : 0.4, 0.6); });
+    });
+    // two birds' worth of chirps
+    [[9.5, 'E7'], [9.75, 'G7'], [11.5, 'E7'], [11.75, 'A7']].forEach(([b, n]) => arp.note(b, n, 0.1, 0.8));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 }); buf = Stage.buffer(PW, PH); img = buf.createImageData(PW, PH); IDX = new Uint8Array(PW * PH); u32 = new Uint32Array(img.data.buffer);
+  },
+
+  frame(t) {
+    // ── palette: night → dawn → morning; slots 10–12 cycle ──
+    const s = 0.5 * smoothstep(2.4, 7.6, t) + 0.5 * smoothstep(7.6, 11.6, t), pal = new Uint32Array(16), cyc = Math.floor(t * 6) % 3;
+    for (let i = 0; i < 16; i++) { const src = i >= 10 && i <= 12 ? 10 + ((i - 10 + cyc) % 3) : i, a = s < 0.5 ? NIGHT[src] : DAWN[src], b = s < 0.5 ? DAWN[src] : DAY[src], u = s < 0.5 ? s * 2 : s * 2 - 2 + 1, q = (k) => Math.round(lerp(a[k], b[k], u) / 8) * 8; pal[i] = 0xff000000 | (Math.min(255, q(2)) << 16) | (Math.min(255, q(1)) << 8) | Math.min(255, q(0)); }
+    if (t > 13.0) pal[14] = pal[14];
+    const P = (x, y, c) => { if (x >= 0 && x < PW && y >= 0 && y < PH) IDX[y * PW + x] = c; };
+    // ── sky: ordered dither between neighbouring sky slots ──
+    for (let y = 0; y < PH; y++) { const g = clamp01(y / 118) * 4, lo = Math.min(3, Math.floor(g)), fr = g - lo; for (let x = 0; x < PW; x++) IDX[y * PW + x] = lo + (fr * 16 > BAYER[(y & 3) * 4 + (x & 3)] + 0.5 ? 1 : 0); }
+    // stars fade one by one
+    for (let i = 0; i < 70; i++) { const x = Math.floor(hash(i, 1) * PW), y = Math.floor(hash(i, 2) * 96), on = hash(i, 3) > s * 2.4 && (Math.floor(t * 3 + hash(i, 4) * 9) % 7 !== 0); if (on) P(x, y, 15); }
+    // sun: rises behind the far ridge, clears it in bar 6
+    const sy = Math.round(lerp(132, 60, E.inOutSine(prog(t, 3.2, 8.6)))), sx = 214; for (let dy = -9; dy <= 9; dy++) for (let dx = -9; dx <= 9; dx++) if (dx * dx + dy * dy <= 84) P(sx + dx, sy + dy, 14);
+    // clouds, drifting a pixel at a time
+    for (let k = 0; k < 4; k++) { const cx = Math.floor(Stage.mod(hash(k, 5) * 420 - t * (1.5 + k * 0.7), 420)) - 50, cy = 20 + Math.floor(hash(k, 6) * 44), w = 22 + Math.floor(hash(k, 7) * 20); for (let dy = 0; dy < 6; dy++) { const inset = [6, 2, 0, 0, 1, 4][dy]; for (let dx = inset; dx < w - inset; dx++) if (dy > 1 || (dx % 9) < 6) P(cx + dx, cy + dy, dy < 2 ? 15 : 4); } }
+    // birds cross in bars 3–5
+    for (let k = 0; k < 3; k++) { const bt = t - 3.4 - k * 0.7; if (bt > 0 && bt < 6) { const x = Math.floor(330 - bt * 62), y = 44 + k * 9 + Math.round(3 * Math.sin(bt * 2 + k)), fl = Math.floor(bt * 6) % 2; P(x, y, 13); P(x + 1, y + (fl ? -1 : 1), 13); P(x - 1, y + (fl ? -1 : 1), 13); } }
+    // ── mountains: far, then middle with its waterfall ──
+    const o1 = Math.floor(t * 2), o2 = Math.floor(t * 4), o3 = Math.floor(t * 8);
+    for (let x = 0; x < PW; x++) { const wx = x + o1, h = 62 + ridge(wx, 11, 34, 9, 64, 13); for (let y = h; y < 132; y++) IDX[y * PW + x] = 5; if (h < 78) for (let y = h; y < h + Math.max(1, (78 - h) >> 2) + ((wx >> 1) & 1); y++) IDX[y * PW + x] = 15; }
+    for (let x = 0; x < PW; x++) { const wx = x + o2, h = 92 + ridge(wx, 23, 26, 6, 52, 9); for (let y = h; y < 132; y++) IDX[y * PW + x] = 6; const fx = Stage.mod(wx - 190, 520); if (fx < 4) for (let y = h + 2; y < 131; y++) IDX[y * PW + x] = 10 + ((y + (fx & 1) * 2) % 3); }
+    // ── lake: base colour, shimmer dashes in the cycling slots, the sun's path ──
+    for (let y = 130; y < PH; y++) for (let x = 0; x < PW; x++) { const wx = x + o2, row = y - 130, k = (wx + row * 5) % (11 + (row % 3) * 4); let c = 9; if (row % 2 === 0 && k < 3 + (row >> 3)) c = 10 + ((wx >> 2) + row) % 3; if (row % 2 === 0 && Math.abs(x - sx) < 2 + (row >> 2) && (x + row * 3 + Math.floor(t * 6)) % 5 < 3 && sy < 96) c = 14; IDX[y * PW + x] = c; }
+    for (let x = 0; x < PW; x++) if (((x + o2) >> 1) % 5 === 0) IDX[130 * PW + x] = 15;                    // a bright shoreline of foam
+    // ── near shore: ground, pines, the cabin and its smoke ──
+    for (let x = 0; x < PW; x++) { const wx = x + o3, h = 150 + ridge(wx, 37, 16, 4, 90, 17) + Math.round(8 * smoothstep(120, 320, x)); for (let y = h; y < PH; y++) IDX[y * PW + x] = y - h < 2 && ((wx + y) & 1) ? 8 : 7; }
+    for (let k = -1; k < 20; k++) { const wx0 = (Math.floor(o3 / 34) + k) * 34 + Math.floor(hash(Math.floor(o3 / 34) + k, 41) * 16), x0 = wx0 - o3, hh = 22 + Math.floor(hash(Math.floor(o3 / 34) + k, 42) * 22), base = 152 + ridge(wx0, 37, 16, 4, 90, 17) + Math.round(8 * smoothstep(120, 320, x0)); if (hash(Math.floor(o3 / 34) + k, 43) < 0.2) continue;
+      for (let y = 0; y < hh; y++) { const tier = y % 8, wdt = 1 + Math.floor((y / hh) * 7) + (tier >> 1); for (let dx = -wdt; dx <= wdt; dx++) P(x0 + dx, base - hh + y, dx < -wdt + 2 && tier < 5 ? 8 : 7); } for (let y = 0; y < 4; y++) P(x0, base + y, 13); }
+    const cxw = 236 - o3 + 96, cb = 151 + ridge(236 + 96, 37, 16, 4, 90, 17) + Math.round(8 * smoothstep(120, 320, cxw));
+    for (let y = 0; y < 11; y++) for (let x = 0; x < 18; x++) P(cxw + x, cb - 11 + y, 13); for (let y = 0; y < 7; y++) { const hw = 3 + Math.floor(y * 1.5); for (let x = 9 - hw; x <= 8 + hw; x++) P(cxw + x, cb - 17 + y, y < 1 ? 15 : 8); }
+    const lit = t < 11.2; for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) P(cxw + 4 + x, cb - 8 + y, lit ? 14 : 6); for (let y = 0; y < 5; y++) P(cxw + 13, cb - 5 + y, 8), P(cxw + 14, cb - 5 + y, 8); for (let y = 0; y < 5; y++) { P(cxw + 14, cb - 21 + y, 13); P(cxw + 15, cb - 21 + y, 13); }
+    if (t > 11.6) for (let k = 0; k < 6; k++) { const a = Stage.mod((t - 11.6) * 0.9 + k * 0.33, 2), yy = cb - 23 - Math.floor(a * 14), xx = cxw + 15 + Math.round(Math.sin(a * 4 + k) * 2 + a * 3), r = a < 0.6 ? 1 : 2; if (a < 1.8) for (let dy = 0; dy < r; dy++) for (let dx = 0; dx < r + 1; dx++) P(xx + dx, yy + dy, a > 1.2 ? 4 : 15); }
+    // ── GOOD MORNING, in a 5×5 face, one letter per frame-step ──
+    const tt = t - 8 * BAR; if (tt > 0) { const msg = 'GOOD MORNING', n = Math.min(msg.length, Math.floor(tt / 0.08)), x0 = (PW - msg.length * 6) / 2 | 0; for (let i = 0; i < n; i++) { const g = FONT[msg[i]].split(' '), hop = i === n - 1 && tt / 0.08 - n < 0.5 ? -1 : 0; for (let r = 0; r < 5; r++) for (let q = 0; q < 5; q++) if (g[r][q] === '1') { P(x0 + i * 6 + q + 1, 13 + r + hop, 5); P(x0 + i * 6 + q, 12 + r + hop, 15); } } }
+    // ── indices → colour → ×6 ──
+    for (let i = 0; i < IDX.length; i++) u32[i] = pal[IDX[i]];
+    buf.putImageData(img, 0, 0); const c = ctx; c.imageSmoothingEnabled = false; c.drawImage(buf.canvas, 0, 0, 1920, 1080);
+    // the sixteen slots, shown small
+    const on = prog(t, 1, 0.5) * (1 - prog(t, 15, 0.6)); for (let i = 0; i < 16; i++) { const v = pal[i]; c.globalAlpha = on; c.fillStyle = `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`; c.fillRect(1920 - 96 - (16 - i) * 18, 1080 - 54, 18, 12); } c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

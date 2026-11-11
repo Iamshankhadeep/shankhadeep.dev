@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 025 — Terminal</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 025 — TERMINAL
+ * A program types itself, runs, and its output is a field of ASCII waves that finally spells DONE.
+ * Everything is a grid of monospaced characters on a canvas. Eleven bars at 132 bpm (1.82 s each):
+ * typing (bars 1–3) → run → interference patterns building (4–9) → DONE → a blinking cursor. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, BAR = 240 / 132, FS = 27, CW = 16.2, CH = 33, COLS = 108, ROWS = 28, X0 = (W - COLS * CW) / 2, Y0 = 92;
+const GREEN = '126,240,156', AMBER = '255,186,84', RAMP = ' .:-=+*#%@';
+const CODE = [
+  '// waves.js — two ripples, one screen',
+  'const ramp = " .:-=+*#%@";',
+  '',
+  'for (let y = 0; y < rows; y++) {',
+  '  for (let x = 0; x < cols; x++) {',
+  '    const a = Math.sin(dist(x, y, p) * 0.35 - t * 3);',
+  '    const b = Math.sin(dist(x, y, q) * 0.35 - t * 3);',
+  '    put(x, y, ramp[shade(a + b)]);',
+  '  }',
+  '}'
+];
+const T_RUN = BAR * 3, T_DONE = BAR * 9, CMD1 = 'vim waves.js', CMD2 = 'node waves.js';
+const FONT5 = { D: ['11110', '10001', '10001', '10001', '10001', '10001', '11110'], O: ['01110', '10001', '10001', '10001', '10001', '10001', '01110'], N: ['10001', '11001', '10101', '10101', '10011', '10001', '10001'], E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'] };
+let ctx, buf, mask;
+
+Stage.create({
+  no: 25, title: 'Terminal', subtitle: 'ascii · canvas 2d · 132 bpm',
+  duration: 20, background: '#050806', grain: 0.07, poster: 13.5, vignette: 0.5,
+  fonts: [`500 ${FS}px "JetBrains Mono Variable"`, `700 ${FS}px "JetBrains Mono Variable"`],
+  slate: { at: 0.6, hold: 2.6, pos: 'br', color: 'rgba(126,240,156,.8)' },
+
+  music(S) {
+    const M = S.score({ bpm: 132, duration: 20, seed: 25 });
+    M.master({ reverb: { decay: 1.3, size: 0.7, damp: 0.5 }, fadeOut: 1.4 });
+    const hum = M.track('hum', { inst: 'warmpad', reverb: 0.4, gain: 0.55, lowpass: 600 }), room = M.track('air', { reverb: 0.1, gain: 1.4 });
+    hum.chord(0, ['D2', 'A2', 'D3'], 12, 0.6); room.hit(0, 0.8, 44);
+    const key = M.track('key', { inst: 'tick', reverb: 0.1, gain: 1.0, humanize: 0.5, params: { tone: 2100, decay: 0.003 } });
+    const sq = M.track('square', { reverb: 0.25, gain: 0.5, delay: { time: 0.75, fb: 0.3, mix: 0.2 }, lowpass: 3200 }), arp = M.track('arp', { reverb: 0.2, gain: 0.55, pan: 0.2 });
+    const acid = M.track('acid', { reverb: 0.1, gain: 0.5, lowpass: (t) => 500 + 2200 * smoothstep(T_RUN, T_DONE, t) }), kick = M.track('kick', { reverb: 0.03, gain: 0.8, params: { decay: 0.22 } });
+    const hat = M.track('hat', { reverb: 0.05, gain: 0.3 }), bell = M.track('celesta', { reverb: 0.5, gain: 0.6 });
+    // keystrokes: irregular sixteenths while the code is being typed
+    for (let b = 1; b < 11.5; b += 0.25) if (hash(b * 4, 7) < 0.74) key.hit(b, 0.5 + 0.4 * hash(b * 4, 8));
+    key.hit(11.75, 1, 1, { tone: 900, decay: 0.012 });
+    sq.seq(2, 1, ['D4', null, 'F4', null, 'A4', null, 'G4', 'F4', 'D4', null], { vel: 0.4, gate: 0.6 });                                   // return
+    const prog = ['Dm', 'Bb', 'F', 'C', 'Dm', 'Gm', 'Bb', 'A'];
+    for (let bar = 3; bar < 9; bar++) {
+      const b = bar * 4, c = prog[(bar - 3) % 8], n = S.chord(c, 3);
+      kick.pattern(b, 1, 'xxxx', { vel: 0.85 }); if (bar >= 4) hat.pattern(b, 0.5, '.x.x.x.x', { vel: 0.6 });
+      acid.seq(b, 0.5, [n[0] - 12, n[0], n[0] - 12, n[2] - 12, n[0] - 12, n[0], n[1] - 12, n[2] - 12], { vel: 0.8, gate: 0.7 });
+      if (bar >= 4) arp.arp(b, c, 0.25, 4, { octave: 4, octaves: 2, mode: 'updown', vel: 0.45, gate: 0.6 });
+      if (bar >= 5) sq.seq(b, 0.5, [n[2] + 24, null, n[1] + 24, n[0] + 24, null, n[2] + 12, n[1] + 24, null], { vel: 0.5 });
+    }
+    // DONE: four notes, one per letter
+    ['D5', 'F5', 'A5', 'D6'].forEach((p, i) => { bell.note(36 + i * 0.5, p, 2, 0.7); sq.note(36 + i * 0.5, p, 0.4, 0.5); });
+    kick.hit(36, 1); acid.note(36, 'D2', 2, 0.8); sq.chord(38, ['D4', 'A4', 'F5'], 3, 0.4);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 }); buf = Stage.buffer(W, H);
+    // block-letter mask for DONE, in character cells
+    mask = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
+    const sx = 4, sy = 3, wd = 4 * 5 * sx + 3 * 2 * sx, ox = Math.floor((COLS - wd) / 2), oy = Math.floor((ROWS - 7 * sy) / 2);
+    'DONE'.split('').forEach((ch, k) => FONT5[ch].forEach((row, j) => row.split('').forEach((bit, i) => { if (bit === '1') for (let y = 0; y < sy; y++) for (let x = 0; x < sx; x++) mask[oy + j * sy + y][ox + k * 7 * sx + i * sx + x] = 1; })));
+  },
+
+  frame(t) {
+    const c = buf; c.fillStyle = '#050806'; c.fillRect(0, 0, W, H);
+    c.textBaseline = 'top'; c.textAlign = 'left'; c.font = `500 ${FS}px "JetBrains Mono Variable"`;
+    const put = (s, col, row, color, bold) => { c.fillStyle = color; if (bold) c.font = `700 ${FS}px "JetBrains Mono Variable"`; c.fillText(s, X0 + col * CW, Y0 + row * CH); if (bold) c.font = `500 ${FS}px "JetBrains Mono Variable"`; };
+    const blink = Math.floor(t * 2.2) % 2 === 0;
+    if (t < T_RUN) {
+      // ── the editor: typed in bursts that follow the keystroke track
+      const keys = Stage.count('key', t), total = CODE.join('\n').length + CMD1.length + CMD2.length, typed = Math.floor(total * clamp01(keys / Stage.events('key').length) + 0.5);
+      let n = typed, row = 6;
+      put('~/films', 0, row, `rgba(${AMBER},.95)`); put('$', 8, row, `rgba(${GREEN},.6)`);
+      const c1 = CMD1.slice(0, n); put(c1, 10, row, `rgba(${GREEN},1)`); n -= CMD1.length; let cur = [10 + c1.length, row];
+      if (n > 0) {
+        row = 8;
+        for (let i = 0; i < CODE.length && n > 0; i++) {
+          const line = CODE[i], s = line.slice(0, n); put(String(i + 1).padStart(2, ' '), 0, row + i, `rgba(${GREEN},.32)`);
+          put(s, 4, row + i, i === 0 ? `rgba(${GREEN},.5)` : `rgba(${GREEN},1)`);
+          const m = s.match(/"[^"]*"?/); if (m && i > 0) put(m[0], 4 + s.indexOf(m[0]), row + i, `rgba(${AMBER},1)`);
+          cur = [4 + s.length, row + i]; n -= line.length + 1;
+        }
+        if (n > 0) { const r2 = row + CODE.length + 2; put('~/films', 0, r2, `rgba(${AMBER},.95)`); put('$', 8, r2, `rgba(${GREEN},.6)`); const c2 = CMD2.slice(0, n); put(c2, 10, r2, `rgba(${GREEN},1)`); cur = [10 + c2.length, r2]; }
+      }
+      if (blink || Stage.hit('key', t, 0.08) > 0.2) { c.fillStyle = `rgba(${GREEN},.9)`; c.fillRect(X0 + cur[0] * CW, Y0 + cur[1] * CH + 2, CW - 2, CH - 6); }
+    } else {
+      // ── the output: interfering ripples, more sources and more motion bar by bar; then the field becomes DONE
+      const u = t - T_RUN, build = smoothstep(0, BAR * 5, u), done = prog(t, T_DONE, 1.6, E.inOutCubic), kick = Stage.hit('kick', t, 0.2);
+      const src = [[COLS * (0.3 + 0.12 * Math.sin(u * 0.5)), ROWS * (0.5 + 0.3 * Math.cos(u * 0.4))], [COLS * (0.7 + 0.12 * Math.cos(u * 0.45)), ROWS * (0.5 + 0.3 * Math.sin(u * 0.36))], [COLS * (0.5 + 0.3 * Math.sin(u * 0.27)), ROWS * (0.5 + 0.35 * Math.sin(u * 0.61))]];
+      const wipe = prog(u, 0, 1.1, E.outCubic) * (COLS + ROWS);
+      for (let y = 0; y < ROWS; y++) {
+        let g = '', a = '', any = false;
+        for (let x = 0; x < COLS; x++) {
+          let ch = ' ', hot = false;
+          if (x + y < wipe) {
+            let v = 0, n = 0;
+            for (let k = 0; k < 3; k++) { const w = k === 0 ? 1 : k === 1 ? smoothstep(0.15, 0.4, build) : 0.45 * smoothstep(0.5, 0.8, build); if (w <= 0) continue; const d = Math.hypot((x - src[k][0]) * 0.5, y - src[k][1]); v += w * Math.sin(d * 0.72 - u * (3 + k * 0.7)) ; n += w; }
+            v = (v / n) * 0.5 + 0.5; v = smoothstep(0.2, 0.8, v); v = clamp01(v * (0.82 + 0.2 * kick));
+            if (done > 0) { const target = mask[y][x] ? 0.92 + 0.08 * Math.sin(u * 4 + x * 0.3) : 0.03 * (1 + Math.sin(d0(x, y) - u * 2)); const th = clamp01(done * 1.4 - hash(x * 131 + y, 4) * 0.4); v = lerp(v, target, th); }
+            const idx = Math.min(9, Math.floor(v * 10)); ch = RAMP[idx]; hot = idx >= 8;
+          }
+          g += hot ? ' ' : ch; a += hot ? ch : ' '; if (hot) any = true;
+        }
+        put(g, 0, y, `rgba(${GREEN},.95)`); if (any) put(a, 0, y, `rgba(${done > 0.6 ? GREEN : AMBER},1)`, true);
+      }
+      if (t > T_DONE + 2.4 && blink) { c.fillStyle = `rgba(${GREEN},.9)`; c.fillRect(X0 + 2 * CW, Y0 + (ROWS + 0.2) * CH, CW - 2, CH - 6); }
+      if (t > T_DONE + 2.0) { put('$', 0, ROWS + 0.2, `rgba(${GREEN},.6)`); }
+    }
+    // ── phosphor: sharp layer + bloom, faint scanlines
+    const m = ctx; m.globalCompositeOperation = 'source-over'; m.filter = 'none'; m.globalAlpha = 1; m.drawImage(c.canvas, 0, 0);
+    m.globalCompositeOperation = 'lighter'; m.filter = 'blur(7px)'; m.globalAlpha = 0.6; m.drawImage(c.canvas, 0, 0); m.filter = 'blur(26px)'; m.globalAlpha = 0.35; m.drawImage(c.canvas, 0, 0);
+    m.filter = 'none'; m.globalAlpha = 1; m.globalCompositeOperation = 'source-over';
+    m.fillStyle = 'rgba(0,0,0,.14)'; for (let y = 0; y < H; y += 3) m.fillRect(0, y, W, 1);
+  }
+});
+function d0(x, y) { return Math.hypot((x - 54) * 0.5, y - 14) * 0.6; }
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 070 — Night Market</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/070-market.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 070 — NIGHT MARKET
+ * A rainy alley of food stalls, alive with small light — one generated photograph and a shader that adds the
+ * weather: rain in two depths (lit by whatever is behind it), puddles that ripple where drops land so the
+ * reflections break and re-form, lanterns that breathe and bloom, steam climbing from the stalls, and soft
+ * bokeh discs sliding past the lens. The rain builds through bars 4–6 and eases off.
+ * Eight bars at 80 bpm, swung (3 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+let sh, img;
+
+const FRAG = `
+uniform sampler2D uImg;
+uniform float uZoom, uRain, uBloom;
+vec3 tex(vec2 p) { return texture(uImg, clamp(p, vec2(0.002), vec2(0.998))).rgb; }
+float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+float rain(vec2 uv, float cols, float k, float speed, float wd, float seed) {
+  uv.x += uv.y * 0.07; float cx = floor(uv.x * cols), fx = fract(uv.x * cols), r = hash11(cx * 1.37 + seed * 71.3);
+  float s = fract(uv.y * k * (0.8 + 0.5 * r) + uTime * speed * (0.8 + 0.5 * r) + r * 17.0);
+  float streak = smoothstep(0.80, 1.0, s) * smoothstep(1.0, 0.985, s);
+  return streak * smoothstep(wd, 0.0, abs(fx - 0.5)) * step(1.0 - 0.38 - 0.5 * uRain, hash11(cx * 3.11 + seed));
+}
+void main() {
+  vec2 p = (vUv - 0.5) / uZoom + vec2(0.5 + 0.03 * (uZoom - 1.0) * 4.0, 0.5 - 0.02 * (uZoom - 1.0) * 4.0);
+  float ground = smoothstep(0.43, 0.27, p.y);
+  // hanging lanterns sway a little
+  p.x += 0.0016 * sin(uTime * 1.2 + p.x * 14.0) * smoothstep(0.55, 0.9, p.y);
+  // puddles: drops land, rings spread, the reflection bends
+  vec2 q = p;
+  for (int i = 0; i < 12; i++) {
+    float fi = float(i), ph = uTime * (0.5 + 0.25 * hash11(fi * 3.7)) + hash11(fi * 9.1), cyc = floor(ph), tp = fract(ph);
+    vec2 c = vec2(0.08 + 0.84 * hash11(fi * 1.3 + cyc * 7.7), 0.03 + 0.34 * hash11(fi * 5.9 + cyc * 3.1));
+    vec2 d = (p - c) * vec2(1.0, 2.6 + 3.0 * (0.4 - c.y)); float r = length(d), rad = tp * 0.085;
+    float ring = sin((r - rad) * 150.0) * exp(-abs(r - rad) * 55.0) * (1.0 - tp) * (1.0 - tp);
+    q += normalize(d + 1e-5) * ring * 0.0045 * (0.4 + 0.6 * uRain);
+  }
+  q.x += 0.0012 * sin(p.y * 160.0 + uTime * 2.4) * ground; q.y += 0.0008 * sin(p.x * 90.0 - uTime * 1.7) * ground;
+  p = mix(p, q, ground);
+  vec3 col = tex(p);
+  // bloom: bright things spill; lanterns breathe
+  vec3 bl = vec3(0.0); for (int i = 0; i < 18; i++) { float a = float(i) * 2.39996, r = sqrt((float(i) + 0.5) / 18.0) * 0.034; vec3 s = tex(p + vec2(cos(a), sin(a) * 1.78) * r); bl += max(s - 0.55, 0.0); }
+  float flick = 0.82 + 0.36 * vnoise(vec2(p.x * 5.0 + 3.0, uTime * 2.6)) ;
+  col += bl / 18.0 * (0.7 + 1.5 * uBloom) * flick;
+  col *= 0.93 + 0.14 * flick * smoothstep(0.5, 0.9, lum(col));
+  // steam from the stalls
+  float st = smoothstep(0.42, 0.85, fbm(vec2(p.x * 4.2 + 0.05 * uTime, p.y * 3.2 - uTime * 0.2)));
+  float reg = exp(-(pow((p.x - 0.13) / 0.15, 2.0) + pow((p.y - 0.62) / 0.2, 2.0))) + 0.8 * exp(-(pow((p.x - 0.9) / 0.1, 2.0) + pow((p.y - 0.68) / 0.2, 2.0)));
+  col = mix(col, vec3(0.86, 0.8, 0.82) * (0.5 + 0.6 * lum(col)), st * reg * 0.5);
+  // rain, far and near, lit by what is behind it
+  float L = 0.2 + 1.5 * lum(col);
+  float far = rain(vUv * vec2(1.78, 1.0), 240.0, 3.2, 2.3, 0.16, 1.0), near = rain(vUv * vec2(1.78, 1.0) + 3.7, 70.0, 1.5, 3.4, 0.11, 2.0);
+  col += vec3(0.72, 0.8, 0.95) * (far * 0.22 + near * 0.42) * L * (0.35 + 0.65 * uRain);
+  // bokeh discs sliding past the lens
+  vec2 sp = (vUv - 0.5) * vec2(1.78, 1.0);
+  for (int i = 0; i < 6; i++) {
+    float fi = float(i), h1 = hash11(fi * 2.3 + 1.0), h2 = hash11(fi * 4.9 + 2.0), h3 = hash11(fi * 7.7 + 3.0), dirn = h2 > 0.5 ? 1.0 : -1.0;
+    vec2 c = vec2((fract(h1 + uTime * 0.014 * (0.5 + h3) * dirn) - 0.5) * 2.6, (h3 - 0.5) * 0.9 + 0.03 * sin(uTime * 0.4 + fi));
+    float r = 0.07 + 0.09 * h2, d = length(sp - c), disc = smoothstep(r, r * 0.86, d) * (0.55 + 0.45 * smoothstep(r * 0.55, r, d));
+    vec3 bc = i % 3 == 0 ? vec3(1.0, 0.22, 0.6) : (i % 3 == 1 ? vec3(0.1, 0.85, 0.82) : vec3(1.0, 0.66, 0.22));
+    col += bc * disc * (0.05 + 0.05 * uBloom);
+  }
+  // grade
+  col = pow(max(col, 0.0), vec3(1.07)); col = col / (1.0 + 0.18 * col) * 1.14;
+  vec2 v = vUv - 0.5; col *= 1.0 - 0.55 * dot(v, v);
+  fragColor = vec4(col + dither(gl_FragCoord.xy, float(uFrame)), 1.0);
+}`;
+
+Stage.create({
+  no: 70, title: 'Night Market', subtitle: 'rain on lantern light · 80 bpm, swung',
+  duration: 24, background: '#07060c', grain: 0.05, poster: 13,
+  fade: { in: 1.2, out: 1.8 },
+  slate: { at: 0.9, hold: 3.0, pos: 'bl', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 80, duration: 24, seed: 70, swing: 0.25 });
+    M.master({ reverb: { decay: 2.0, size: 0.9, damp: 0.5 }, fadeIn: 0.4, fadeOut: 2.2, saturate: 0.15 });
+    const ep = M.track('epiano', { reverb: 0.35, gain: 0.7, chorus: 0.4, lowpass: 6500 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.72 }), br = M.track('brush', { reverb: 0.2, gain: 0.6 }), hat = M.track('hat', { reverb: 0.1, gain: 0.2 }), cel = M.track('celesta', { reverb: 0.5, gain: 0.3, pan: 0.3 }), vinyl = M.track('vinyl', { reverb: 0, gain: 0.2 });
+    const lead = M.track('softlead', { reverb: 0.4, gain: 0.34, delay: { time: 0.75, fb: 0.3, mix: 0.22 }, lowpass: 5200 }), sub = M.track('sub', { reverb: 0.05, gain: 0.42 }), rain = M.track('air', { reverb: 0.2, gain: (t) => 0.06 + 0.12 * smoothstep(7, 12, t) * (1 - smoothstep(17, 22, t)) });
+    const bars = [['F#1', ['F#3', 'A3', 'C#4', 'E4', 'G#4']], ['D2', ['D3', 'F#3', 'A3', 'C#4', 'E4']], ['B1', ['B2', 'D3', 'F#3', 'A3', 'C#4']], ['C#2', ['C#3', 'E3', 'G#3', 'B3', 'D#4']], ['F#1', ['F#3', 'A3', 'C#4', 'E4', 'G#4']], ['D2', ['D3', 'F#3', 'A3', 'C#4', 'E4']], ['B1', ['B2', 'D3', 'F#3', 'A3', 'C#4']], ['F#1', ['F#3', 'C#4', 'E4', 'G#4', 'B4']]];
+    bars.forEach(([r, ch], i) => {
+      const b = i * 4; ep.chord(b, ch, 1.4, 0.5); if (i < 7) { ep.chord(b + 1.5, ch.slice(1), 0.9, 0.36); ep.chord(b + 2.5, ch, 1.3, 0.42); } sub.note(b, r, 1.8, 0.6); if (i < 7) sub.note(b + 2.5, r, 1.2, 0.45);
+      if (i >= 1 && i < 7) { kick.pattern(b, 0.5, 'x..x.x..', { vel: 0.8 }); br.pattern(b, 0.5, '..x.x.xx', { vel: 0.5 }); br.hit(b + 1, 0.7); br.hit(b + 3, 0.7); hat.pattern(b, 0.5, 'xxxxxxxx', { vel: 0.4 }); cel.note(b + 3.5, ch[4], 1, 0.4); cel.note(b + 1.5, S.midi(ch[2]) + 12, 1, 0.3); }
+    });
+    [[8, 'C#5', 1], [9, 'E5', 0.5], [9.5, 'F#5', 1.5], [11.5, 'E5', 0.5], [12, 'G#5', 1.5], [13.5, 'F#5', 0.5], [14, 'E5', 1], [15, 'C#5', 1], [16, 'A5', 1.5], [17.5, 'G#5', 0.5], [18, 'F#5', 1], [19, 'E5', 1], [20, 'F#5', 1], [21, 'C#5', 0.5], [21.5, 'E5', 0.5], [22, 'C#5', 2], [24.5, 'B4', 0.5], [25, 'C#5', 1], [26, 'F#4', 2]].forEach(([b, n, d]) => lead.note(b, n, d, 0.5));
+    vinyl.hit(0, 0.6, 24); rain.hit(0, 0.6, 24);
+    return M;
+  },
+
+  async setup() { img = await Stage.image('070-market'); sh = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const storm = smoothstep(7, 11.5, t) * (1 - smoothstep(17, 22, t));
+    sh.draw(t, { uImg: img, uZoom: lerp(1.0, 1.15, E.inOutSine(clamp01(t / 24))), uRain: 0.18 + 0.82 * storm, uBloom: 0.15 + 0.85 * storm + 0.25 * Math.exp(-Math.pow((t - 21.6) / 0.8, 2)) });
+  }
+});
+</script>
+</body>
+</html>

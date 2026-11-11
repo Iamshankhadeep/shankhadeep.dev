@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 013 — Phyllotaxis</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 013 — PHYLLOTAXIS
+ * Why sunflowers use the golden angle. Seed i sits at angle i·φ, radius √i. At 137.5° the seeds pack perfectly;
+ * nudge the angle and the order collapses into arms and spokes. Nine bars at 108 bpm (2.22 s each):
+ * growth (bars 1–3) → 137.0°, 135°, 120°, each locking in on a downbeat → back to 137.5° and the head blooms (bar 8). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 108, N = 1400, C = 10.6, CX = 1180, CY = 540;
+const GOLDEN = 137.50776;
+// angle keyframes: [arrival time, degrees, caption]
+const KEYS = [[0, GOLDEN, 'the golden angle'], [BAR * 3, 137.0, 'half a degree off'], [BAR * 4, 135.0, 'three eighths of a turn — eight arms'], [BAR * 5, 120.0, 'a third of a turn — three spokes'], [BAR * 7, GOLDEN, 'the golden angle']];
+const ramp = Stage.color.ramp(['#5e2a08', '#9a4d0e', '#d1861c', '#ecbd4a', '#f6e3a0']);
+let ctx;
+
+function angleAt(t) {
+  let a = KEYS[0][1];
+  for (let k = 1; k < KEYS.length; k++) a = lerp(a, KEYS[k][1], prog(t, KEYS[k][0] - 1.0, 1.0, E.inOutCubic));
+  return a;
+}
+
+Stage.create({
+  no: 13, title: 'Phyllotaxis', subtitle: 'canvas 2d · 108 bpm',
+  duration: 20, background: '#140e09', grain: 0.055, poster: 18.4, vignette: 0.35,
+  fonts: ['300 112px "JetBrains Mono Variable"', '500 15px "JetBrains Mono Variable"', 'italic 400 36px "Fraunces Variable"'],
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(246,227,160,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 108, duration: 20, seed: 13 });
+    M.master({ reverb: { decay: 2.2, size: 0.9, damp: 0.45 }, fadeOut: 1.6 });
+    const mar = M.track('marimba', { reverb: 0.3, gain: 1.0, pan: -0.2 }), kal = M.track('kalimba', { reverb: 0.4, gain: 0.8, pan: 0.25, delay: { time: 0.75, fb: 0.3, mix: 0.2 } });
+    const sh = M.track('shaker', { reverb: 0.1, gain: 0.5 }), bass = M.track('bass', { reverb: 0.05, gain: 0.8, params: { cutoff: 380, envAmt: 1.4 } });
+    const wb = M.track('woodblock', { reverb: 0.3, gain: 0.8 }), pad = M.track('warmpad', { reverb: 0.5, gain: 0.5 }), chime = M.track('chime', { reverb: 0.7, gain: 0.6 });
+    const five = ['C4', 'E4', 'G4', 'A4', 'G4'], eight = ['E5', null, 'G5', 'A5', null, 'C6', null, 'D5'];
+    const roots = ['C2', 'C2', 'C2', 'A1', 'F1', 'G1', 'G1', 'C2', 'C2'];
+    for (let bar = 0; bar < 9; bar++) {
+      const b = bar * 4, off = bar >= 3 && bar < 7;                         // while the angle is "wrong" the patterns thin out and darken
+      for (let i = 0; i < 8; i++) { const k = bar * 8 + i; if (bar < 8 || i < 1) mar.note(b + i * 0.5, S.midi(five[k % 5]) + (off ? -3 : 0), 0.5, k % 5 === 0 ? 0.8 : 0.55); }
+      if (bar >= 1 && bar < 8) kal.seq(b, 0.5, eight.map((n) => n && (off ? S.midi(n) - 3 : n)), { vel: off ? 0.4 : 0.55 });
+      if (bar >= 1 && bar < 8) sh.pattern(b, 0.25, off ? 'x...x...x...x...' : 'x.xxx.xxx.xxx.xx', { vel: 0.45 });
+      if (bar >= 1) { bass.note(b, roots[bar], bar === 8 ? 3.5 : 1.3, 0.85); if (bar < 8) bass.note(b + 2.5, roots[bar], 1, 0.6); }
+      if (bar >= 7) pad.chord(b, ['C3', 'G3', 'D4', 'E4'], 4, 0.6);
+    }
+    for (let k = 1; k < KEYS.length; k++) wb.hit(M.b(KEYS[k][0]), 0.9);
+    chime.note(M.b(BAR * 7), 'C6', 2, 0.6); chime.note(M.b(BAR * 7) + 0.5, 'G6', 2, 0.4);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1 }); },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // warm pool of light under the head
+    const bg = c.createRadialGradient(CX, CY, 40, CX, CY, 900); bg.addColorStop(0, 'rgba(88,52,22,.55)'); bg.addColorStop(0.5, 'rgba(46,28,14,.35)'); bg.addColorStop(1, 'rgba(20,14,9,0)'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    const ang = angleAt(t), rad = ang * Math.PI / 180, spin = t * 0.035;
+    const R = C * Math.sqrt(N), bloom = prog(t, BAR * 7 - 0.2, 2.6, E.outCubic);
+    // ray florets, behind the disc
+    if (bloom > 0) {
+      const P = 34;
+      for (let layer = 0; layer < 2; layer++) for (let k = 0; k < P; k++) {
+        const u = clamp01(bloom * 1.5 - (((k * 13) % P) / P) * 0.5 - layer * 0.12), s = E.outBack(u); if (s <= 0) continue;
+        const a = (k + layer * 0.5) / P * TAU + spin, len = (layer ? 118 : 138) * s, w = (layer ? 26 : 30) * Math.min(1, s);
+        c.save(); c.translate(CX + Math.cos(a) * (R - 22), CY + Math.sin(a) * (R - 22)); c.rotate(a);
+        const g = c.createLinearGradient(0, 0, len, 0); g.addColorStop(0, layer ? '#b9730f' : '#d08a14'); g.addColorStop(0.6, layer ? '#e2a520' : '#f2c231'); g.addColorStop(1, '#f8dc6a');
+        c.fillStyle = g; c.beginPath(); c.moveTo(0, -w * 0.55); c.bezierCurveTo(len * 0.4, -w, len * 0.8, -w * 0.6, len, 0); c.bezierCurveTo(len * 0.8, w * 0.6, len * 0.4, w, 0, w * 0.55); c.closePath(); c.fill();
+        c.strokeStyle = 'rgba(120,70,8,.35)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(4, 0); c.lineTo(len * 0.86, 0); c.stroke();
+        c.restore();
+      }
+    }
+    // seeds
+    const rings = (Stage.events('marimba') || []).filter((e) => e.t <= t && t - e.t < 1.4).map((e) => [(t - e.t) * 900, Math.exp(-(t - e.t) * 5) * e.vel]);   // every recent note keeps its ring, so a new note never cuts the last one off
+    for (let i = 1; i <= N; i++) {
+      const birth = 0.5 + Math.pow(i / N, 0.78) * (BAR * 3 - 1.4), age = t - birth; if (age <= 0) break;
+      const pop = age < 0.5 ? E.outBack(age / 0.5) : 1;
+      const r = C * Math.sqrt(i), a = i * rad + spin, x = CX + r * Math.cos(a), y = CY + r * Math.sin(a), u = r / R;
+      const sz = (3.4 + 5.2 * u) * pop, glow = rings.reduce((g, q) => Math.max(g, q[1] * Math.exp(-Math.pow((r - q[0]) / 46, 2))), 0);
+      c.save(); c.translate(x, y); c.rotate(a);
+      c.fillStyle = ramp(clamp01(u * 0.92 + 0.5 * glow + (age < 0.6 ? 0.35 * (1 - age / 0.6) : 0)));
+      c.beginPath(); c.ellipse(0, 0, sz * 1.25, sz * 0.82, 0, 0, TAU); c.fill();
+      c.fillStyle = 'rgba(255,244,210,.22)'; c.beginPath(); c.ellipse(-sz * 0.25, -sz * 0.22, sz * 0.5, sz * 0.26, 0, 0, TAU); c.fill();
+      c.restore();
+    }
+    // readout
+    let ki = 0; for (let k = 0; k < KEYS.length; k++) if (t >= KEYS[k][0] - 0.5) ki = k;
+    const lx = 150, on = prog(t, 0.9, 0.9, E.outExpo) * (1 - prog(t, 18.9, 0.9, E.inCubic));
+    c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+    c.fillStyle = `rgba(246,227,160,${0.5 * on})`; c.font = '500 15px "JetBrains Mono Variable"'; c.fillText('D I V E R G E N C E   A N G L E', lx, 452);
+    const exact = Math.abs(ang - GOLDEN) < 0.02, off = 1 - smoothstep(0, 0.4, Math.abs(ang - KEYS[ki][1]));
+    c.fillStyle = exact ? `rgba(246,227,160,${on})` : `rgba(236,160,84,${on})`; c.font = '300 112px "JetBrains Mono Variable"'; c.fillText(ang.toFixed(1) + '°', lx - 6, 566);
+    c.strokeStyle = `rgba(246,227,160,${0.35 * on})`; c.lineWidth = 1; c.beginPath(); c.moveTo(lx, 600); c.lineTo(lx + 150 + 300 * off, 600); c.stroke();
+    const capA = on * off * prog(t, KEYS[ki][0] - 0.2, 0.6, E.outCubic) * (ki < KEYS.length - 1 ? 1 - prog(t, KEYS[ki + 1][0] - 1.2, 0.4) : 1);
+    c.fillStyle = `rgba(246,227,160,${0.82 * capA})`; c.font = 'italic 400 36px "Fraunces Variable"'; c.fillText(KEYS[ki][2], lx, 654);
+    // a small dial: the angle drawn as an arc
+    c.save(); c.translate(lx + 36, 760); c.strokeStyle = `rgba(246,227,160,${0.3 * on})`; c.lineWidth = 1.2; c.beginPath(); c.arc(0, 0, 36, 0, TAU); c.stroke();
+    c.strokeStyle = `rgba(236,180,84,${on})`; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, 36, -Math.PI / 2, -Math.PI / 2 + rad); c.stroke();
+    c.fillStyle = `rgba(246,227,160,${on})`; c.beginPath(); c.arc(36 * Math.cos(-Math.PI / 2 + rad), 36 * Math.sin(-Math.PI / 2 + rad), 4.5, 0, TAU); c.fill(); c.restore();
+  }
+});
+</script>
+</body>
+</html>

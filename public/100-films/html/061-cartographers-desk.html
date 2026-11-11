@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 061 — The Cartographer's Desk</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../assets/img/061-map.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 061 — THE CARTOGRAPHER'S DESK
+ * One generated photograph (a hand-drawn map of an invented coast on a walnut desk) brought to life: a slow
+ * push-in, the brass compass lifted onto its own parallax layer, window light crossing the paper, dust in the
+ * beam — and a vermilion route that inks itself from a harbour, out of the bay, round the cape and across the
+ * strait to an island, where an X is stamped on beat 23. The route is a spline placed by hand on the sea.
+ * Seven bars at 84 bpm (2.86 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BEAT = 60 / 84;
+const PTS = [[617, 452], [680, 461], [750, 468], [815, 503], [880, 508], [933, 478], [965, 425], [1020, 390], [1080, 385], [1135, 399], [1189, 412], [1252, 390]];
+const LAND_AT = 10;                    // index of the landing point: the ship stops here, the last leg is on foot
+const ROUTE = spline(PTS, 26);
+const T_SAIL = 3.3, T_LAND = 22 * BEAT - 0.9, T_X = 23 * BEAT, COMP = [1418, 142, 118];
+let ctx, img, mote, vig, compass;
+
+function spline(p, n) {
+  const out = [], g = (i) => p[Math.max(0, Math.min(p.length - 1, i))];
+  for (let i = 0; i < p.length - 1; i++) for (let k = 0; k < n; k++) {
+    const u = k / n, a = g(i - 1), b = g(i), c = g(i + 1), d = g(i + 2), u2 = u * u, u3 = u2 * u;
+    out.push([0.5 * (2 * b[0] + (c[0] - a[0]) * u + (2 * a[0] - 5 * b[0] + 4 * c[0] - d[0]) * u2 + (3 * b[0] - a[0] - 3 * c[0] + d[0]) * u3), 0.5 * (2 * b[1] + (c[1] - a[1]) * u + (2 * a[1] - 5 * b[1] + 4 * c[1] - d[1]) * u2 + (3 * b[1] - a[1] - 3 * c[1] + d[1]) * u3), i + u]);
+  }
+  out.push([p[p.length - 1][0], p[p.length - 1][1], p.length - 1]);
+  let s = 0; out.forEach((q, i) => { if (i) s += Math.hypot(q[0] - out[i - 1][0], q[1] - out[i - 1][1]); q[3] = s; });
+  out.len = s; out.landLen = out.find((q) => q[2] >= LAND_AT)[3];
+  return out;
+}
+function at(len) { const r = ROUTE; let i = 1; while (i < r.length - 1 && r[i][3] < len) i++; const a = r[i - 1], b = r[i], u = clamp01((len - a[3]) / Math.max(1e-6, b[3] - a[3])); return [lerp(a[0], b[0], u), lerp(a[1], b[1], u), Math.atan2(b[1] - a[1], b[0] - a[0]), i]; }
+
+Stage.create({
+  no: 61, title: 'The Cartographer’s Desk', subtitle: 'a route in vermilion · 84 bpm',
+  duration: 20, background: '#1a120b', grain: 0.055, poster: 13.4,
+  fonts: ['italic 400 22px "Fraunces Variable"'],
+  fade: { in: 1.0, out: 1.4 },
+  slate: { at: 0.8, hold: 2.8, pos: 'bl', color: 'rgba(255,244,220,.94)', shadow: true },
+
+  music(S) {
+    const M = S.score({ bpm: 84, duration: 20, seed: 61 });
+    M.master({ reverb: { decay: 2.4, size: 0.95, damp: 0.42 }, fadeOut: 1.8 });
+    const gtr = M.track('guitar', { reverb: 0.3, gain: 0.8, pan: -0.25, humanize: 0.012 }), harp = M.track('harp', { reverb: 0.45, gain: 0.72, pan: 0.25 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.34 });
+    const sh = M.track('shaker', { reverb: 0.15, gain: 0.2 }), sub = M.track('sub', { reverb: 0.05, gain: 0.34 }), wb = M.track('woodblock', { reverb: 0.3, gain: 0.8 }), tom = M.track('tom', { reverb: 0.3, gain: 0.5 }), bell = M.track('celesta', { reverb: 0.5, gain: 0.4 });
+    const bars = [['G2', ['G3', 'B3', 'D4']], ['E2', ['G3', 'B3', 'E4']], ['C2', ['G3', 'C4', 'E4']], ['D2', ['A3', 'D4', 'F#4']], ['G2', ['B3', 'D4', 'G4']], ['C2', ['C4', 'E4', 'G4']], ['G2', ['G3', 'D4', 'B4']]];
+    bars.forEach(([root, tri], i) => {
+      const b = i * 4; pad.chord(b, [root, ...tri].map((n) => S.midi(n) + 12), 4, 0.4); if (i >= 1) sub.note(b, root, 3.6, 0.5);
+      if (i < 6) { // a rolling travel pattern: thumb on 1 and 3, fingers between
+        gtr.note(b, root, 1.8, 0.6); gtr.note(b + 2, S.midi(root) + 7, 1.6, 0.48);
+        [tri[0], tri[1], tri[2], tri[1], tri[0], tri[1], tri[2], tri[1]].forEach((n, k) => { if (k !== 0 && k !== 4) gtr.note(b + k * 0.5, n, 0.9, i === 0 ? 0.34 : 0.42); });
+      } else { [root, ...tri].forEach((n, k) => gtr.note(b + k * 0.12, n, 4, 0.5)); }
+      if (i >= 1 && i < 6) sh.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.45 });
+    });
+    // the travelling theme
+    [[4, 'D5', 1], [5, 'B4', 0.5], [5.5, 'D5', 0.5], [6, 'E5', 1.5], [7.5, 'D5', 0.5], [8, 'G5', 1.5], [9.5, 'E5', 0.5], [10, 'D5', 1], [11, 'B4', 1], [12, 'A4', 1], [13, 'D5', 0.5], [13.5, 'F#5', 0.5], [14, 'A5', 1.5], [15.5, 'F#5', 0.5],
+     [16, 'G5', 1], [17, 'B5', 1], [18, 'D6', 1.5], [19.5, 'B5', 0.5], [20, 'C6', 1], [21, 'G5', 0.5], [21.5, 'E5', 0.5], [22, 'D5', 1]].forEach(([b, n, d]) => harp.note(b, n, d + 0.4, 0.5));
+    // the stamp
+    wb.hit(23, 1.0); tom.hit(23, 0.7, 0.4, { pitch: 38 }); bell.chord(24, ['G5', 'B5', 'D6'], 3, 0.4); harp.note(24.5, 'G5', 2, 0.4); harp.note(25, 'D6', 2, 0.36); harp.note(26, 'G6', 2, 0.3);
+    return M;
+  },
+
+  async setup() {
+    ctx = Stage.canvas2d({ z: 1 }); img = await Stage.image('061-map');
+    // the compass, lifted off the photograph
+    compass = Stage.buffer(COMP[2] * 2 + 8, COMP[2] * 2 + 8); compass.save(); compass.beginPath(); compass.arc(COMP[2] + 4, COMP[2] + 4, COMP[2], 0, TAU); compass.clip(); compass.drawImage(img, COMP[0] - COMP[2] - 4, COMP[1] - COMP[2] - 4, COMP[2] * 2 + 8, COMP[2] * 2 + 8, 0, 0, COMP[2] * 2 + 8, COMP[2] * 2 + 8); compass.restore();
+    // a soft dust mote, and the room's vignette
+    mote = Stage.buffer(64, 64); const g = mote.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,236,196,1)'); g.addColorStop(0.3, 'rgba(255,226,170,.45)'); g.addColorStop(1, 'rgba(255,220,160,0)'); mote.fillStyle = g; mote.fillRect(0, 0, 64, 64);
+    vig = Stage.buffer(W, H); const v = vig.createRadialGradient(W * 0.55, H * 0.46, 260, W * 0.5, H * 0.5, 1180); v.addColorStop(0, 'rgba(255,255,255,1)'); v.addColorStop(0.6, 'rgba(206,188,170,1)'); v.addColorStop(1, 'rgba(96,74,60,1)'); vig.fillStyle = v; vig.fillRect(0, 0, W, H);
+  },
+
+  frame(t) {
+    const c = ctx, e = E.inOutSine(clamp01(t / 20)), s = lerp(1.25, 1.6, e), cx = lerp(768, 930, e), cy = lerp(512, 455, e);
+    const SX = (x) => (x - cx) * s + W / 2, SY = (y) => (y - cy) * s + H / 2;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.fillStyle = '#1a120b'; c.fillRect(0, 0, W, H);
+    c.imageSmoothingQuality = 'high'; c.setTransform(s, 0, 0, s, W / 2 - cx * s, H / 2 - cy * s); c.drawImage(img, 0, 0);
+
+    // ── the route, as ink on the paper ──
+    const sail = prog(t, T_SAIL, T_LAND - T_SAIL, (u) => 0.62 * u + 0.38 * E.inOutSine(u)), walk = prog(t, T_LAND + 0.25, T_X - T_LAND - 0.45, E.inOutSine);
+    const len = sail * ROUTE.landLen + walk * (ROUTE.len - ROUTE.landLen);
+    c.globalCompositeOperation = 'multiply';
+    if (t > T_SAIL - 0.6) {   // harbour mark
+      const a = prog(t, T_SAIL - 0.6, 0.5); c.strokeStyle = `rgba(190,44,26,${0.9 * a})`; c.lineWidth = 2.2; c.beginPath(); c.arc(PTS[0][0], PTS[0][1], 6.5 * E.outBack(a), 0, TAU); c.stroke(); c.fillStyle = `rgba(190,44,26,${0.9 * a})`; c.beginPath(); c.arc(PTS[0][0], PTS[0][1], 2.2, 0, TAU); c.fill();
+    }
+    if (len > 0) {
+      c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = 'rgba(192,44,24,.92)';
+      const seaLen = Math.min(len, ROUTE.landLen);
+      c.lineWidth = 3.0; c.setLineDash([11, 8]); c.beginPath(); c.moveTo(ROUTE[0][0], ROUTE[0][1]); for (let i = 1; i < ROUTE.length && ROUTE[i][3] <= seaLen; i++) c.lineTo(ROUTE[i][0], ROUTE[i][1]); const q = at(seaLen); c.lineTo(q[0], q[1]); c.stroke();
+      if (len > ROUTE.landLen) { c.lineWidth = 2.6; c.setLineDash([1, 7]); c.beginPath(); const l0 = at(ROUTE.landLen); c.moveTo(l0[0], l0[1]); for (let i = 1; i < ROUTE.length; i++) if (ROUTE[i][3] > ROUTE.landLen && ROUTE[i][3] <= len) c.lineTo(ROUTE[i][0], ROUTE[i][1]); const q2 = at(len); c.lineTo(q2[0], q2[1]); c.stroke(); }
+      c.setLineDash([]);
+    }
+    // the X
+    const xs = prog(t, T_X - 0.06, 0.22, E.outCubic);
+    if (xs > 0) {
+      const X = PTS[PTS.length - 1], sc = lerp(2.6, 1, xs), r = 13 * sc; c.save(); c.translate(X[0], X[1]); c.rotate(-0.12); c.strokeStyle = `rgba(184,36,20,${0.95 * xs})`; c.lineWidth = 5.2 * sc; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(-r, -r); c.lineTo(r, r); c.moveTo(r, -r * 0.94); c.lineTo(-r * 0.96, r); c.stroke();
+      const ring = prog(t, T_X, 0.9, E.outCubic); if (ring > 0 && ring < 1) { c.strokeStyle = `rgba(184,36,20,${0.5 * (1 - ring)})`; c.lineWidth = 2; c.beginPath(); c.arc(0, 0, 16 + 44 * ring, 0, TAU); c.stroke(); }
+      c.restore();
+    }
+    c.globalCompositeOperation = 'source-over';
+    // the ship: a small hull and sail, heading along the route, bobbing
+    if (t > T_SAIL - 0.5) {
+      const p = at(Math.min(len, ROUTE.landLen)), a = prog(t, T_SAIL - 0.5, 0.5), bob = Math.sin(t * 3.1) * 0.08, moving = sail > 0 && sail < 1;
+      c.save(); c.translate(p[0], p[1]); c.rotate((moving ? p[2] : sail >= 1 ? 0.2 : 0.1) * 0.35 + bob); c.scale(a * 1.55, a * 1.55);
+      c.fillStyle = 'rgba(40,24,14,.35)'; c.beginPath(); c.ellipse(1.5, 6.5, 12, 3.2, 0, 0, TAU); c.fill();
+      c.fillStyle = '#5a2a16'; c.beginPath(); c.moveTo(-11, 0); c.quadraticCurveTo(0, 9, 12, 0); c.lineTo(8, 4.6); c.lineTo(-7.5, 4.6); c.closePath(); c.fill();
+      c.strokeStyle = '#3c1f12'; c.lineWidth = 1.3; c.beginPath(); c.moveTo(0.5, 0.5); c.lineTo(0.5, -17); c.stroke();
+      c.fillStyle = '#fbf3e2'; c.beginPath(); c.moveTo(1.6, -16); c.quadraticCurveTo(13 + 2 * Math.sin(t * 2.2), -9, 2, -2); c.closePath(); c.fill(); c.fillStyle = '#e9dcc2'; c.beginPath(); c.moveTo(-0.6, -14); c.quadraticCurveTo(-8, -8, -0.8, -2.5); c.closePath(); c.fill();
+      c.fillStyle = '#c02c18'; c.beginPath(); c.moveTo(0.5, -17); c.lineTo(6, -19); c.lineTo(0.5, -21); c.closePath(); c.fill();
+      c.restore();
+    }
+    // the compass on its own plane: a little larger, sliding against the map as the camera moves, with a shadow
+    const par = 0.05, ox = (cx - 768) * par * -1, oy = (cy - 512) * par * -1 + 0, k = 1.045, R = COMP[2];
+    c.fillStyle = 'rgba(20,10,4,.38)'; c.filter = 'blur(10px)'; c.beginPath(); c.arc(COMP[0] + ox - 12, COMP[1] + oy + 16, R * k * 0.98, 0, TAU); c.fill(); c.filter = 'none';
+    c.drawImage(compass.canvas, COMP[0] + ox - (R + 4) * k, COMP[1] + oy - (R + 4) * k, (R * 2 + 8) * k, (R * 2 + 8) * k);
+
+    // ── the room: vignette, window light crossing the desk, dust in the beam ──
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalCompositeOperation = 'multiply'; c.drawImage(vig.canvas, 0, 0);
+    const bx = lerp(-520, 2150, E.inOutSine(clamp01(t / 20))), ang = -0.36, dx = Math.cos(ang), dy = Math.sin(ang);
+    const band = (off, wd, col, a) => { const x0 = bx + off - wd * dx, x1 = bx + off + wd * dx, g = c.createLinearGradient(x0, 540 - wd * dy, x1, 540 + wd * dy); g.addColorStop(0, 'rgba(255,214,150,0)'); g.addColorStop(0.5, col); g.addColorStop(1, 'rgba(255,214,150,0)'); c.globalAlpha = a; c.fillStyle = g; c.fillRect(0, 0, W, H); };
+    c.globalCompositeOperation = 'soft-light'; band(0, 620, 'rgba(255,222,160,1)', 0.85); band(-230, 70, 'rgba(60,36,16,1)', 0.35); band(40, 60, 'rgba(60,36,16,1)', 0.3); band(300, 70, 'rgba(60,36,16,1)', 0.28);
+    c.globalCompositeOperation = 'lighter'; band(0, 520, 'rgba(255,196,120,1)', 0.10); c.globalAlpha = 1;
+    for (let i = 0; i < 120; i++) {
+      const z = hash(i, 1), x = Stage.mod(hash(i, 2) * 2300 + t * (8 + 26 * z) + 40 * Math.sin(t * 0.4 + i), 2300) - 190, y = Stage.mod(hash(i, 3) * 1300 - t * (5 + 14 * z) + 26 * Math.sin(t * 0.33 + i * 1.7), 1300) - 110;
+      const d = ((x - bx) * dx + (y - 540) * dy) / 560, lit = Math.exp(-d * d * 2.2), sz = lerp(5, 30, z * z), tw = 0.6 + 0.4 * Math.sin(t * (1 + 2 * hash(i, 5)) + i);
+      c.globalAlpha = (0.05 + 0.5 * lit) * tw * lerp(0.9, 0.4, z); c.drawImage(mote.canvas, x - sz / 2, y - sz / 2, sz, sz);
+    }
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  }
+});
+</script>
+</body>
+</html>

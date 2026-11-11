@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 043 — Mycelium</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 043 — MYCELIUM
+ * A fungal network explores darkness, finds its food and lights up. The whole growth is computed once, up front,
+ * by space colonisation (branches grow toward scattered attractors); every segment remembers when it was born,
+ * so the film just reveals it. When a hypha reaches a nutrient node, pulses of light travel back to the spore —
+ * and a kalimba note sounds: the score is written from the growth itself. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5, GROW0 = 0.7, GROW1 = 14.2, FRUIT = BAR * 6;
+const NET = grow();
+let bg, ctx;
+
+function grow() {
+  const r = Stage.rng(43), root = [820, 560], STEP = 7, INF = 110, KILL = 13;
+  const food = [[300, 260], [520, 840], [1010, 190], [1280, 470], [1180, 880], [1560, 250], [1640, 720], [160, 600], [760, 960], [1420, 100], [980, 640], [1820, 480]];
+  let att = []; for (let i = 0; i < 850; i++) att.push([70 + r() * (W - 140), 60 + r() * (H - 120)]);
+  for (const f of food) for (let k = 0; k < 16; k++) att.push([f[0] + (r() - 0.5) * 120, f[1] + (r() - 0.5) * 120]);
+  const nodes = [{ x: root[0], y: root[1], par: -1, it: 0, kids: 0 }];
+  const CELL = 60, grid = new Map(), key = (x, y) => ((x / CELL) | 0) + ',' + ((y / CELL) | 0), put = (i) => { const k = key(nodes[i].x, nodes[i].y); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }; put(0);
+  const reached = new Array(food.length).fill(null);
+  for (let it = 1; it < 520 && att.length > 30; it++) {
+    const pull = new Map();
+    for (const a of att) {       // each attractor pulls on its nearest node within reach
+      let best = -1, bd = INF * INF; const cx = (a[0] / CELL) | 0, cy = (a[1] / CELL) | 0;
+      for (let gy = cy - 2; gy <= cy + 2; gy++) for (let gx = cx - 2; gx <= cx + 2; gx++) { const g = grid.get(gx + ',' + gy); if (!g) continue; for (const i of g) { const d = (nodes[i].x - a[0]) ** 2 + (nodes[i].y - a[1]) ** 2; if (d < bd) { bd = d; best = i; } } }
+      if (best < 0) continue; const d = Math.sqrt(bd) || 1, p = pull.get(best) || [0, 0]; p[0] += (a[0] - nodes[best].x) / d; p[1] += (a[1] - nodes[best].y) / d; pull.set(best, p);
+    }
+    if (!pull.size) { // nothing in reach yet: push the frontier toward the nearest attractor
+      let bi = 0, ba = null, bd = 1e18; for (let i = Math.max(0, nodes.length - 200); i < nodes.length; i++) for (let k = 0; k < att.length; k += 7) { const d = (nodes[i].x - att[k][0]) ** 2 + (nodes[i].y - att[k][1]) ** 2; if (d < bd) { bd = d; bi = i; ba = att[k]; } }
+      if (!ba) break; pull.set(bi, [ba[0] - nodes[bi].x, ba[1] - nodes[bi].y]);
+    }
+    for (const [i, p] of pull) { const l = Math.hypot(p[0], p[1]) || 1, n = nodes[i]; const nx = n.x + p[0] / l * STEP + (r() - 0.5) * 1.6, ny = n.y + p[1] / l * STEP + (r() - 0.5) * 1.6; nodes.push({ x: nx, y: ny, par: i, it, kids: 0 }); put(nodes.length - 1); }
+    att = att.filter((a) => { const cx = (a[0] / CELL) | 0, cy = (a[1] / CELL) | 0; for (let gy = cy - 1; gy <= cy + 1; gy++) for (let gx = cx - 1; gx <= cx + 1; gx++) { const g = grid.get(gx + ',' + gy); if (!g) continue; for (const i of g) if ((nodes[i].x - a[0]) ** 2 + (nodes[i].y - a[1]) ** 2 < KILL * KILL) return false; } return true; });
+    food.forEach((f, k) => { if (reached[k]) return; for (let i = nodes.length - pull.size; i < nodes.length; i++) if ((nodes[i].x - f[0]) ** 2 + (nodes[i].y - f[1]) ** 2 < 30 * 30) { reached[k] = { node: i, it }; break; } });
+  }
+  const maxIt = nodes[nodes.length - 1].it;
+  // thickness from the amount of network each segment feeds; birth time from its iteration
+  for (let i = nodes.length - 1; i > 0; i--) nodes[nodes[i].par].kids += nodes[i].kids + 1;
+  const timeOf = (it) => GROW0 + (GROW1 - GROW0) * Math.pow(it / maxIt, 0.8);
+  nodes.forEach((n) => { n.t = timeOf(n.it); n.w = 0.7 + 0.42 * Math.log(1 + n.kids); n.depth = 0; });
+  for (let i = 1; i < nodes.length; i++) nodes[i].depth = nodes[nodes[i].par].depth + 1;
+  const hits = food.map((f, k) => { if (!reached[k]) return null; const path = []; let i = reached[k].node; while (i >= 0) { path.push(i); i = nodes[i].par; } return { x: f[0], y: f[1], t: timeOf(reached[k].it), path }; }).filter(Boolean).sort((a, b) => a.t - b.t);
+  return { nodes, hits, root };
+}
+
+Stage.create({
+  no: 43, title: 'Mycelium', subtitle: 'space colonisation · 96 bpm',
+  duration: 20, background: '#0c0906', grain: 0.065, poster: 15.8, vignette: 0.45,
+  fade: { in: 1.0, out: 1.8 }, slate: { at: 0.8, hold: 3.0 },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 43 });
+    M.master({ reverb: { decay: 4.0, size: 1.2, damp: 0.5 }, fadeIn: 0.4, fadeOut: 2.6 });
+    const kal = M.track('kalimba', { reverb: 0.6, gain: 1.0, delay: { time: 0.75, fb: 0.4, mix: 0.3 } }), pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.4 + 0.3 * smoothstep(5, 15, t), lowpass: (t) => 500 + 1400 * smoothstep(4, 15, t) });
+    const sub = M.track('sub', { reverb: 0.06, gain: 0.6 }), tick = M.track('tick', { reverb: 0.4, gain: 0.18, humanize: 1, params: { tone: 3000 } }), bell = M.track('bell', { reverb: 0.8, gain: 0.5 }), str = M.track('strings', { reverb: 0.6, gain: 0.5, params: { cutoff: 2400, A: 1.5, R: 2 } });
+    const ch = [['C2', 'G2', 'Eb3'], ['Ab1', 'Eb2', 'C3', 'G3'], ['F2', 'C3', 'Ab3'], ['G2', 'D3', 'Bb3'], ['C2', 'G2', 'Eb3', 'Bb3'], ['Ab1', 'Eb2', 'C3', 'G3'], ['Eb2', 'Bb2', 'G3', 'D4'], ['C2', 'G2', 'D3', 'Eb3']], rt = ['C1', 'Ab0', 'F1', 'G1', 'C1', 'Ab0', 'Eb1', 'C1'];
+    ch.forEach((c, i) => { pad.chord(i * 4, c, 4, 0.55); sub.note(i * 4, rt[i], 3.7, i >= 4 ? 0.8 : 0.55); if (i >= 5) str.chord(i * 4, c.map((n) => S.midi(n) + 12), 4, 0.45); });
+    // a faint crackle of growth, and a note for every nutrient node reached (pitch from C minor pentatonic)
+    for (let b = 0.5; b < 23; b += 0.25) if (hash(b * 4, 9) < 0.5) tick.hit(b, 0.3 + 0.5 * hash(b * 4, 10));
+    const sc = S.scale('C5', 'minorPent', 2); NET.hits.forEach((h, k) => kal.note(M.b(h.t), sc[(k * 3) % sc.length], 1.5, 0.7));
+    bell.note(M.b(FRUIT), 'G5', 4, 0.7); bell.note(M.b(FRUIT) + 0.5, 'C6', 4, 0.5); bell.note(M.b(FRUIT) + 1, 'Eb6', 4, 0.45);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 });
+    const c = bg, r = Stage.rng(430), g = c.createRadialGradient(NET.root[0], NET.root[1], 80, 960, 540, 1200); g.addColorStop(0, '#1b130c'); g.addColorStop(1, '#0a0705'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 5200; i++) { const v = r(); c.fillStyle = `rgba(${v > 0.5 ? '120,90,60' : '0,0,0'},${0.05 + 0.1 * r()})`; c.beginPath(); c.arc(r() * W, r() * H, 0.6 + 2.2 * r() * r(), 0, TAU); c.fill(); }
+    for (let i = 0; i < 60; i++) { c.fillStyle = `rgba(90,66,44,${0.05 + 0.06 * r()})`; c.beginPath(); c.ellipse(r() * W, r() * H, 8 + 30 * r(), 5 + 16 * r(), r() * 3, 0, TAU); c.fill(); }
+  },
+
+  frame(t) {
+    const c = ctx, { nodes, hits } = NET; c.clearRect(0, 0, W, H); c.lineCap = 'round'; c.lineJoin = 'round';
+    const ember = 1 - 0.8 * prog(t, 17.6, 2.4, E.inOutSine), alive = smoothstep(4, 9, t);
+    // hyphae: three weight classes, a soft halo under a fine bright line
+    const paths = [new Path2D(), new Path2D(), new Path2D()]; let tips = [];
+    for (let i = 1; i < nodes.length; i++) { const n = nodes[i]; if (n.t > t) continue; const p = nodes[n.par], k = n.w > 2.6 ? 2 : n.w > 1.5 ? 1 : 0; paths[k].moveTo(p.x, p.y); paths[k].lineTo(n.x, n.y); if (t - n.t < 0.25 && n.kids === 0 | 1) tips.push(n); }
+    c.globalCompositeOperation = 'lighter';
+    [[1.0, 0.5], [1.9, 0.62], [3.4, 0.8]].forEach(([w, a], k) => { c.strokeStyle = `rgba(190,170,140,${0.10 * ember})`; c.lineWidth = w * 4.5; c.stroke(paths[k]); c.strokeStyle = `rgba(236,224,204,${a * ember})`; c.lineWidth = w; c.stroke(paths[k]); });
+    // growing tips glint
+    c.fillStyle = 'rgba(255,246,225,.9)'; for (const n of tips) { c.beginPath(); c.arc(n.x, n.y, 1.8, 0, TAU); c.fill(); }
+    // pulses travelling home from every node that has been reached
+    for (const h of hits) {
+      const age = t - h.t; if (age < 0) continue; const L = h.path.length;
+      for (let rep = 0; rep < 9; rep++) {
+        const a = age - rep * 1.35; if (a < 0) break; const head = a * 150; if (head > L + 26) continue;
+        c.beginPath(); let started = false;
+        for (let q = Math.max(0, Math.floor(head - 26)); q < Math.min(L, head); q++) { const n = nodes[h.path[q]]; started ? c.lineTo(n.x, n.y) : c.moveTo(n.x, n.y); started = true; }
+        c.strokeStyle = `rgba(70,230,200,${0.26 * ember})`; c.lineWidth = 9; c.stroke(); c.strokeStyle = `rgba(190,255,240,${0.9 * ember})`; c.lineWidth = 2.2; c.stroke();
+      }
+      // the node itself: a ring when found, then an amber fruiting body
+      const found = Math.exp(-age * 1.6); c.strokeStyle = `rgba(120,240,215,${0.8 * found})`; c.lineWidth = 2; c.beginPath(); c.arc(h.x, h.y, 10 + 60 * (1 - found), 0, TAU); c.stroke();
+      const fr = prog(t, FRUIT + hash(h.path.length, 3) * 1.4, 1.6, E.outBack) * ember;
+      const g = c.createRadialGradient(h.x, h.y, 0, h.x, h.y, 16 + 54 * fr); g.addColorStop(0, `rgba(255,196,96,${0.55 + 0.4 * fr})`); g.addColorStop(0.35, `rgba(255,150,60,${0.26 * (0.4 + fr)})`); g.addColorStop(1, 'rgba(255,150,60,0)'); c.fillStyle = g; c.fillRect(h.x - 80, h.y - 80, 160, 160);
+      c.fillStyle = `rgba(255,226,170,${0.9 * Math.max(0.35, fr)})`; c.beginPath(); c.arc(h.x, h.y, 3.5 + 6.5 * fr, 0, TAU); c.fill();
+    }
+    // the spore
+    const sp = 0.7 + 0.3 * Math.sin(t * 2.4) * alive; const sg = c.createRadialGradient(NET.root[0], NET.root[1], 0, NET.root[0], NET.root[1], 46); sg.addColorStop(0, `rgba(255,244,220,${0.9 * sp * ember})`); sg.addColorStop(0.3, `rgba(120,240,215,${0.3 * sp * ember})`); sg.addColorStop(1, 'rgba(120,240,215,0)'); c.fillStyle = sg; c.fillRect(NET.root[0] - 50, NET.root[1] - 50, 100, 100);
+    c.globalCompositeOperation = 'source-over';
+  }
+});
+</script>
+</body>
+</html>

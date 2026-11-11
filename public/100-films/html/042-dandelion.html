@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 042 — Dandelion</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 042 — DANDELION
+ * A dandelion clock releases its seeds to the wind. 190 seeds sit on a sphere (golden-angle spacing), each a
+ * hairline parachute; every one has its own moment of letting go, and from then on its flight is a closed-form
+ * path in the gusting wind. Seven bars at 84 bpm (2.86 s each): trembling → the first few → a gust takes half
+ * (bar 5, 11.4 s) → the last seed crosses the frame. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 84, HX = 700, HY = 500, NS = 190, GUST = BAR * 4;
+let bg, ctx, seeds = [];
+const gustAt = (t) => 0.18 + 0.12 * Math.sin(t * 1.7) + 0.5 * Math.exp(-Math.pow((t - 5.6) / 0.9, 2)) + 1.0 * Math.exp(-Math.pow((t - GUST - 0.3) / 1.1, 2)) + 0.45 * Math.exp(-Math.pow((t - 15.2) / 1.2, 2));
+
+function drawSeed(c, x, y, ang, sc, al, open) {
+  // achene at (x, y); the beak runs along `ang` to the pappus
+  const L = 58 * sc, px = x + Math.cos(ang) * L, py = y + Math.sin(ang) * L;
+  c.strokeStyle = `rgba(255,248,232,${0.5 * al})`; c.lineWidth = 0.9 * Math.max(1, sc * 0.8); c.beginPath(); c.moveTo(x, y); c.lineTo(px, py); c.stroke();
+  c.fillStyle = `rgba(92,62,34,${0.9 * al})`; c.beginPath(); c.ellipse(x, y, 5.2 * sc, 1.7 * sc, ang, 0, TAU); c.fill();
+  c.strokeStyle = `rgba(255,252,242,${0.62 * al})`; c.lineWidth = 0.75 * Math.max(1, sc * 0.7); c.beginPath();
+  for (let k = 0; k < 17; k++) { const a = ang + (k / 16 - 0.5) * 2.7 * open, r = 30 * sc * (0.86 + 0.14 * Math.cos(k * 2.3)); c.moveTo(px, py); c.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r); }
+  c.stroke();
+  c.fillStyle = `rgba(255,255,250,${0.8 * al})`; c.beginPath(); c.arc(px, py, 1.5 * sc, 0, TAU); c.fill();
+}
+
+Stage.create({
+  no: 42, title: 'Dandelion', subtitle: 'canvas 2d · 84 bpm',
+  duration: 20, background: '#6f6a33', grain: 0.055, poster: 12.2, vignette: 0.3,
+  fade: { in: 1.2, out: 1.6, color: '#3a3a1c' },
+  slate: { at: 0.8, hold: 3.0, pos: 'br', color: 'rgba(255,248,230,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 84, duration: 20, seed: 42 });
+    M.master({ reverb: { decay: 3.6, size: 1.2, damp: 0.4 }, fadeIn: 0.5, fadeOut: 2.6 });
+    const fl = M.track('flute', { reverb: 0.6, gain: 0.85, delay: { time: 1.5, fb: 0.25, mix: 0.18 } }), harp = M.track('harp', { reverb: 0.5, gain: 0.85 });
+    const pad = M.track('warmpad', { reverb: 0.6, gain: 0.42 }), wind = M.track('wind', { reverb: 0.4, gain: (t) => 0.5 + 2.2 * gustAt(t), params: { freq: 700 } }), sub = M.track('sub', { reverb: 0.06, gain: 0.45 }), ch = M.track('glass', { reverb: 0.7, gain: 0.5 });
+    wind.hit(0, 0.6, M.beats);
+    const prog = ['Fmaj9', 'Dm9', 'Bbmaj9', 'C6', 'Fmaj9', 'Am7', 'Fadd9'], rt = ['F1', 'D1', 'Bb0', 'C1', 'F1', 'A0', 'F1'];
+    prog.forEach((c, i) => { const b = i * 4; pad.chord(b, c, 4, 0.5, { octave: 3 }); if (i >= 1) sub.note(b, rt[i], 3.6, i === 4 ? 0.85 : 0.55); if (i < 6) harp.arp(b, c, 0.5, 4, { octave: 4, octaves: 2, mode: i % 2 ? 'updown' : 'up', vel: i === 4 ? 0.5 : 0.36 }); });
+    fl.seq(4, 1, ['A5', '-', 'C6', 'A5', 'G5', '-', 'F5', '-', 'D5', '-', 'F5', 'A5', 'G5', '-', '-', '-'], { vel: 0.5 });
+    fl.seq(16, 0.5, ['C6', 'D6', 'F6', '-', 'E6', '-', 'C6', '-', 'A5', '-', 'C6', '-', 'D6', '-', '-', '-'], { vel: 0.62 });
+    fl.seq(24, 1, ['A5', '-', 'G5', 'F5'], { vel: 0.45 });
+    ch.note(M.b(16.4), 'F6', 3, 0.5);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2, dpr: 2 });
+    // out-of-focus meadow: olive into honey gold, with bokeh
+    const c = bg, g = c.createLinearGradient(0, 0, W * 0.6, H); g.addColorStop(0, '#4c5527'); g.addColorStop(0.5, '#8a7a34'); g.addColorStop(1, '#c79a45'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const sun = c.createRadialGradient(1500, 180, 20, 1500, 180, 1100); sun.addColorStop(0, 'rgba(255,232,170,.75)'); sun.addColorStop(0.35, 'rgba(255,210,130,.28)'); sun.addColorStop(1, 'rgba(255,210,130,0)'); c.fillStyle = sun; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 46; i++) { const x = hash(i, 1) * W, y = hash(i, 2) * H, r = 40 + 150 * hash(i, 3) * hash(i, 4), a = 0.05 + 0.13 * hash(i, 5), warm = hash(i, 6) > 0.4; const b = c.createRadialGradient(x, y, r * 0.55, x, y, r); b.addColorStop(0, `rgba(${warm ? '255,226,150' : '190,205,120'},${a})`); b.addColorStop(0.9, `rgba(${warm ? '255,226,150' : '190,205,120'},${a * 1.25})`); b.addColorStop(1, 'rgba(255,226,150,0)'); c.fillStyle = b; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+    // grass blades, far out of focus
+    c.filter = 'blur(9px)'; c.strokeStyle = 'rgba(40,52,20,.5)'; c.lineCap = 'round'; for (let i = 0; i < 26; i++) { const x = hash(i, 11) * W; c.lineWidth = 10 + 26 * hash(i, 12); c.beginPath(); c.moveTo(x, H + 40); c.quadraticCurveTo(x + 60 * (hash(i, 13) - 0.5), H - 260, x + 220 * (hash(i, 14) - 0.5), H - 380 - 420 * hash(i, 15)); c.stroke(); } c.filter = 'none';
+    // seeds on a sphere, golden-angle spaced
+    const r = Stage.rng(42), order = Array.from({ length: NS }, (_, i) => i).sort(() => r() - 0.5);
+    for (let i = 0; i < NS; i++) {
+      const y = 1 - 2 * (i + 0.5) / NS, rad = Math.sqrt(1 - y * y), th = i * 2.39996;
+      const rank = order.indexOf(i);
+      // when it lets go: a few early, most in the gust, stragglers, and one last seed
+      let td; if (rank < 9) td = 4.6 + rank * 0.42 + r() * 0.2; else if (rank < NS * 0.62) td = GUST - 0.5 + 1.6 * Math.pow(r(), 0.8); else if (rank < NS - 1) td = GUST + 1.4 + 3.2 * r(); else td = 16.4;
+      seeds.push({ dx: Math.cos(th) * rad, dy: y, dz: Math.sin(th) * rad, td, ph: r() * TAU, vx: 250 + 220 * r(), vy: 30 + 90 * r(), fg: rank % 23 === 3 && rank > 9, last: rank === NS - 1, k: 0.6 + 0.8 * r() });
+    }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H); c.lineCap = 'round';
+    const gust = gustAt(t), sway = 0.05 * Math.sin(t * 2.1) + 0.11 * gust * Math.sin(t * 6.3) + 0.14 * gust;
+    // stem: a gentle curve that leans with the wind
+    const hx = HX + 46 * sway * 3, hy = HY + 6 * sway;
+    c.strokeStyle = '#7d8a3c'; c.lineWidth = 14; c.beginPath(); c.moveTo(540, H + 40); c.bezierCurveTo(600, 860, 640 + 80 * sway, 700, hx - 10, hy + 36); c.stroke();
+    c.strokeStyle = 'rgba(225,235,150,.5)'; c.lineWidth = 2; c.beginPath(); c.moveTo(545, H + 40); c.bezierCurveTo(605, 860, 645 + 80 * sway, 700, hx - 5, hy + 22); c.stroke();
+    c.fillStyle = '#6a5a2a'; c.beginPath(); c.arc(hx, hy, 40, 0, TAU); c.fill(); c.fillStyle = 'rgba(255,240,200,.25)'; c.beginPath(); c.arc(hx - 10, hy - 12, 20, 0, TAU); c.fill();
+    const list = seeds.map((s) => {
+      const a = t - s.td;
+      if (a <= 0) {   // still attached: leaning with the gusts, trembling harder just before it goes
+        const tremble = (0.03 + 0.10 * gust + 0.25 * smoothstep(-0.5, 0, a)) * Math.sin(t * (9 + 5 * s.k) + s.ph);
+        const ang = Math.atan2(s.dy, s.dx) + tremble + 0.5 * sway * (1 - Math.abs(s.dx)), rr = 44;
+        return { z: s.dz, x: hx + s.dx * rr, y: hy + s.dy * rr, ang, sc: 1.75 * (1 + 0.12 * s.dz), al: 0.42 + 0.58 * (s.dz * 0.5 + 0.5), open: 1 };
+      }
+      // in flight
+      const x0 = hx + s.dx * 44, y0 = hy + s.dy * 44, sc = s.fg ? 3.4 : s.last ? 2.0 : 1.15 + 0.7 * s.k * 0.6;
+      const drag = 1 - Math.exp(-a * 1.4), x = x0 + s.dx * 60 * drag + (s.vx * (s.last ? 0.62 : 1)) * (a * 0.55 + 0.45 * a * a / (1 + a)) * (s.fg ? 1.6 : 1) + 34 * Math.sin(a * 1.3 + s.ph);
+      const y = y0 + s.dy * 50 * drag - s.vy * a * (s.last ? 0.5 : 1) + 28 * Math.sin(a * 1.9 + s.ph * 2) + 9 * a * a * (s.last ? 0.25 : 0.6);
+      const ang = -Math.PI / 2 + 0.5 * Math.sin(a * 1.6 + s.ph) + lerp(Math.atan2(s.dy, s.dx) + Math.PI / 2, 0, clamp01(a * 1.2));
+      return { z: s.fg ? 9 : 2 + s.k, x, y, ang, sc, al: s.fg ? 0.8 : 0.95, open: 1.0, fg: s.fg, fly: true };
+    }).sort((p, q) => p.z - q.z);
+    for (const s of list) { if (s.x < -200 || s.x > W + 200 || s.y < -260 || s.y > H + 200) continue; if (s.fg) { c.filter = 'blur(5px)'; drawSeed(c, s.x, s.y, s.ang, s.sc, s.al, s.open); c.filter = 'none'; } else drawSeed(c, s.x, s.y, s.ang, s.sc, s.al, s.open); }
+    // visible gust: a few fine streaks of air
+    if (gust > 0.4) { c.strokeStyle = `rgba(255,250,235,${0.10 * (gust - 0.4)})`; c.lineWidth = 1.5; for (let i = 0; i < 12; i++) { const y = hash(i, 31) * H, x = Stage.mod(hash(i, 32) * 3000 + t * 1400, W + 700) - 350; c.beginPath(); c.moveTo(x, y); c.bezierCurveTo(x + 120, y - 16, x + 240, y + 16, x + 380, y - 6); c.stroke(); } }
+  }
+});
+</script>
+</body>
+</html>

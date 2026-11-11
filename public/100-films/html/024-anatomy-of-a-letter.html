@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 024 — Anatomy of a Letter</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 024 — ANATOMY OF A LETTER
+ * A type-specimen plate comes alive: one giant lowercase "g", annotated like a botanical drawing.
+ * The guide lines are measured from the font itself (canvas text metrics), so when the typeface changes —
+ * three times, on downbeats — the baseline, x-height, ascender and descender slide to the new face's truth.
+ * Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5, SIZE = 720, GX = 930, BASE = 694;
+const PAPER = '#efe7d5', INK = '#181513', RED = '#c7311d';
+const FACES = [
+  { fam: '"Fraunces Variable"', name: 'Fraunces', note: 'soft, wonky old-style', w: 400 },
+  { fam: '"Playfair Display Variable"', name: 'Playfair Display', note: 'high-contrast transitional', w: 500 },
+  { fam: '"Newsreader Variable"', name: 'Newsreader', note: 'a text face for long reading', w: 400 },
+  { fam: '"Cormorant Garamond Variable"', name: 'Cormorant Garamond', note: 'display garalde', w: 500 }
+];
+const SWITCH = [BAR * 5, BAR * 5.5, BAR * 6, BAR * 6.5], ORDER = [0, 1, 2, 3, 0];
+// anatomy: label, anchor as fractions of the glyph box (x across, y from x-height line to descender), label position, time
+const PARTS = [
+  { name: 'EAR', fx: 0.90, fy: 0.07, lx: 1480, ly: 300, t: BAR * 1.6 },
+  { name: 'BOWL', fx: 0.10, fy: 0.24, lx: 350, ly: 446, t: BAR * 2.1 },
+  { name: 'COUNTER', fx: 0.43, fy: 0.22, lx: 1480, ly: 438, t: BAR * 2.6 },
+  { name: 'LINK', fx: 0.27, fy: 0.52, lx: 350, ly: 618, t: BAR * 3.1 },
+  { name: 'LOOP', fx: 0.52, fy: 0.955, lx: 1480, ly: 916, t: BAR * 3.6 }
+];
+let ctx, met = [];
+
+Stage.create({
+  no: 24, title: 'Anatomy of a Letter', subtitle: 'type specimen · 96 bpm',
+  duration: 20, background: PAPER, grain: 0.05, poster: 11,
+  fonts: FACES.map((f) => `${f.w} 100px ${f.fam}`).concat(['500 20px "JetBrains Mono Variable"', 'italic 400 44px "Fraunces Variable"']),
+  fade: { in: 0.7, out: 1.0, color: PAPER },
+  slate: { at: 0.8, hold: 2.8, color: 'rgba(24,21,19,.85)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 24 });
+    M.master({ reverb: { decay: 2.0, size: 0.85, damp: 0.4 }, fadeOut: 1.6 });
+    const harp = M.track('harp', { reverb: 0.4, gain: 1.0 }), plk = M.track('pluck', { reverb: 0.3, gain: 0.9, pan: -0.2, params: { decay: 1.6, bright: 0.5 } });
+    const wb = M.track('woodblock', { reverb: 0.25, gain: 0.7 }), bass = M.track('bass', { reverb: 0.05, gain: 0.6, params: { cutoff: 400, envAmt: 1.2 } }), cel = M.track('celesta', { reverb: 0.5, gain: 0.6 });
+    const prog = ['G', 'Em7', 'Cmaj7', 'D', 'G', 'Bm7', 'Cmaj7', 'Gadd9'], roots = ['G1', 'E1', 'C2', 'D2', 'G1', 'B1', 'C2', 'G1'];
+    prog.forEach((c, i) => {
+      const b = i * 4, n = S.chord(c, 4);
+      if (i < 7) { harp.seq(b, 0.5, [n[0], n[2], n[1], n[2], n[0] + 12, n[2], n[1], n[2]], { vel: i === 0 ? 0.45 : 0.55, gate: 1.6 }); if (i >= 1) plk.seq(b, 1, [n[2] + 12, null, n[1] + 12, n[0] + 12], { vel: 0.5, gate: 1.5 }); }
+      else { harp.chord(b, ['G3', 'D4', 'G4', 'A4', 'B4', 'D5'], 4, 0.65, { strum: 0.08 }); }
+      if (i >= 1) { bass.note(b, roots[i], 1.6, 0.8); if (i < 7) bass.note(b + 2.5, roots[i], 1, 0.55); }
+    });
+    PARTS.forEach((p) => wb.hit(M.b(p.t), 0.8));
+    [0.9, 1.15, 1.4, 1.65].forEach((t) => wb.hit(M.b(t * 1), 0.4, 1, { tone: 1200 }));       // four guide lines click into place
+    SWITCH.forEach((t, k) => cel.note(M.b(t), ['D6', 'B5', 'E6', 'G6'][k], 1.5, 0.6));
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    for (const f of FACES) {
+      ctx.font = `${f.w} ${SIZE}px ${f.fam}`;
+      const g = ctx.measureText('g'), x = ctx.measureText('x'), h = ctx.measureText('h');
+      // rasterise the big glyph once (drawing 800 px type every frame is slow); frames just blit it
+      const bw = Math.ceil(g.actualBoundingBoxRight + g.actualBoundingBoxLeft + 40), bh = Math.ceil(g.actualBoundingBoxAscent + g.actualBoundingBoxDescent + 40), b = Stage.buffer(bw * 2, bh * 2);
+      b.scale(2, 2); b.font = ctx.font; b.fillStyle = INK; b.textBaseline = 'alphabetic'; b.fillText('g', 20 + g.actualBoundingBoxLeft, 20 + g.actualBoundingBoxAscent); f.img = b.canvas; f.bw = bw; f.bh = bh;
+      met.push({ xh: x.actualBoundingBoxAscent, asc: h.actualBoundingBoxAscent, desc: g.actualBoundingBoxDescent, l: g.actualBoundingBoxLeft, r: g.actualBoundingBoxRight, top: g.actualBoundingBoxAscent, adv: g.width });
+    }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // which face, and the blend into it
+    let k = 0, u = 1; for (let i = 0; i < SWITCH.length; i++) if (t >= SWITCH[i]) { k = i + 1; u = prog(t, SWITCH[i], 0.6, E.inOutCubic); }
+    const A = met[ORDER[Math.max(0, k - 1)]], B = met[ORDER[k]], fa = FACES[ORDER[Math.max(0, k - 1)]], fb = FACES[ORDER[k]];
+    const m = {}; for (const key of Object.keys(B)) m[key] = lerp(A[key], B[key], k === 0 ? 1 : u);
+    const drift = 6 * Math.sin(t * 0.35);
+    // plate furniture: border, registration marks, plate number
+    c.strokeStyle = 'rgba(24,21,19,.5)'; c.lineWidth = 1; c.strokeRect(70.5, 70.5, W - 141, H - 141);
+    c.fillStyle = 'rgba(24,21,19,.6)'; c.font = '500 20px "JetBrains Mono Variable"'; c.textBaseline = 'alphabetic'; c.textAlign = 'right'; c.fillText('PLATE  XXIV', W - 110, 118); c.textAlign = 'left';
+    // the glyph rises in, then cross-fades between faces
+    const rise = prog(t, 0.2, 1.3, E.outExpo);
+    const drawG = (f, mm, al) => { if (al <= 0.003) return; c.save(); c.globalAlpha = al; const x = GX - (mm.r - mm.l) / 2 + drift; c.beginPath(); c.rect(0, 0, W, BASE + mm.desc + 40); c.clip(); c.drawImage(f.img, x - 20, BASE - mm.top - 20 + (1 - rise) * 320, f.bw, f.bh); c.restore(); };
+    if (k > 0 && u < 1) drawG(fa, A, (1 - u) * rise); drawG(fb, B, (k === 0 ? 1 : u) * rise);
+    const gx0 = GX - (m.r - m.l) / 2 + drift, gw = m.r - m.l, gtop = BASE - m.top, gh = m.top + m.desc;
+    // guides, measured from the font
+    const guides = [['ASCENDER', BASE - m.asc, 0.9], ['X-HEIGHT', BASE - m.xh, 1.15], ['BASELINE', BASE, 1.4], ['DESCENDER', BASE + m.desc, 1.65]];
+    guides.forEach(([name, y, t0]) => {
+      const a = prog(t, t0, 0.9, E.inOutCubic) * (1 - prog(t, 18.6, 0.8)); if (a <= 0) return;
+      c.strokeStyle = RED; c.globalAlpha = 0.85; c.lineWidth = 1.5; c.beginPath(); c.moveTo(110, y); c.lineTo(110 + (W - 220) * a, y); c.stroke();
+      c.globalAlpha = a; c.fillStyle = RED; c.font = '500 20px "JetBrains Mono Variable"'; c.fillText(name.split('').join(' '), 112, y - 12);
+      c.textAlign = 'right'; c.fillText(String(Math.round((BASE - y) / SIZE * 1000)).padStart(4, ' '), W - 112, y - 12); c.textAlign = 'left'; c.globalAlpha = 1;
+    });
+    // anatomical labels with leader lines
+    PARTS.forEach((p) => {
+      const a = prog(t, p.t, 0.8, E.outCubic) * (1 - prog(t, 18.4, 0.8)); if (a <= 0) return;
+      const ax = gx0 + p.fx * gw, ay = gtop + p.fy * gh, right = p.lx > GX, ex = right ? p.lx - 22 : p.lx + 22 + c.measureText(p.name.split('').join(' ')).width;
+      c.strokeStyle = INK; c.lineWidth = 1.4; c.globalAlpha = 0.9;
+      const kx = lerp(ax, ex, 0.55), e = E.inOutCubic(clamp01(a * 1.3));
+      c.beginPath(); c.moveTo(ex, p.ly - 6); c.lineTo(lerp(ex, kx, Math.min(1, e * 2)), p.ly - 6); if (e > 0.5) c.lineTo(lerp(kx, ax, (e - 0.5) * 2), lerp(p.ly - 6, ay, (e - 0.5) * 2)); c.stroke();
+      if (e >= 1) { c.fillStyle = PAPER; c.beginPath(); c.arc(ax, ay, 7, 0, TAU); c.fill(); c.strokeStyle = RED; c.lineWidth = 2; c.stroke(); c.fillStyle = RED; c.beginPath(); c.arc(ax, ay, 2.6, 0, TAU); c.fill(); }
+      c.globalAlpha = a; c.fillStyle = INK; c.font = '500 20px "JetBrains Mono Variable"'; c.textAlign = right ? 'left' : 'left';
+      const label = p.name.split('').join(' '), n = Math.ceil(label.length * clamp01(a * 1.6)); c.fillText(label.slice(0, n), right ? p.lx : p.lx, p.ly); c.globalAlpha = 1;
+    });
+    // the face's name
+    const na = prog(t, BAR * 4.1, 0.8, E.outCubic) * (1 - prog(t, 18.6, 0.8));
+    if (na > 0) {
+      const f = k > 0 && u < 0.5 ? fa : fb, sw = k > 0 ? Math.abs(u - 0.5) * 2 : 1;
+      c.globalAlpha = na * sw; c.textAlign = 'left'; c.fillStyle = INK; c.font = 'italic 400 44px "Fraunces Variable"'; c.fillText(f.name, 112, H - 126);
+      c.fillStyle = 'rgba(24,21,19,.62)'; c.font = '500 20px "JetBrains Mono Variable"'; c.fillText(f.note.toUpperCase().split('').join(' '), 112, H - 92); c.globalAlpha = 1;
+    }
+  }
+});
+</script>
+</body>
+</html>

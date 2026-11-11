@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 083 — Cymatics</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 083 — CYMATICS
+ * Sand on a vibrating plate jumps to the silent lines — every pitch has a shape. Thirty-eight thousand
+ * grains take a random step each frame whose size is the local amplitude of the plate's standing wave,
+ * |cos nπx · cos mπy ∓ cos mπx · cos nπy|: where the plate moves they are thrown about, where it is still
+ * they stay, so they gather on the nodal lines (Chladni, 1787). Five pure tones, one per bar, each mode more
+ * intricate; at every change the old figure is suddenly on moving ground and has to find the new one.
+ * Stateful: the sand is a simulation, not a drawing. Five bars at 60 bpm (4 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, PS = 860, PX = 420, PY = 110, NG = 38000, PI = Math.PI;
+const TONES = [{ n: 0, m: 2, sg: -1, hz: 110, midi: 45, t0: 1.0 }, { n: 1, m: 3, sg: 1, hz: 196, midi: 55, t0: 4.0 }, { n: 2, m: 5, sg: -1, hz: 392, midi: 67, t0: 8.0 }, { n: 3, m: 6, sg: 1, hz: 587, midi: 74, t0: 12.0 }, { n: 4, m: 7, sg: -1, hz: 880, midi: 81, t0: 16.0 }];
+TONES.forEach((q, i) => { q.t1 = i < 4 ? TONES[i + 1].t0 - 0.12 : 19.2; });
+let bg, ctx, hud, sand, img, gx, gy, seed;
+const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let r = Math.imul(seed ^ seed >>> 15, 1 | seed); r = r + Math.imul(r ^ r >>> 7, 61 | r) ^ r; return ((r ^ r >>> 14) >>> 0) / 4294967296; };
+function init() { seed = 8383; gx = new Float32Array(NG); gy = new Float32Array(NG); for (let i = 0; i < NG; i++) { gx[i] = rnd(); gy[i] = rnd(); } }
+
+Stage.create({
+  no: 83, title: 'Cymatics', subtitle: 'five tones, five figures · 60 bpm',
+  duration: 20, background: '#1b1c1f', grain: 0.045, poster: 15.4, stateful: true,
+  fonts: ['500 15px "JetBrains Mono Variable"', '500 34px "JetBrains Mono Variable"'],
+  fade: { in: 0.8, out: 1.2 },
+  slate: { at: 0.4, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 20, seed: 83 });
+    M.master({ reverb: { decay: 3.2, size: 1.1, damp: 0.5 }, fadeOut: 1.0 });
+    const sine = M.track('sine', { reverb: 0.3, gain: 0.5 }), oct = M.track('tri', { reverb: 0.3, gain: 0.08 }), sub = M.track('sub', { reverb: 0.05, gain: 0.3 }), air = M.track('air', { reverb: 0.2, gain: (t) => 0.1 + 0.3 * Math.exp(-Stage.mod(t, 4) * 1.1) * (t > 0.9 ? 1 : 0) }), shk = M.track('shaker', { reverb: 0.2, gain: 0.3 }), tk = M.track('tick', { reverb: 0.3, gain: 0.3 });
+    TONES.forEach((q, i) => { const d = q.t1 - q.t0; sine.note(q.t0, q.midi, d, [0.7, 0.62, 0.5, 0.42, 0.34][i], { attack: 0.45, release: 0.4 }); oct.note(q.t0, q.midi + 12, d, 0.4, { attack: 0.6 }); sub.note(q.t0, 33, d, 0.5, { attack: 0.5 }); tk.hit(q.t0, 0.5, 0.05, { tone: 1200 + 400 * i }); for (let h = 0; h < 22; h++) shk.hit(q.t0 + 0.05 + h * 0.07 + 0.02 * Math.sin(h * 3), 0.55 * Math.exp(-h * 0.13), 0.05, { pan: Math.sin(h * 1.7) * 0.6 }); });
+    air.hit(0, 0.6, 20);
+    return M;
+  },
+
+  setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 }); hud = Stage.canvas2d({ z: 3, dpr: 2 }); sand = Stage.buffer(PS, PS); img = sand.createImageData(PS, PS);
+    const c = bg, g = c.createRadialGradient(PX + PS / 2, 400, 200, W / 2, H / 2, 1300); g.addColorStop(0, '#2c2d31'); g.addColorStop(1, '#101113'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // the plate: black anodised, a bevel that catches light, a centre clamp
+    c.save(); c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 60; c.shadowOffsetY = 30; c.fillStyle = '#0b0b0d'; c.beginPath(); c.roundRect(PX - 14, PY - 14, PS + 28, PS + 28, 10); c.fill(); c.restore();
+    const pg = c.createLinearGradient(PX, PY, PX + PS, PY + PS); pg.addColorStop(0, '#1a1b1f'); pg.addColorStop(0.5, '#0d0e10'); pg.addColorStop(1, '#151619'); c.fillStyle = pg; c.beginPath(); c.roundRect(PX - 14, PY - 14, PS + 28, PS + 28, 10); c.fill();
+    const r = Stage.rng(83); c.save(); c.beginPath(); c.roundRect(PX - 14, PY - 14, PS + 28, PS + 28, 10); c.clip(); for (let i = 0; i < 700; i++) { c.strokeStyle = `rgba(255,255,255,${0.008 + 0.02 * r()})`; c.lineWidth = 1; const y = PY - 14 + r() * (PS + 28); c.beginPath(); c.moveTo(PX - 14, y); c.lineTo(PX + PS + 14, y + (r() - 0.5) * 4); c.stroke(); } c.restore();
+    const eg = c.createLinearGradient(PX, PY, PX + PS, PY + PS); eg.addColorStop(0, 'rgba(255,255,255,.34)'); eg.addColorStop(0.5, 'rgba(255,255,255,.04)'); eg.addColorStop(1, 'rgba(255,255,255,.16)'); c.strokeStyle = eg; c.lineWidth = 2; c.beginPath(); c.roundRect(PX - 13, PY - 13, PS + 26, PS + 26, 9); c.stroke();
+    const bx = PX + PS / 2, by = PY + PS / 2, bgd = c.createRadialGradient(bx - 4, by - 5, 1, bx, by, 15); bgd.addColorStop(0, '#9a9da6'); bgd.addColorStop(1, '#2c2d33'); c.fillStyle = bgd; c.beginPath(); c.arc(bx, by, 15, 0, 6.2832); c.fill(); c.strokeStyle = '#08080a'; c.lineWidth = 2; c.beginPath(); for (let k = 0; k < 6; k++) { const a = k * 1.0472; c.lineTo(bx + Math.cos(a) * 8, by + Math.sin(a) * 8); } c.closePath(); c.stroke();
+    init();
+  },
+
+  reset() { init(); },
+
+  frame(t) {
+    if (!gx) init();
+    // which tone, how hard the plate is shaking
+    let k = -1; for (let i = 0; i < TONES.length; i++) if (t >= TONES[i].t0) k = i;
+    const q = k >= 0 ? TONES[k] : null, amp = q ? smoothstep(q.t0, q.t0 + 0.4, t) * (1 - smoothstep(q.t1 - 0.25, q.t1, t)) : 0, kickS = 1;
+    if (amp > 0) { const n = q.n * PI, m = q.m * PI, S = lerp(0.075, 0.016, smoothstep(q.t0 + 0.3, q.t0 + 2.6, t)) * amp;      // big hops first, then finer and finer
+      const sg = q.sg, scr = 0.022 * Math.max(0, 1 - (t - q.t0) / 0.45) * (q.t0 > 2 ? 1 : 0);
+      for (let sub = 0; sub < 4; sub++) for (let i = 0; i < NG; i++) { let x = gx[i], y = gy[i]; const a = Math.abs(Math.cos(n * x) * Math.cos(m * y) + sg * Math.cos(m * x) * Math.cos(n * y)) * 0.5, st = S * a + scr; x += (rnd() - 0.5) * 2 * st; y += (rnd() - 0.5) * 2 * st; if (x < 0) x = -x; else if (x > 1) x = 2 - x; if (y < 0) y = -y; else if (y > 1) y = 2 - y; gx[i] = x; gy[i] = y; } }
+    // sand to pixels: overlapping grains pile up brighter
+    const d = img.data; d.fill(0);
+    for (let i = 0; i < NG; i++) { const px = (gx[i] * (PS - 2)) | 0, py = (gy[i] * (PS - 2)) | 0, j = (py * PS + px) * 4, tone = 200 + (i % 56); d[j] = tone + 30 > 255 ? 255 : tone + 30; d[j + 1] = tone + 12; d[j + 2] = tone - 22; const a = d[j + 3] + 190; d[j + 3] = a > 255 ? 255 : a; const j2 = j + 4; d[j2] = d[j]; d[j2 + 1] = d[j + 1]; d[j2 + 2] = d[j + 2]; const a2 = d[j2 + 3] + 96; d[j2 + 3] = a2 > 255 ? 255 : a2; const j3 = j + PS * 4; d[j3] = d[j]; d[j3 + 1] = d[j + 1]; d[j3 + 2] = d[j + 2]; const a3 = d[j3 + 3] + 96; d[j3 + 3] = a3 > 255 ? 255 : a3; }
+    sand.putImageData(img, 0, 0);
+    const c = ctx; c.clearRect(0, 0, W, H); const jit = amp * 0.7; c.drawImage(sand.canvas, PX + (rnd() - 0.5) * jit, PY + (rnd() - 0.5) * jit);
+    // readout
+    const h = hud; h.clearRect(0, 0, W, H); const on = prog(t, 0.6, 0.8) * (1 - prog(t, 19.2, 0.6)), X0 = PX + PS + 96;
+    h.textBaseline = 'alphabetic'; h.textAlign = 'left'; h.font = '500 15px "JetBrains Mono Variable"'; h.fillStyle = `rgba(214,216,224,${0.5 * on})`; h.fillText('M O D E   ( n ,  m )   ·   T O N E', X0, 320);
+    TONES.forEach((tn, i) => { const cur = i === k, past = i < k, y = 372 + i * 58, a = cur ? 1 : past ? 0.42 : 0.2; h.font = (cur ? '500 34px' : '500 15px') + ' "JetBrains Mono Variable"'; h.fillStyle = cur ? `rgba(240,226,196,${on})` : `rgba(214,216,224,${a * on})`; h.fillText(`(${tn.n}, ${tn.m})${tn.sg > 0 ? '⁺' : '⁻'} ·  ${String(tn.hz).padStart(3, ' ')} Hz`, X0, y + (cur ? 8 : 0));
+      if (cur) { h.strokeStyle = `rgba(240,226,196,${0.8 * on})`; h.lineWidth = 2; h.beginPath(); for (let x = 0; x <= 150; x += 2) { const yy = y + 34 + 9 * amp * Math.sin(x * 0.045 * (1 + i * 0.8) + t * 30); x ? h.lineTo(X0 + x, yy) : h.moveTo(X0 + x, yy); } h.stroke(); } });
+    h.font = '500 15px "JetBrains Mono Variable"'; h.fillStyle = `rgba(214,216,224,${0.4 * on})`; h.fillText('3 8  0 0 0   G R A I N S', X0, 760); h.fillText(amp > 0.02 ? 'D R I V I N G' : 'A T   R E S T', X0, 786);
+  }
+});
+</script>
+</body>
+</html>

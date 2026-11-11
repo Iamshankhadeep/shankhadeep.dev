@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 052 — Cellular</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 052 — CELLULAR
+ * Four rules on a grid: Conway's Life, seeded on purpose — still lifes and oscillators, a glider gun, and at
+ * bar 5 an r-pentomino that erupts. All 240 generations are computed before the film starts (12 a second),
+ * with each cell's age and time since death, so frames can fade smoothly between generations.
+ * Ten bars at 120 bpm (2 s each); the music's density follows the population. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, GW = 96, GH = 54, CELL = 20, GPS = 12, GENS = 244, ERUPT = 42;
+const LIFE = evolve();
+const ramp = Stage.color.ramp(['#e6fff0', '#8fe6b8', '#3fb09c', '#2b7f9c', '#3b4fa0']);
+let ctx, buf;
+
+function evolve() {
+  let g = new Uint8Array(GW * GH);
+  const put = (x, y, rows) => rows.forEach((row, j) => row.split('').forEach((ch, i) => { if (ch === 'O') g[(y + j) * GW + x + i] = 1; }));
+  put(3, 3, ['........................O', '......................O.O', '............OO......OO............OO', '...........O...O....OO............OO', 'OO........O.....O...OO', 'OO........O...O.OO....O.O', '..........O.....O.......O', '...........O...O', '............OO']);     // Gosper glider gun
+  put(76, 5, ['..OOO...OOO', '', 'O....O.O....O', 'O....O.O....O', 'O....O.O....O', '..OOO...OOO', '', '..OOO...OOO', 'O....O.O....O', 'O....O.O....O', 'O....O.O....O', '', '..OOO...OOO']);   // pulsar
+  put(12, 42, ['OO', 'OO']); put(24, 47, ['.OO.', 'O..O', '.OO.']); put(8, 30, ['OOO']); put(84, 34, ['.OOO', 'OOO.']); put(64, 46, ['OO..', 'OO..', '..OO', '..OO']); put(50, 5, ['.O.', 'O.O', 'O.O', '.O.']);
+  const gens = [], ages = [], dead = [], pop = []; let age = new Uint8Array(GW * GH), dd = new Uint8Array(GW * GH).fill(255);
+  for (let n = 0; n < GENS; n++) {
+    if (n === ERUPT) put(62, 26, ['.OO', 'OO.', '.O.']); if (n === 108) put(34, 30, ['.O.....', '...O...', 'OO..OOO']);   // … and later an acorn                                   // the r-pentomino
+    for (let i = 0; i < g.length; i++) { if (g[i]) { age[i] = Math.min(250, age[i] + 1); dd[i] = 0; } else { age[i] = 0; dd[i] = Math.min(255, dd[i] + 1); } }
+    gens.push(g); ages.push(Uint8Array.from(age)); dead.push(Uint8Array.from(dd)); let p = 0; for (let i = 0; i < g.length; i++) p += g[i]; pop.push(p);
+    const nx = new Uint8Array(GW * GH);
+    for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) { const i = y * GW + x, c = g[i - GW - 1] + g[i - GW] + g[i - GW + 1] + g[i - 1] + g[i + 1] + g[i + GW - 1] + g[i + GW] + g[i + GW + 1]; nx[i] = (c === 3 || (c === 2 && g[i])) ? 1 : 0; }
+    g = nx;
+  }
+  return { gens, ages, dead, pop };
+}
+
+Stage.create({
+  no: 52, title: 'Cellular', subtitle: 'conway’s life · 120 bpm',
+  duration: 20, background: '#080b1c', grain: 0.05, poster: 13,
+  fonts: ['500 18px "JetBrains Mono Variable"'],
+  slate: { at: 0.6, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 20, seed: 52 });
+    M.master({ reverb: { decay: 2.0, size: 0.9, damp: 0.45 }, fadeOut: 1.8 });
+    const arp = M.track('arp', { reverb: 0.3, gain: 1.0, delay: { time: 0.75, fb: 0.35, mix: 0.25 }, lowpass: (t) => 900 + 2600 * smoothstep(6, 14, t) }), plk = M.track('pluck', { reverb: 0.35, gain: 1.0, pan: 0.25, params: { decay: 0.9, bright: 0.55 } });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.32 }), tk = M.track('tick', { reverb: 0.2, gain: 0.3, params: { tone: 2400 } }), pad = M.track('pad', { reverb: 0.6, gain: 0.6 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.5 }), boom = M.track('impact', { reverb: 0.5, gain: 0.5 });
+    const sc = S.scale('A2', 'minorPent', 4), maxPop = Math.max(...LIFE.pop);
+    // sixteenth notes: pitch walks with the population, density with its size
+    for (let s = 0; s < 152; s++) { const t = s * 0.125, gen = Math.min(GENS - 1, Math.floor(t * GPS)), p = LIFE.pop[gen], d = p / maxPop; if (hash(s, 3) > 0.25 + 0.75 * d && s % 4) continue; const idx = (p + s * 3) % 9 + Math.floor(d * 8); arp.note(t * 2, sc[Math.min(sc.length - 1, idx)], 0.22, 0.35 + 0.3 * (s % 4 === 0)); if (s % 8 === 4 && gen > ERUPT) plk.note(t * 2, sc[Math.min(sc.length - 1, idx + 4)], 0.5, 0.5); }
+    const prog = ['Am9', 'Fmaj7', 'Dm9', 'Em7', 'Am9', 'Fmaj7', 'Dm9', 'Em7', 'Am9', 'Am9'], rt = ['A1', 'F1', 'D1', 'E1'];
+    prog.forEach((c, i) => { const b = i * 4; pad.chord(b, c, 4, 0.5, { octave: 3 }); if (i >= 1) sub.note(b, rt[i % 4], 3.5, i >= 4 ? 0.8 : 0.5); if (i >= 2 && i < 9) kick.pattern(b, 1, i >= 4 ? 'xxxx' : 'x.x.', { vel: 0.8 }); if (i < 9) tk.pattern(b, 0.5, 'x.x.x.xx', { vel: 0.5 }); });
+    boom.hit(M.b(ERUPT / GPS), 0.8, 3);
+    return M;
+  },
+
+  setup() { ctx = Stage.canvas2d({ z: 1 }); buf = Stage.buffer(W, H); },
+
+  frame(t) {
+    const c = buf, gf = Math.min(GENS - 1.001, t * GPS), n = Math.floor(gf), f = E.inOutCubic(gf - n);
+    const cur = LIFE.gens[n], nxt = LIFE.gens[Math.min(GENS - 1, n + 1)], age = LIFE.ages[n], dead = LIFE.dead[n];
+    c.fillStyle = '#080b1c'; c.fillRect(0, 0, W, H);
+    // faint lattice
+    c.fillStyle = 'rgba(120,150,220,.045)'; for (let y = 0; y < GH; y += 2) for (let x = (y / 2) % 2 * 2; x < GW; x += 4) c.fillRect(x * CELL + 9, y * CELL + 9, 2, 2);
+    for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) {
+      const i = y * GW + x, a = cur[i], b = nxt[i];
+      if (!a && !b) {   // trails: a cool afterimage that fades over a second
+        const d = dead[i]; if (d < 14) { c.fillStyle = `rgba(59,79,160,${0.34 * (1 - (d + (gf - n)) / 14)})`; c.fillRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6); } continue;
+      }
+      const al = a && b ? 1 : a ? 1 - f : f, born = !a && b, s = born ? 0.4 + 0.6 * f : a && !b ? 1 - 0.3 * f : 1, sz = (CELL - 3) * s, o = (CELL - sz) / 2;
+      c.globalAlpha = al; c.fillStyle = ramp(clamp01((age[i] - 1 + (gf - n)) / 26)); c.beginPath(); c.roundRect(x * CELL + o, y * CELL + o, sz, sz, 4); c.fill();
+    }
+    c.globalAlpha = 1;
+    // composite with a soft bloom
+    const m = ctx; m.globalCompositeOperation = 'source-over'; m.filter = 'none'; m.globalAlpha = 1; m.drawImage(c.canvas, 0, 0);
+    m.globalCompositeOperation = 'lighter'; m.filter = 'blur(10px)'; m.globalAlpha = 0.55; m.drawImage(c.canvas, 0, 0); m.filter = 'none'; m.globalAlpha = 1; m.globalCompositeOperation = 'source-over';
+    // readout
+    const on = prog(t, 0.8, 0.8) * (1 - prog(t, 19, 0.8)); m.font = '500 18px "JetBrains Mono Variable"'; m.textAlign = 'right'; m.textBaseline = 'alphabetic'; m.fillStyle = `rgba(8,11,28,${0.7 * on})`; m.fillRect(W - 470, H - 110, 400, 46);
+    m.fillStyle = `rgba(200,240,220,${0.85 * on})`; m.fillText('G E N  ' + String(n).padStart(3, '0') + '   ·   P O P  ' + String(LIFE.pop[n]).padStart(4, '0'), W - 92, H - 80);
+  }
+});
+</script>
+</body>
+</html>

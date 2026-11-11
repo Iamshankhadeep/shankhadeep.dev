@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 009 — Deep Field</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 009 — DEEP FIELD
+ * One slow push through foreground stars toward a single distant spiral galaxy, painted in one fragment shader.
+ * Six bars at 60 bpm (4 s each):
+ *   bar 1  dark starfield, lateral parallax drift            bar 4  the galaxy grows, the veil slides to the edges
+ *   bar 2  a dust veil gathers light in front of us          bar 5  peak — the disc fills a third of the frame
+ *   bar 3  low impact (8.0 s): the veil parts                bar 6  hold, rotating almost imperceptibly
+ * The camera is real perspective: the galaxy sits at depth 1, the camera travels c(t) → 0.94, every star layer at
+ * depth z is magnified by z / (z − c) and fades as it passes the lens. Behind everything is a static deep field. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+
+const ZOOM = Math.log(16), R0 = 0.020;                                   // galaxy radius 0.02 → 0.32 (of frame height)
+const travel = (t) => 0.985 * E.inOutSine(clamp01((t + 1) / 18.5)) + 0.015 * t / 24;   // 0..1, settles in bar 5, then creeps
+const cam = (t) => 1 - Math.exp(-ZOOM * travel(t));
+const galR = (t) => R0 * Math.exp(ZOOM * travel(t));
+const galC = (t) => { const s = E.inOutSine(clamp01(t / 24)); return [lerp(0.060, 0.098, s), lerp(-0.012, 0.012, s)]; };
+const drift = (t) => [-0.046 * E.inOutSine(clamp01(t / 15)) - 0.004 * t / 24, 0.012 * Math.sin(t * 0.21 + 0.4) + 0.006 * t / 24];
+const hole = (t) => (0.085 + 1.75 * galR(t)) * prog(t, 7.85, 3.4, E.outCubic);
+
+// hero stars with diffraction spikes — placed by hand: [depth, reference time, x, y at that time, intensity, warmth 0..1]
+const HEROES = [
+  [0.34, 0.0, -0.440, 0.215, 0.95, 0.20],
+  [0.52, 0.0, 0.520, -0.150, 0.80, 0.85],
+  [0.66, 0.0, 0.265, 0.330, 0.55, 0.60],
+  [0.80, 0.0, -0.640, -0.060, 0.70, 0.75],
+  [0.90, 6.0, -0.300, -0.250, 0.50, 0.30],
+  [1.10, 24.0, -0.560, 0.285, 1.00, 0.80],
+  [1.32, 24.0, 0.640, -0.310, 0.72, 0.15],
+  [2.10, 24.0, 0.470, 0.370, 0.42, 0.55]
+].map(([z, tr, x, y, I, w]) => { const g = galC(tr), d = drift(tr), gap = z - cam(tr); return { z, I, w, wx: (x - g[0]) * gap + d[0], wy: (y - g[1]) * gap + d[1] }; });
+const heroBuf = new Float32Array(32);
+
+const FRAG = `
+uniform float uCam, uCamVel, uE, uGr, uGrot, uVeil, uVeilS, uHole, uOpen, uRim, uPulse, uExpose;
+uniform vec2 uGc, uDrift, uDriftVel;
+uniform float uHero[32];
+const float PA = .50;        // position angle of the disc's major axis
+const float CI = .47;        // cos(inclination)
+const int NL = 12;
+const float Z[12] = float[12](.10, .16, .24, .34, .46, .58, .70, .82, .94, 1.18, 1.70, 3.0);
+
+vec3 starTint(float h){ vec3 c = mix(vec3(1., .76, .56), vec3(.64, .78, 1.), smoothstep(.1, .9, h)); return mix(c, vec3(1.), .42); }
+
+// one jittered-grid layer of point stars. g: grid coords, cellPx: cell size in px, vel: screen velocity in px/frame (in grid orientation)
+vec3 starLayer(vec2 g, float cellPx, float seed, float dens, vec2 vel){
+  vec2 id = floor(g), f = fract(g) - .5;
+  if (hash21(id + seed) > dens) return vec3(0.);
+  vec2 o = (hash22(id + seed + 17.) - .5) * .62;
+  float b = pow(hash21(id + seed + 41.), 6.);
+  vec2 v = (f - o) * cellPx;
+  float sp = length(vel);
+  if (sp > .4) { vec2 dir = vel / sp; float al = dot(v, dir), ac = dot(v, vec2(-dir.y, dir.x)); v = vec2(sign(al) * max(abs(al) - sp * .25, 0.), ac); }   // 180° shutter
+  float sig = .78 + 1.05 * b, d2 = dot(v, v);
+  float I = (.11 + .95 * b) * exp(-d2 / (sig * sig)) + b * .30 * exp(-sqrt(d2) / 2.6);
+  return starTint(hash21(id + seed + 77.)) * I / (1. + sp * .10);
+}
+
+// faint, far smudges: the deep field itself
+vec3 farGalaxies(vec2 s, float px){
+  vec2 g = rot(1.1) * s * 6.4 + 4.4, id = floor(g), f = fract(g) - .5;
+  if (hash21(id + 3.7) > .62) return vec3(0.);
+  vec2 v = rot(hash21(id + 23.) * PI) * ((f - (hash22(id + 9.1) - .5) * .5) * px / 6.4);
+  float ar = mix(.2, .9, hash21(id + 31.)), sz = mix(2.6, 9., pow(hash21(id + 47.), 2.));
+  float d = length(vec2(v.x, v.y / ar)) / sz;
+  float I = exp(-d * 1.7) * .20 + exp(-d * d * 7.) * .22;
+  return mix(vec3(1., .80, .60), vec3(.68, .79, 1.), hash21(id + 53.)) * I * mix(.3, 1., hash21(id + 61.));
+}
+
+// fbm whose octaves fade to their mean once they are finer than a pixel (px = pixel footprint in p units) → no shimmer while the galaxy grows
+float gfbm(vec2 p, float px){
+  float a = .5, s = 0., f = 1.; mat2 m = mat2(.8, -.6, .6, .8);
+  for (int i = 0; i < 5; i++) { s += a * mix(.5, vnoise(p), clamp(1.7 - f * px * 3.2, 0., 1.)); p = m * p * 2.03 + 17.3; a *= .5; f *= 2.03; }
+  return s;
+}
+
+vec3 galaxy(vec2 pf){
+  vec2 q = rot(PA) * pf / uGr;                       // major axis along x
+  vec2 d = vec2(q.x, q.y / CI);                      // de-projected disc plane
+  float r = length(d) + 1e-4;
+  if (r > 3.2) return vec3(0.);
+  float px = 1. / (uGr * uRes.y * CI);
+  float rb = length(vec2(q.x, q.y / .72));           // the bulge is rounder than the disc
+  // unwind the logarithmic spiral so the arms become straight spokes; noise sampled there follows the arms
+  vec2 w = rot(2.55 * log(r + .035) - uGrot) * d;
+  float rho = .95 + .30 * log(r + .035);
+  vec2 sp = w / r * rho; float spx = px * max(rho, .25) / r;
+  float n1 = gfbm(sp * 4.6 + 3., spx * 4.6);
+  float ang = atan(w.y, w.x) + (n1 - .5) * 1.7;
+  float arm = pow(.5 + .5 * cos(2. * ang), 2.3);
+  float armIn = smoothstep(.06, .24, r), edge = 1. - smoothstep(.72, 1.35, r);
+  float disc = exp(-r * 3.0) * edge;
+  vec2 dr = rot(-uGrot) * d;                         // rigidly rotating disc coordinates
+  float cl = gfbm(dr * 6.5 + 9., px * 6.5);
+  float fine = clamp(1.6 - px * 30. * 3., 0., 1.);
+  float kn = smoothstep(.60, .86, vnoise(dr * 30. + 5.)) * fine;
+  float kr = smoothstep(.70, .90, vnoise(dr * 21. + 31.)) * fine;
+  float grainN = mix(1., .78 + .44 * vnoise(dr * 110.), clamp(1.5 - px * 110. * 2.6, 0., 1.));
+  // dust lanes ride the inner edge of each arm, heavier on the near side of the tilted disc
+  float dn = gfbm(sp * 12. + 21., spx * 12.);
+  float dust = pow(.5 + .5 * cos(2. * ang + 1.2), 3.5) * smoothstep(.34, .66, dn) * smoothstep(.05, .15, r) * (1. - smoothstep(.62, 1.05, r));
+  dust = clamp(dust * (1. + .6 * smoothstep(.05, -.45, q.y)), 0., 1.);
+  float I = disc * (.20 + 1.55 * arm * armIn) * (.62 + .76 * cl) * grainN;
+  vec3 c = mix(vec3(.98, .84, .70), vec3(.56, .69, .96), smoothstep(.08, .72, r)) * I * 1.25;
+  c += vec3(.70, .82, 1.) * kn * arm * armIn * disc * 2.2;                 // young blue clusters
+  c += vec3(1., .46, .54) * kr * arm * armIn * disc * 1.7 * smoothstep(.15, .4, r);   // a few rose emission knots
+  c *= 1. - .80 * dust;
+  c += vec3(1., .85, .64) * (1.35 * exp(-rb * 10.5) + .42 * exp(-rb * 4.4)) * (1. - .45 * dust);
+  c += vec3(1., .95, .86) * exp(-rb * rb * 620.) * (1.1 + .9 * uPulse);
+  c += vec3(.46, .56, .82) * .055 * exp(-r * 1.5);                         // outer halo
+  return c;
+}
+
+void main(){
+  vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y, pf = p - uGc;
+  float lp = length(pf);
+
+  // ── the veil: domain-warped dust, pushed outward where it parts
+  float push = uOpen * .46 * exp(-lp / (uHole * 1.5 + .002));
+  vec2 vp = pf * (1. - push) / uVeilS;
+  vec2 wq = vp * 1.45 + vec2(2.3, -1.1);
+  vec2 warp = vec2(fbm(wq * 1.2 + vec2(5.2, 1.3) + uTime * .008), fbm(wq * 1.2 + vec2(1.7, 9.2) - uTime * .006)) - .5;
+  float n = fbm(wq + warp * 1.6) + .16 * exp(-dot(vp, vp) * 5.);
+  float rdg = 1. - abs(2. * fbm(wq * 2.3 + warp * 2.8 + 11.) - 1.);
+  float dens = smoothstep(.36, .76, n) * (.30 + .85 * rdg * rdg);
+  vec3 vt = mix(vec3(.25, .37, .58), vec3(.66, .36, .43), smoothstep(.40, .60, fbm(wq * .6 + vec2(20., 4.))));
+  vec2 hq = rot(PA) * pf; hq.y *= 1.3;
+  float hd = length(hq) * (1. + (fbm(vp * 3.4 + 30.) - .5) * 1.15);
+  float mask = mix(1., smoothstep(uHole * .55, uHole * 1.45, hd), uOpen);
+  float rim = smoothstep(uHole * .45, uHole * 1.05, hd) * (1. - smoothstep(uHole * 1.05, uHole * 2.2, hd));
+  float vd = dens * mask;
+  float T = exp(-2.3 * vd);                                               // light from behind the veil
+  float cover = 1. - .72 * mask * smoothstep(.30, .62, n);
+
+  // ── sky
+  vec3 col = vec3(.0105, .012, .028) + vec3(.010, .012, .028) * fbm(p * 1.3 + 40.);
+
+  // ── static deep field (stars at infinity, tiny far galaxies)
+  float ms = 1. + .10 * uE; vec2 sd = pf / ms;
+  vec3 deep = starLayer(rot(.7) * sd * 66. + 3.3, uRes.y * ms / 66., 91., .55, vec2(0.)) * .55
+            + starLayer(rot(2.1) * sd * 37. + 8.1, uRes.y * ms / 37., 57., .50, vec2(0.)) * .85
+            + farGalaxies(sd, uRes.y * ms);
+  col += deep * T * cover;
+
+  // ── the galaxy, seen only through the gap
+  col += galaxy(pf) * (1. - mask) * exp(-3. * vd);
+
+  // ── the veil's own glow
+  col += vt * vd * uVeil * .30;
+  col += mix(vt, vec3(.80, .66, .62), .5) * dens * mask * rim * uRim * .34;
+
+  // ── foreground stars in true perspective
+  for (int i = 0; i < NL; i++) {
+    float z = Z[i], gap = z - uCam;
+    float fade = smoothstep(.07, .34, gap / (1. - uCam));
+    if (fade <= 0.) continue;
+    float fi = float(i), G = 23. + 16. * fi / 11.;
+    mat2 R = rot(fi * 1.3 + .4);
+    vec2 g = R * (pf * gap + uDrift) * (G / z) + fi * 13.7;
+    vec2 vel = R * ((pf * uCamVel - uDriftVel) / gap) * uRes.y / 60.;
+    vec3 s = starLayer(g, uRes.y * z / (G * gap), fi * 7.31 + 1.9, .34, vel);
+    col += s * fade * mix(1.15, .62, fi / 11.) * mix(1., T * cover, smoothstep(.4, .6, z));
+  }
+
+  // ── hero stars: core, halo, four fine diffraction spikes
+  for (int i = 0; i < 8; i++) {
+    float I = uHero[i * 4 + 2]; if (I <= 0.) continue;
+    float tp = uHero[i * 4 + 3], behind = step(1.5, tp); tp -= 2. * behind;
+    vec2 v = (p - vec2(uHero[i * 4], uHero[i * 4 + 1])) * uRes.y; float d = length(v);
+    if (d > 420.) continue;
+    vec2 r = rot(.24) * v; float L = 34. + 54. * I;
+    float spike = exp(-abs(r.y) / .85) * exp(-abs(r.x) / L) + exp(-abs(r.x) / .85) * exp(-abs(r.y) / L);
+    float s = 1.5 + 1.5 * I;
+    float lum = 1.5 * exp(-d * d / (s * s)) + .30 / (1. + d * d * .028) + .012 * exp(-d / 60.) + .62 * spike;
+    col += mix(starTint(1. - tp), vec3(1.), .25) * lum * I * mix(1., T * cover, behind);
+  }
+
+  col *= 1. - .40 * dot(p, p);
+  col *= uExpose;
+  col = 1. - exp(-col * 1.35);
+  col = pow(col, vec3(1.03, 1.0, .97)) + dither(gl_FragCoord.xy, float(uFrame));
+  fragColor = vec4(col, 1.);
+}`;
+
+let sky;
+
+Stage.create({
+  no: 9, title: 'Deep Field', subtitle: 'fragment shader · 60 bpm',
+  duration: 24, background: '#03040a', grain: 0.055, poster: 18,
+  fade: { in: 2.2, out: 2.6, color: '#020308' },
+  slate: { at: 1.0, hold: 3.4, pos: 'bl', color: 'rgba(212,220,240,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 60, duration: 24, seed: 9 });
+    M.master({ reverb: { decay: 6.5, size: 1.5, damp: 0.5 }, fadeIn: 1.5, fadeOut: 3.2 });
+    const swell = (t) => 0.55 + 0.25 * smoothstep(4, 8, t) + 0.3 * smoothstep(11, 16.5, t) - 0.25 * smoothstep(20, 24, t);
+    const pad = M.track('pad', { inst: 'warmpad', reverb: 0.6, gain: swell, params: { A: 2.4, R: 3.6, cutoff: 760 }, lowpass: (t) => 520 + 1300 * smoothstep(6, 17, t) });
+    const high = M.track('high', { inst: 'glasspad', reverb: 0.85, gain: 0.6, params: { A: 2.8, R: 4.0, cutoff: 2400 } });
+    const sub = M.track('sub', { reverb: 0.04, gain: 0.42, params: { A: 0.5, R: 1.4 } });
+    const bell = M.track('bell', { reverb: 0.7, gain: 0.8, delay: { time: 1.5, fb: 0.55, mix: 0.42 } });
+    const boom = M.track('impact', { reverb: 0.75, gain: 0.62 });
+    const rise = M.track('riser', { reverb: 0.6, gain: 0.22 });
+    const air = M.track('air', { reverb: 0.2, gain: 0.8 });
+    air.hit(0, 0.8, 24);
+    // open fifths: C#  A  F#  G#  A  C#
+    const fifths = [['C#2', 'G#2', 'C#3'], ['A1', 'E2', 'A2'], ['F#1', 'C#2', 'F#2', 'C#3'], ['G#1', 'D#2', 'G#2', 'D#3'], ['A1', 'E2', 'A2', 'E3'], ['C#2', 'G#2', 'C#3', 'G#3']];
+    fifths.forEach((n, i) => pad.chord(i * 4, n, 4.6, i < 2 ? 0.55 : 0.7));
+    high.chord(15.5, ['E4', 'B4'], 5, 0.5); high.chord(20, ['G#4', 'C#5'], 4, 0.42);
+    sub.note(4, 'A1', 3.8, 0.45); sub.note(8, 'F#1', 3.8, 0.8); sub.note(12, 'G#1', 3.8, 0.7); sub.note(16, 'A1', 3.9, 0.85); sub.note(20, 'C#2', 3.6, 0.6);
+    rise.hit(5.5, 0.6, 2.5); boom.hit(8, 0.85, 4);
+    // sparse bells, answered by their own echoes
+    [[2, 'G#5', 0.34], [5, 'E5', 0.34], [7, 'C#6', 0.30], [9, 'B5', 0.42], [10.5, 'G#5', 0.34], [12, 'D#6', 0.40], [13.5, 'G#5', 0.34], [15, 'B5', 0.38],
+     [16, 'C#6', 0.56], [16, 'E6', 0.44], [17.5, 'G#5', 0.40], [19, 'B5', 0.36], [20, 'G#5', 0.40], [21.5, 'C#6', 0.32]]
+      .forEach(([b, p, v]) => bell.note(b, p, 2, v));
+    return M;
+  },
+
+  setup() { sky = Stage.shader({ frag: FRAG, z: 1 }); },
+
+  frame(t) {
+    const c = cam(t), h = 1 / 120, g = galC(t), d = drift(t), d0 = drift(t - h), d1 = drift(t + h);
+    const bellHit = Stage.hit('bell', t, 1.8), boomHit = Stage.hit('impact', t, 1.6);
+    HEROES.forEach((s, i) => {
+      const gap = s.z - c, f = smoothstep(0.07, 0.34, gap / (1 - c));
+      heroBuf[i * 4] = g[0] + (s.wx - d[0]) / Math.max(gap, 1e-3);
+      heroBuf[i * 4 + 1] = g[1] + (s.wy - d[1]) / Math.max(gap, 1e-3);
+      heroBuf[i * 4 + 2] = gap > 0 ? s.I * f * (1 + 0.22 * bellHit) : 0;
+      heroBuf[i * 4 + 3] = s.w + (s.z > 0.5 ? 2 : 0);
+    });
+    sky.draw(t, {
+      uCam: c, uCamVel: (cam(t + h) - cam(t - h)) / (2 * h), uE: travel(t),
+      uGc: g, uGr: galR(t), uGrot: 0.5 + 0.013 * t,
+      uDrift: d, uDriftVel: [(d1[0] - d0[0]) / (2 * h), (d1[1] - d0[1]) / (2 * h)],
+      uVeil: lerp(0.30, 1, smoothstep(1.0, 7.4, t)) * lerp(1, 0.66, smoothstep(9, 16, t)),
+      uVeilS: Math.exp(1.45 * travel(t)),
+      uHole: hole(t), uOpen: prog(t, 7.85, 0.5), uRim: win(t, 7.9, 13.5, 0.5, 4.0),
+      uPulse: bellHit, uExpose: 1 + 0.10 * boomHit + 0.05 * bellHit * smoothstep(15, 16, t),
+      uHero: heroBuf
+    });
+  }
+});
+</script>
+</body>
+</html>

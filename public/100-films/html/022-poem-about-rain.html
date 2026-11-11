@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 022 — A Short Poem About Rain</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 022 — A SHORT POEM ABOUT RAIN
+ * Words fall like rain and settle into four lines. Every word is a note on the felt piano: the score decides
+ * when each one lands, and the picture reads those times back. Seven bars at 70 bpm (3.43 s each):
+ * rain alone → three lines → a held breath → the last line as the rain thins → the ink runs. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 240 / 70;
+const POEM = [
+  'It starts as a rumour on the roof,',
+  'then every window is listening.',
+  'The street forgets its dust,',
+  'and the evening smells of beginnings.'
+];
+// landing beats for each word (beats from the start of the film)
+const BEATS = [
+  [4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5],
+  [8, 8.75, 9.5, 10.5, 11],
+  [12, 12.75, 13.5, 14.5, 15.25],
+  [20, 20.5, 21, 22, 22.75, 23.25]
+];
+const FONT = 'italic 400 78px "Newsreader Variable"', LH = 124, TOP = 540 - LH * 1.5 + 22, INKC = '226,236,248';
+let rain, txt, words = [];
+
+Stage.create({
+  no: 22, title: 'A Short Poem About Rain', subtitle: 'kinetic type · 70 bpm',
+  duration: 24, background: '#27313f', grain: 0.06, poster: 19.4, vignette: 0.4,
+  fonts: [FONT],
+  fade: { in: 1.2, out: 1.4 }, slate: { at: 0.8, hold: 2.4, color: 'rgba(226,236,248,.85)' },
+
+  music(S) {
+    const M = S.score({ bpm: 70, duration: 24, seed: 22 });
+    M.master({ reverb: { decay: 3.4, size: 1.1, damp: 0.5 }, fadeIn: 0.8, fadeOut: 2.6 });
+    const felt = M.track('words', { inst: 'felt', reverb: 0.5, gain: 1.0, delay: { time: 1.5, fb: 0.2, mix: 0.12 } });
+    const low = M.track('low', { inst: 'felt', reverb: 0.5, gain: 0.8 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.42, lowpass: 900 });
+    const air = M.track('rain', { inst: 'air', reverb: 0.15, gain: (t) => 0.5 * (1 - 0.6 * smoothstep(16.5, 23, t)), params: { type: 'bp', freq: 3000, q: 0.5 } }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 });
+    air.hit(0, 0.9, M.beats);
+    // A minor: Am9 — Fmaj7 — Cmaj7 — Em7 … Fmaj9 — Am(add9)
+    const harm = [['Am9', 'A1'], ['Am9', 'A1'], ['Fmaj7', 'F1'], ['Cmaj7', 'C2'], ['Em7', 'E1'], ['Fmaj9', 'F1'], ['Am9', 'A1']];
+    harm.forEach(([c, r], i) => { const b = i * 4; pad.chord(b, c, 4, 0.5); low.note(b, S.midi(r) + 12, 3.5, 0.5); low.note(b + 1.5, S.midi(r) + 19, 2, 0.34); if (i >= 1) sub.note(b, r, 3.6, 0.6); });
+    // the words: each line climbs through its chord, the last word of a line resolves downward
+    const tones = [['A3', 'C4', 'E4', 'G4', 'B4', 'C5', 'E5', 'B4'], ['F4', 'A4', 'C5', 'E5', 'C5'], ['E4', 'G4', 'B4', 'D5', 'C5'], ['A4', 'C5', 'E5', 'G5', 'B5', 'A5']];
+    BEATS.forEach((ln, li) => ln.forEach((b, wi) => felt.note(b, tones[li][wi], 2.2, wi === ln.length - 1 ? 0.62 : 0.5)));
+    low.chord(24, ['A2', 'E3', 'B3', 'C4'], 4, 0.45, { strum: 0.15 });
+    return M;
+  },
+
+  setup() {
+    rain = Stage.canvas2d({ z: 1 }); txt = Stage.canvas2d({ z: 2, dpr: 2 });
+    const ev = Stage.events('words'); let k = 0;
+    txt.font = FONT;
+    POEM.forEach((line, li) => {
+      const ws = line.split(' '), sp = txt.measureText(' ').width, total = txt.measureText(line).width; let x = (W - total) / 2;
+      ws.forEach((w, wi) => { const wd = txt.measureText(w).width; words.push({ w, x: x + wd / 2, y: TOP + li * LH, wd, land: ev[k].t, k, rot: (hash(k, 3) - 0.5) * 0.5, dx: (hash(k, 4) - 0.5) * 90 }); x += wd + sp; k++; });
+    });
+  },
+
+  frame(t) {
+    // ── rain
+    const c = rain; c.clearRect(0, 0, W, H);
+    const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#222b38'); g.addColorStop(0.6, '#34414f'); g.addColorStop(1, '#47566a'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const glow = c.createRadialGradient(W / 2, 520, 60, W / 2, 520, 900); glow.addColorStop(0, 'rgba(120,150,190,.20)'); glow.addColorStop(1, 'rgba(120,150,190,0)'); c.fillStyle = glow; c.fillRect(0, 0, W, H);
+    const amount = 0.55 + 0.45 * smoothstep(0, 3, t) - 0.62 * smoothstep(16.5, 22.5, t);
+    c.lineCap = 'round';
+    for (let i = 0; i < 520; i++) {
+      if (hash(i, 1) > amount) continue;
+      const depth = hash(i, 2), sp = 900 + 900 * depth, len = 26 + 70 * depth, period = (H + 300) / sp;
+      const ph = (t + hash(i, 3) * 9) / period, cyc = Math.floor(ph), u = ph - cyc;
+      const x0 = hash(i + cyc * 977, 4) * (W + 400), y = -150 + u * (H + 300), x = x0 - y * 0.16;
+      c.strokeStyle = `rgba(${INKC},${0.05 + 0.15 * depth})`; c.lineWidth = 0.8 + 1.1 * depth;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + len * 0.16, y - len); c.stroke();
+    }
+    // ── words
+    const d = txt; d.clearRect(0, 0, W, H); d.font = FONT; d.textAlign = 'center'; d.textBaseline = 'alphabetic';
+    const run = prog(t, BAR * 6 + 0.5, 3.0, E.inQuad);
+    for (const w of words) {
+      const a = t - w.land; if (a < -0.62) continue;
+      let y = w.y, x = w.x, rot = 0, al = 1, sy = 1, blur = 0;
+      if (a < 0) { const u = 1 + a / 0.62, e = u * u; y = w.y - 520 * (1 - e); x = w.x + w.dx * (1 - e); rot = w.rot * (1 - e * 0.8); al = clamp01(u * 2.2); blur = 5 * (1 - u); sy = 1 + 0.25 * (1 - u); }
+      else { const b = Math.exp(-a * 7) * Math.sin(a * 22); y = w.y - 13 * b * (a < 0.7 ? 1 : 0); rot = w.rot * 0.2 * Math.exp(-a * 6) * Math.cos(a * 18); sy = 1 - 0.10 * Math.exp(-a * 14); }
+      if (run > 0) { const r = clamp01(run * 1.4 - hash(w.k, 9) * 0.4); y += 150 * r * r; sy *= 1 + 1.3 * r; al *= 1 - r; blur += 9 * r; }
+      // ripple where the word lands
+      if (a > 0 && a < 1.5) { const u = a / 1.5; d.strokeStyle = `rgba(${INKC},${0.34 * (1 - u) * (1 - u)})`; d.lineWidth = 1.5; d.beginPath(); d.ellipse(w.x, w.y + 16, (w.wd * 0.5 + 16) * (0.5 + 0.9 * E.outCubic(u)), 9 * (0.5 + 0.9 * E.outCubic(u)), 0, 0, TAU); d.stroke(); }
+      if (al <= 0.003) continue;
+      d.save(); d.translate(x, y); d.rotate(rot); d.scale(1, sy); d.filter = blur > 0.2 ? `blur(${blur.toFixed(1)}px)` : 'none';
+      d.fillStyle = `rgba(${INKC},${0.95 * al})`; d.fillText(w.w, 0, 0);
+      if (run > 0 && al > 0) { d.filter = 'blur(3px)'; d.fillStyle = `rgba(${INKC},${0.22 * al})`; d.fillRect(-w.wd * 0.32 + hash(w.k, 11) * w.wd * 0.6, 0, 3, 190 * run); }
+      d.restore();
+    }
+    d.filter = 'none';
+  }
+});
+</script>
+</body>
+</html>

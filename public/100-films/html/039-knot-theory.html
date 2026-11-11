@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 039 — Knot Theory</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 039 — KNOT THEORY
+ * One loop of clay rope ties itself into ever more complex torus knots and unties again (three.js).
+ * The tube is rebuilt every frame from a curve interpolated between (p, q) torus knots; knot and backdrop are a
+ * tonal pair that changes with each knot. Seven bars at 105 bpm (2.29 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const BAR = 240 / 105, TAU = Math.PI * 2, NP = 420;
+// stages: [p, q, tube radius, clay colour, backdrop colour, name]
+const KN = [
+  { p: 1, q: 0, r: 0.30, clay: '#d9703d', bg: '#f0c9a8', name: 'unknot', sub: '0₁' },
+  { p: 2, q: 3, r: 0.30, clay: '#d9703d', bg: '#f0c9a8', name: 'trefoil', sub: 'T(2, 3)' },
+  { p: 2, q: 5, r: 0.25, clay: '#86a37c', bg: '#d7e4cc', name: 'cinquefoil', sub: 'T(2, 5)' },
+  { p: 3, q: 4, r: 0.22, clay: '#2f56b8', bg: '#bcd3ef', name: 'torus knot', sub: 'T(3, 4)' },
+  { p: 1, q: 0, r: 0.30, clay: '#d9703d', bg: '#f0c9a8', name: 'unknot', sub: '0₁' }
+];
+const T_AT = [0, BAR * 1, BAR * 3, BAR * 5, BAR * 6.2], MORPH = 1.25;
+let T3, mesh, floor, key, label;
+
+function knotPoint(k, u, out) {
+  const s = KN[k], a = u * TAU, R = 1.55, rr = s.q === 0 ? 0 : 0.62;
+  const c = R + rr * Math.cos(s.q * a); out.set(c * Math.cos(s.p * a), c * Math.sin(s.p * a), rr * Math.sin(s.q * a) * 1.25); return out;
+}
+
+Stage.create({
+  no: 39, title: 'Knot Theory', subtitle: 'three.js · torus knots · 105 bpm',
+  duration: 16, background: '#f0c9a8', grain: 0.05, poster: 9,
+  fonts: ['italic 400 56px "Fraunces Variable"', '500 18px "JetBrains Mono Variable"'],
+  fade: { in: 0.8, out: 1.2, color: '#f0c9a8' },
+  slate: { at: 0.6, hold: 2.6, color: 'rgba(70,40,24,.82)' },
+
+  music(S) {
+    const M = S.score({ bpm: 105, duration: 16, seed: 39 });
+    M.master({ reverb: { decay: 1.6, size: 0.85, damp: 0.45 }, fadeOut: 1.6 });
+    const plk = M.track('pluck', { reverb: 0.3, gain: 1.2, delay: { time: 0.75, fb: 0.25, mix: 0.18 }, params: { decay: 1.1, bright: 0.6 } }), con = M.track('conga', { reverb: 0.2, gain: 0.7 }), sh = M.track('shaker', { reverb: 0.1, gain: 0.45 });
+    const bass = M.track('bass', { reverb: 0.04, gain: 0.7, params: { cutoff: 480, envAmt: 1.8 } }), mar = M.track('marimba', { reverb: 0.3, gain: 0.8, pan: 0.2 }), wh = M.track('whoosh', { reverb: 0.4, gain: 0.4 }), ch = M.track('kalimba', { reverb: 0.5, gain: 0.7 });
+    const prog = ['F', 'Dm7', 'Bbmaj7', 'C', 'F', 'Am7', 'Fadd9'], roots = ['F1', 'D1', 'Bb0', 'C1', 'F1', 'A0', 'F1'];
+    prog.forEach((c, i) => {
+      const b = i * 4, n = S.chord(c, 4);
+      if (i < 6) { plk.seq(b, 0.5, [n[0], n[2], n[1], n[0] + 12, null, n[2], n[1], n[2] + 12], { vel: 0.6 }); con.pattern(b, 0.5, 'x.xx.x.x', { vel: 0.6 }); if (i >= 1) { sh.pattern(b, 0.25, 'x.xxx.xxx.xxx.xx', { vel: 0.4 }); bass.seq(b, 0.5, [roots[i], null, null, roots[i], null, S.midi(roots[i]) + 12, null, roots[i]], { vel: 0.85, gate: 0.8 }); } if (i >= 2) mar.seq(b + 0.25, 1, [n[2] + 12, n[1] + 12, n[0] + 12, n[1] + 12], { vel: 0.45 }); }
+      else { plk.chord(b, ['F3', 'C4', 'F4', 'G4', 'A4'], 4, 0.7, { strum: 0.06 }); bass.note(b, 'F1', 3.5, 0.9); }
+    });
+    T_AT.slice(1).forEach((t, k) => { wh.hit(M.b(t) - 0.3, 0.7, 2.2); ch.note(M.b(t + MORPH), ['A5', 'C6', 'E6', 'F6'][k], 1.5, 0.6); });
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ fov: 28, bloom: false, composer: true, exposure: 1.0, z: 1 });
+    const { scene, renderer, camera } = T3;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    scene.background = new T.Color(KN[0].bg);
+    mesh = new T.Mesh(new T.BufferGeometry(), new T.MeshStandardMaterial({ color: KN[0].clay, roughness: 0.88, metalness: 0 })); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+    floor = new T.Mesh(new T.PlaneGeometry(80, 80), new T.ShadowMaterial({ color: '#5a2e14', opacity: 0.26 })); floor.rotation.x = -Math.PI / 2; floor.position.y = -2.75; floor.receiveShadow = true; scene.add(floor);
+    key = new T.DirectionalLight('#fff2e2', 3.0); key.position.set(-5, 9, 6); key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 9; key.shadow.bias = -0.0006; const sc = key.shadow.camera; sc.left = -6; sc.right = 6; sc.top = 6; sc.bottom = -6; sc.near = 1; sc.far = 40; scene.add(key);
+    scene.add(new T.HemisphereLight('#ffffff', '#e8c9a8', 1.25));
+    const rim = new T.DirectionalLight('#ffffff', 0.8); rim.position.set(6, 3, -6); scene.add(rim);
+    camera.position.set(0, 2.6, 13.2); camera.lookAt(0, -0.2, 0);
+    // caption
+    label = Stage.div(Stage.el, { position: 'absolute', right: '150px', bottom: '120px', textAlign: 'right', zIndex: 5, color: 'rgba(60,34,18,.86)' });
+    label.innerHTML = '<div id="kn" style="font:italic 400 56px \'Fraunces Variable\',serif;line-height:1.1"></div><div id="ks" style="font:500 18px \'JetBrains Mono Variable\',monospace;letter-spacing:.22em;margin-top:10px;opacity:.75"></div>';
+  },
+
+  frame(t) {
+    const T = THREE, { scene } = T3;
+    let k = 0, u = 1; for (let i = 1; i < KN.length; i++) if (t >= T_AT[i]) { k = i; u = prog(t, T_AT[i], MORPH, E.inOutCubic); }
+    const a = Math.max(0, k - 1), e = k === 0 ? 1 : u;
+    // curve: interpolate point by point between the two knots (the rope passes through itself for an instant, like clay)
+    const pts = [], pa = new T.Vector3(), pb = new T.Vector3();
+    for (let i = 0; i < NP; i++) { knotPoint(a, i / NP, pa); knotPoint(k, i / NP, pb); pts.push(pa.clone().lerp(pb, e)); }
+    const curve = new T.CatmullRomCurve3(pts, true), rad = lerp(KN[a].r, KN[k].r, e) * (1 + 0.05 * Stage.hit('conga', t, 0.12));
+    mesh.geometry.dispose(); mesh.geometry = new T.TubeGeometry(curve, NP, rad, 22, true);
+    const grow = prog(t, 0.1, 1.2, E.outBack);
+    mesh.rotation.set(0.95 + 0.12 * Math.sin(t * 0.5), t * 0.42, 0.1 * Math.sin(t * 0.37)); mesh.scale.setScalar(0.25 + 0.75 * grow); mesh.position.y = 0.1 + 0.08 * Math.sin(t * 1.1);
+    // tonal pair cross-fades with the knot
+    mesh.material.color.set(Stage.color.mix(KN[a].clay, KN[k].clay, e)); scene.background.set(Stage.color.mix(KN[a].bg, KN[k].bg, e));
+    floor.material.color.set(Stage.color.mix(Stage.color.mix(KN[a].clay, KN[k].clay, e), '#201008', 0.55));
+    T3.render();
+    // caption swaps at the middle of each morph
+    const cur = k > 0 && u < 0.5 ? a : k, vis = k === 0 ? prog(t, 0.8, 0.6) : Math.abs(u - 0.5) * 2;
+    const kn = label.firstChild, ks = label.lastChild; if (kn.textContent !== KN[cur].name) { kn.textContent = KN[cur].name; ks.textContent = KN[cur].sub; }
+    label.style.opacity = (clamp01(vis) * (1 - prog(t, 15, 0.8))).toFixed(3); label.style.transform = `translateY(${((1 - clamp01(vis)) * 14).toFixed(1)}px)`;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 038 — Contour</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 038 — CONTOUR
+ * A topographic map draws itself: contour lines rise through an invented landscape like a tide.
+ * The terrain is fractal noise with a summit and a lake basin; contours are extracted once by marching squares
+ * and plotted level by level. Eight bars at 96 bpm (2.5 s each): graticule → water → contours climbing (bars 2–6)
+ * → relief shading, trail and labels (7) → a red survey mark on the summit (8). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5, CELL = 8, GW = W / CELL + 1, GH = H / CELL + 1;
+const PAPER = '#efe6d3', SEPIA = '112,74,40', BLUE = '86,136,168', RED = '#c2371f';
+const LEVELS = 17, WATER = 0.2, SUMMIT = [1180, 430], LAKE = [520, 700];
+let base, ctx, hgt, levels = [], shore = [], shade, trail = [], N = Stage.makeNoise(38);
+
+function height(x, y) {
+  let h = 0.5 + 0.34 * N.fbm2(x * 0.0019, y * 0.0019, 3) + 0.012 * N.noise2(x * 0.011, y * 0.011);
+  h += 0.52 * Math.exp(-(Math.pow(x - SUMMIT[0], 2) + Math.pow(y - SUMMIT[1], 2)) / (2 * 300 * 300));
+  h += 0.16 * Math.exp(-(Math.pow(x - 1560, 2) + Math.pow(y - 780, 2)) / (2 * 190 * 190));
+  h -= 0.5 * Math.exp(-(Math.pow((x - LAKE[0]) * 0.8, 2) + Math.pow(y - LAKE[1], 2)) / (2 * 210 * 210));
+  return h;
+}
+function march(level) {          // marching squares → array of segments, sorted west → east for a plotter-like reveal
+  const segs = [], f = (a, b) => (level - a) / (b - a);
+  for (let j = 0; j < GH - 1; j++) for (let i = 0; i < GW - 1; i++) {
+    const a = hgt[j * GW + i], b = hgt[j * GW + i + 1], c = hgt[(j + 1) * GW + i + 1], d = hgt[(j + 1) * GW + i];
+    const k = (a > level ? 8 : 0) | (b > level ? 4 : 0) | (c > level ? 2 : 0) | (d > level ? 1 : 0); if (k === 0 || k === 15) continue;
+    const x = i * CELL, y = j * CELL, T = [x + f(a, b) * CELL, y], R = [x + CELL, y + f(b, c) * CELL], B = [x + f(d, c) * CELL, y + CELL], L = [x, y + f(a, d) * CELL];
+    const add = (p, q) => segs.push([p[0], p[1], q[0], q[1]]);
+    switch (k) { case 1: case 14: add(L, B); break; case 2: case 13: add(B, R); break; case 3: case 12: add(L, R); break; case 4: case 11: add(T, R); break; case 6: case 9: add(T, B); break; case 7: case 8: add(L, T); break; case 5: add(L, T); add(B, R); break; case 10: add(L, B); add(T, R); break; }
+  }
+  return segs.sort((p, q) => p[0] - q[0]);
+}
+
+Stage.create({
+  no: 38, title: 'Contour', subtitle: 'marching squares · 96 bpm',
+  duration: 20, background: PAPER, grain: 0.055, poster: 18.6,
+  fonts: ['italic 500 30px "Cormorant Garamond Variable"', '600 22px "Cormorant Garamond Variable"', '500 15px "JetBrains Mono Variable"'],
+  fade: { in: 0.8, out: 1.2, color: PAPER },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(112,74,40,.9)', shadow: '0 0 10px #efe6d3, 0 0 5px #efe6d3' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 38 });
+    M.master({ reverb: { decay: 2.4, size: 1.0, damp: 0.4 }, fadeOut: 1.8 });
+    const gtr = M.track('guitar', { reverb: 0.35, gain: 1.1, humanize: 0.4 }), harp = M.track('harp', { reverb: 0.5, gain: 0.8 }), sh = M.track('shaker', { reverb: 0.1, gain: 0.4 });
+    const bass = M.track('bass', { inst: 'pluck', reverb: 0.2, gain: 1.4, params: { decay: 1.8, bright: 0.3, damp: 0.6 } }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.4 }), wb = M.track('woodblock', { reverb: 0.3, gain: 0.7 }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 });
+    const prog = ['G', 'Em7', 'Cadd9', 'D', 'G', 'Bm7', 'Cadd9', 'G'], roots = ['G1', 'E1', 'C2', 'D2', 'G1', 'B1', 'C2', 'G1'];
+    prog.forEach((c, i) => {
+      const b = i * 4, n = S.chord(c, 3);
+      if (i < 7) gtr.seq(b, 0.5, [n[0], n[2], n[1] + 12, n[2], n[0] + 12, n[2], n[1] + 12, n[2]], { vel: i < 1 ? 0.45 : 0.6, gate: 1.6 }); else gtr.chord(b, ['G2', 'D3', 'G3', 'B3', 'D4', 'G4'], 4, 0.7, { strum: 0.07 });
+      if (i >= 1) { bass.note(b, roots[i], 1.8, 0.8); sub.note(b, roots[i], 3.5, 0.5); if (i < 7) bass.note(b + 2.5, roots[i], 1.2, 0.5); }
+      if (i >= 2 && i < 7) { sh.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.45 }); harp.seq(b + 0.5, 1, [n[2] + 24, n[1] + 24, n[0] + 24, n[1] + 12], { vel: 0.4 + 0.03 * i, gate: 1.5 }); }
+      pad.chord(b, c, 4, 0.5, { octave: 3 });
+    });
+    wb.hit(28, 0.9); wb.hit(28.25, 0.5);
+    return M;
+  },
+
+  setup() {
+    base = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 });
+    hgt = new Float32Array(GW * GH); let mn = 1e9, mx = -1e9;
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const h = height(i * CELL, j * CELL); hgt[j * GW + i] = h; mn = Math.min(mn, h); mx = Math.max(mx, h); }
+    for (let i = 0; i < hgt.length; i++) hgt[i] = (hgt[i] - mn) / (mx - mn);
+    for (let k = 0; k < LEVELS; k++) levels.push({ v: WATER + 0.035 + k * (0.97 - WATER - 0.035) / (LEVELS - 1), segs: null, index: k % 4 === 0, m: 400 + k * 60 });
+    levels.forEach((l) => { l.segs = march(l.v); });
+    for (let k = 0; k < 4; k++) shore.push(march(WATER - 0.012 - k * 0.022));
+    const lake = march(WATER);
+    // base sheet: paper, water tint, graticule and frame are static
+    const c = base, r = Stage.rng(38); c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 14000; i++) { c.fillStyle = `rgba(${r() > 0.5 ? '255,250,240' : '120,90,50'},${0.05 * r()})`; c.fillRect(r() * W, r() * H, 1 + r() * 2, 1 + r() * 2); }
+    // relief shading image (light from the north-west), used later as a multiply layer
+    const sb = Stage.buffer(GW, GH), id = sb.createImageData(GW, GH);
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const dx = hgt[j * GW + Math.min(GW - 1, i + 1)] - hgt[j * GW + Math.max(0, i - 1)], dy = hgt[Math.min(GH - 1, j + 1) * GW + i] - hgt[Math.max(0, j - 1) * GW + i], s = clamp01(0.5 + (dx + dy) * 9), v = 255 * (0.35 + 0.65 * (1 - s)), q = (j * GW + i) * 4; id.data[q] = v * 0.86; id.data[q + 1] = v * 0.78; id.data[q + 2] = v * 0.66; id.data[q + 3] = 255 * Math.abs(s - 0.5) * 1.5 * smoothstep(WATER, WATER + 0.03, hgt[j * GW + i]); }
+    sb.putImageData(id, 0, 0); shade = sb.canvas;
+    // water mask as an image too
+    const wb2 = Stage.buffer(GW, GH), wd = wb2.createImageData(GW, GH); for (let i = 0; i < GW * GH; i++) { const a = smoothstep(WATER + 0.004, WATER - 0.004, hgt[i]); wd.data[i * 4] = 150; wd.data[i * 4 + 1] = 190; wd.data[i * 4 + 2] = 208; wd.data[i * 4 + 3] = 150 * a; } wb2.putImageData(wd, 0, 0); this.water = wb2.canvas; this.lake = lake;
+    // the trail: from the lake shore to the summit, wandering
+    const from = [LAKE[0] + 250, LAKE[1] + 60]; for (let i = 0; i <= 120; i++) { const u = i / 120; trail.push([lerp(from[0], SUMMIT[0], u) + 70 * Math.sin(u * 7) * (1 - u), lerp(from[1], SUMMIT[1], u) + 46 * Math.sin(u * 5 + 1) * (1 - u)]); }
+  },
+
+  frame(t) {
+    const c = ctx, o = this; c.clearRect(0, 0, W, H); c.lineCap = 'round'; c.lineJoin = 'round';
+    c.save(); c.beginPath(); c.rect(48, 48, W - 96, H - 96); c.clip();
+    // water first
+    const wa = prog(t, BAR * 0.9, 1.6, E.inOutSine);
+    if (wa > 0) { c.globalAlpha = wa; c.imageSmoothingEnabled = true; c.drawImage(o.water, 0, 0, GW, GH, -CELL / 2, -CELL / 2, GW * CELL, GH * CELL); c.globalAlpha = 1;
+      shore.forEach((segs, k) => { const a = prog(t, BAR * 1.1 + k * 0.25, 1.2, E.outCubic); if (a <= 0) return; c.strokeStyle = `rgba(${BLUE},${(0.5 - 0.1 * k) * a})`; c.lineWidth = 1; c.beginPath(); for (const s of segs) { const w = 2 * Math.sin(t * 1.2 + s[0] * 0.02 + k); c.moveTo(s[0], s[1] + w * 0.3); c.lineTo(s[2], s[3] + w * 0.3); } c.stroke(); });
+      c.strokeStyle = `rgba(${BLUE},${0.95 * wa})`; c.lineWidth = 1.8; c.beginPath(); for (const s of o.lake) { c.moveTo(s[0], s[1]); c.lineTo(s[2], s[3]); } c.stroke(); }
+    // relief shading (multiply) arrives late
+    const sa = prog(t, BAR * 6, 2.0, E.inOutSine); if (sa > 0) { c.globalCompositeOperation = 'multiply'; c.globalAlpha = 0.42 * sa; c.drawImage(shade, 0, 0, GW, GH, -CELL / 2, -CELL / 2, GW * CELL, GH * CELL); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; }
+    c.restore();
+    // graticule and neat line
+    const ga = prog(t, 0.2, 1.4, E.outCubic); c.strokeStyle = `rgba(${SEPIA},${0.13 * ga})`; c.lineWidth = 1; c.beginPath(); for (let x = 160; x < W; x += 320) { c.moveTo(x, 40); c.lineTo(x, 40 + (H - 80) * ga); } for (let y = 220; y < H; y += 320) { c.moveTo(40, y); c.lineTo(40 + (W - 80) * ga, y); } c.stroke();
+    c.strokeStyle = `rgba(${SEPIA},${0.8 * ga})`; c.lineWidth = 2; c.strokeRect(40, 40, (W - 80) * ga, H - 80); c.lineWidth = 0.8; c.strokeRect(48, 48, (W - 96) * ga, H - 96);
+    c.save(); c.beginPath(); c.rect(48, 48, W - 96, H - 96); c.clip();
+    // contours, lowest first, each plotted west → east
+    levels.forEach((l, k) => {
+      const u = prog(t, BAR * 1.3 + k * 0.66, 1.9, E.inOutCubic); if (u <= 0) return; const n = Math.floor(l.segs.length * u);
+      c.strokeStyle = `rgba(${SEPIA},${l.index ? 0.95 : 0.62})`; c.lineWidth = l.index ? 2.3 : 1.15; c.beginPath(); for (let i = 0; i < n; i++) { const s = l.segs[i]; c.moveTo(s[0], s[1]); c.lineTo(s[2], s[3]); } c.stroke();
+      if (u < 1 && n > 0) { const s = l.segs[n - 1]; c.fillStyle = `rgba(${SEPIA},.9)`; c.beginPath(); c.arc(s[2], s[3], 3, 0, TAU); c.fill(); }
+      // elevation labels on index contours
+      if (l.index) { const la = prog(t, BAR * 6.2 + k * 0.06, 0.8, E.outCubic); if (la > 0) for (const q of [0.3, 0.72]) { const s = l.segs[Math.floor(l.segs.length * q)]; if (!s || s[0] < 120 || s[0] > W - 120 || s[1] < 100 || s[1] > H - 120) continue; c.save(); c.translate(s[0], s[1]); let a = Math.atan2(s[3] - s[1], s[2] - s[0]); if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI; c.rotate(a); c.globalAlpha = la; c.fillStyle = PAPER; c.fillRect(-26, -11, 52, 22); c.fillStyle = `rgba(${SEPIA},1)`; c.font = '600 22px "Cormorant Garamond Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(l.m), 0, 1); c.restore(); } }
+    });
+    // the trail, dashed, walking up to the summit
+    const tr = prog(t, BAR * 6.1, 3.2, E.inOutSine); if (tr > 0) { c.strokeStyle = 'rgba(60,40,24,.9)'; c.lineWidth = 2.4; c.setLineDash([3, 9]); c.beginPath(); const n = Math.floor(tr * 120); for (let i = 0; i <= n; i++) i ? c.lineTo(trail[i][0], trail[i][1]) : c.moveTo(trail[i][0], trail[i][1]); c.stroke(); c.setLineDash([]); }
+    // survey mark: stamps on the downbeat of bar 8
+    const st = prog(t, BAR * 7, 0.35, E.outBack); if (st > 0) { c.save(); c.translate(SUMMIT[0], SUMMIT[1]); c.scale(lerp(2.4, 1, clamp01(st)), lerp(2.4, 1, clamp01(st))); c.globalAlpha = clamp01(st); c.fillStyle = RED; c.beginPath(); c.moveTo(0, -17); c.lineTo(15, 10); c.lineTo(-15, 10); c.closePath(); c.fill(); c.fillStyle = PAPER; c.beginPath(); c.arc(0, 2, 3.4, 0, TAU); c.fill(); c.fillStyle = RED; c.font = '500 15px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillText('▲ 1 482 m', 26, -2); c.restore(); }
+    c.restore();
+    // furniture: lake name, north arrow, scale bar, sheet title
+    const fa = prog(t, BAR * 2, 1.2, E.outCubic); c.globalAlpha = fa; c.fillStyle = `rgba(${BLUE},1)`; c.font = 'italic 500 30px "Cormorant Garamond Variable"'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Lake Ormolu', LAKE[0] + 10, LAKE[1] + 6); c.globalAlpha = 1;
+    const na = prog(t, 0.8, 1.2, E.outCubic); c.globalAlpha = na; c.strokeStyle = c.fillStyle = `rgba(${SEPIA},1)`; c.lineWidth = 1.6; c.beginPath(); c.moveTo(1780, 190); c.lineTo(1780, 110); c.stroke(); c.beginPath(); c.moveTo(1780, 96); c.lineTo(1789, 122); c.lineTo(1780, 116); c.lineTo(1771, 122); c.closePath(); c.fill(); c.font = '600 22px "Cormorant Garamond Variable"'; c.textAlign = 'center'; c.fillText('N', 1780, 78);
+    c.fillStyle = PAPER; c.fillRect(1470, 946, 372, 78); c.strokeStyle = `rgba(${SEPIA},1)`; c.lineWidth = 1; c.strokeRect(1470.5, 946.5, 372, 78);
+    for (let k = 0; k < 4; k++) { c.fillStyle = k % 2 ? PAPER : `rgba(${SEPIA},1)`; c.fillRect(1494 + k * 60, 992, 60, 7); } c.strokeRect(1494.5, 992.5, 240, 7);
+    c.fillStyle = `rgba(${SEPIA},1)`; c.font = '500 15px "JetBrains Mono Variable"'; c.textAlign = 'left'; c.fillText('0', 1490, 1010); c.fillText('2 km', 1722, 1010); c.fillText('SHEET 38 · INTERVAL 60 m', 1494, 970); c.globalAlpha = 1;
+  }
+});
+</script>
+</body>
+</html>

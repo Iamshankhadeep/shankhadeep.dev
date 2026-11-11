@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 082 — Crown</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 082 — CROWN
+ * The spectrum of the track as a rotating crown of light. In setup the finished mix (Stage.music.L/R) is
+ * analysed once: a 2048-point Hann-windowed FFT centred on every video frame, folded into 64 logarithmic
+ * bands from 40 Hz to 14 kHz, tilted +3 dB/octave, with a fast attack and a slow release. Each band is a
+ * slender column (lows at the front, highs meeting at the back), mirrored in a dark glossy floor; the last
+ * 1.7 seconds of spectrum ripple outward across that floor as rings of tiles. A slow, low orbit.
+ * The music is built to exercise the whole range: intro, beat, build, drop, breakdown. Ten bars at 120 bpm. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const NB = 64, FPS = 60, DUR = 20, FR = DUR * FPS + 1, RING = 5.2, K = 26, MAXH = 5.2;
+let T3, cols = [], mir = [], tiles, SPEC, hud, dummy, colr, glowMat;
+const band = (i) => (i < 32 ? i * 2 : (63 - i) * 2 + 1);          // lows in front, highs behind, symmetric
+
+function analyse() {
+  const L = Stage.music.L, R = Stage.music.R, sr = Stage.music.sr, n = 2048, re = new Float32Array(n), im = new Float32Array(n), hann = new Float32Array(n), rev = new Uint16Array(n), out = new Float32Array(FR * NB), state = new Float32Array(NB);
+  for (let i = 0; i < n; i++) { hann[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); let r = 0; for (let b = 0; b < 11; b++) r |= ((i >> b) & 1) << (10 - b); rev[i] = r; }
+  const cosT = new Float32Array(n / 2), sinT = new Float32Array(n / 2); for (let i = 0; i < n / 2; i++) { cosT[i] = Math.cos(2 * Math.PI * i / n); sinT[i] = Math.sin(2 * Math.PI * i / n); }
+  const lo = [], hi = []; for (let k = 0; k < NB; k++) { const f = 40 * Math.pow(14000 / 40, k / (NB - 1)), b = f * n / sr; lo.push(b * 0.945); hi.push(b * 1.058); }
+  for (let f = 0; f < FR; f++) {
+    const c0 = Math.round(f / FPS * sr) - n / 2;
+    for (let i = 0; i < n; i++) { const j = c0 + i, s = j >= 0 && j < L.length ? 0.5 * (L[j] + R[j]) : 0; re[rev[i]] = s * hann[i]; im[rev[i]] = 0; }
+    for (let size = 2; size <= n; size <<= 1) { const half = size >> 1, step = n / size; for (let i = 0; i < n; i += size) for (let j = 0, k = 0; j < half; j++, k += step) { const a = i + j, b = a + half, tr = re[b] * cosT[k] + im[b] * sinT[k], ti = im[b] * cosT[k] - re[b] * sinT[k]; re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti; } }
+    for (let k = 0; k < NB; k++) { let sum = 0, cnt = 0; const a = Math.floor(lo[k]), b = Math.max(a + 1, Math.ceil(hi[k])); for (let q = a; q <= b; q++) { sum += Math.hypot(re[q], im[q]); cnt++; } const db = 20 * Math.log10(sum / cnt / (n / 4) + 1e-9) + 0.36 * k, v = clamp01((db + 58) / 46);
+      state[k] = v > state[k] ? lerp(state[k], v, 0.75) : Math.max(v, state[k] - 0.03); out[f * NB + k] = state[k]; }
+  }
+  return out;
+}
+const RAMP = Stage.color.ramp(['#2a1466', '#7a2a9a', '#ff5a4e', '#ffb86a', '#fff0bc']);
+
+Stage.create({
+  no: 82, title: 'Crown', subtitle: 'sixty-four bands of the mix · 120 bpm',
+  duration: DUR, background: '#05030c', grain: 0.04, poster: 12.4,
+  fonts: ['500 13px "JetBrains Mono Variable"'],
+  fade: { in: 1.0, out: 1.6 },
+  slate: { at: 0.6, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: DUR, seed: 82 });
+    M.master({ reverb: { decay: 2.2, size: 0.95, damp: 0.45 }, fadeOut: 1.8 });
+    const kick = M.track('kick', { reverb: 0.04, gain: 0.8 }), clap = M.track('clap', { reverb: 0.3, gain: 0.5 }), hat = M.track('hat', { reverb: 0.08, gain: 0.26 }), ohat = M.track('ohat', { reverb: 0.15, gain: 0.2 });
+    const reese = M.track('reese', { reverb: 0.08, gain: 0.34, lowpass: (t) => 240 + 1300 * smoothstep(8, 10.5, t) * (1 - smoothstep(16, 17, t)), duck: { by: 'kick', depth: 0.55 } });
+    const pad = M.track('pad', { reverb: 0.6, gain: 0.44, duck: { by: 'kick', depth: 0.3 } }), arp = M.track('arp', { reverb: 0.35, gain: 0.5, pan: 0.2, delay: { time: 0.75, fb: 0.4, mix: 0.28 }, lowpass: (t) => 700 + 6500 * smoothstep(1, 10.5, t) * (1 - 0.7 * smoothstep(16, 18, t)) });
+    const lead = M.track('lead', { reverb: 0.4, gain: 0.36, pan: -0.15, delay: { time: 0.375, fb: 0.3, mix: 0.2 } }), ris = M.track('riser', { reverb: 0.4, gain: 0.4 }), imp = M.track('impact', { reverb: 0.5, gain: 0.6 }), sn = M.track('snare', { reverb: 0.25, gain: 0.4 }), crash = M.track('crash', { reverb: 0.4, gain: 0.3 }), sub = M.track('sub', { reverb: 0.04, gain: 0.36, duck: { by: 'kick', depth: 0.6 } });
+    const ch = [['B1', ['B3', 'D4', 'F#4', 'A4']], ['G1', ['B3', 'D4', 'G4', 'A4']], ['D2', ['A3', 'D4', 'F#4', 'A4']], ['A1', ['A3', 'C#4', 'E4', 'G4']]];
+    const pat = [0, 2, 1, 3, 2, 1, 3, 2, 0, 3, 1, 2, 3, 1, 2, 3];
+    for (let bar = 0; bar < 10; bar++) {
+      const b = bar * 4, [r, c] = ch[bar % 4], beat = bar >= 2 && bar < 8, drop = bar >= 5 && bar < 8, build = bar === 4;
+      pad.chord(b, c, 4, bar < 2 ? 0.4 : 0.5); if (bar < 9) pat.forEach((k, i) => arp.note(b + i * 0.25, S.midi(c[k]) + 12, 0.2, i % 4 === 0 ? 0.5 : 0.36));
+      if (beat && !build) { kick.pattern(b, 1, 'xxxx', { vel: 0.95 }); hat.pattern(b, 0.25, drop ? 'x.xxx.xxx.xxx.xx' : '..x...x...x...x.', { vel: 0.5 }); reese.note(b, r, 3.9, 0.75); sub.note(b, r, 3.8, 0.7); if (drop) { clap.pattern(b, 1, '.x.x', { vel: 0.8 }); ohat.pattern(b, 1, '.x.x', { vel: 0.4 }, 0.5); } }
+      if (build) { kick.pattern(b, 1, 'xxxx', { vel: 0.7 }); for (let i = 0; i < 16; i++) sn.hit(b + i * 0.25, 0.25 + 0.04 * i); reese.note(b, r, 3.9, 0.6); }
+    }
+    ohat.pattern(20, 0.5, '.x.x.x.x.x.x.x.x.x.x.x.x', { vel: 0.4 });
+    ris.hit(16, 0.9, 4); imp.hit(20, 1, 4); crash.hit(20, 0.9, 3); crash.hit(8, 0.5, 2);
+    [[20, 'F#5', 1.5], [21.5, 'E5', 0.5], [22, 'D5', 1], [23, 'B4', 1], [24, 'D5', 1.5], [25.5, 'E5', 0.5], [26, 'G5', 2], [28, 'A5', 1.5], [29.5, 'F#5', 0.5], [30, 'D5', 1], [31, 'E5', 1], [32, 'F#5', 3], [36, 'B4', 3]].forEach(([b, n, d]) => lead.note(b, n, d, 0.55));
+    return M;
+  },
+
+  setup() {
+    SPEC = analyse();
+    T3 = Stage.three({ fov: 38, bloom: { strength: 0.5, radius: 0.6, threshold: 0.3 }, exposure: 1.0, z: 1 }); const T = THREE, sc = T3.scene; sc.background = new T.Color('#05030c'); sc.fog = new T.Fog('#05030c', 14, 34);
+    const stops = ['#2a1466', '#7a2a9a', '#ff5a4e', '#ffb86a', '#fff0bc'].map((h) => new T.Color(h));
+    const mk = (alpha, mirror) => new T.ShaderMaterial({ transparent: mirror, depthWrite: !mirror, uniforms: { uMax: { value: MAXH }, uA: { value: alpha }, uS: { value: stops } },
+      vertexShader: 'varying float vH; varying vec3 vN; void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vH = wp.y; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * wp; }',
+      fragmentShader: 'uniform float uMax, uA; uniform vec3 uS[5]; varying float vH; varying vec3 vN; void main(){ float x = clamp(abs(vH) / uMax, 0.0, 1.0) * 4.0; int i = int(min(3.0, floor(x))); vec3 c = mix(uS[i], uS[i + 1], x - float(i)); float side = 0.55 + 0.45 * abs(vN.x * 0.6 + vN.z * 0.8); float a = uA * (uA < 1.0 ? exp(-abs(vH) * 0.55) : 1.0); gl_FragColor = vec4(c * side * (0.3 + 0.17 * x), a); }' });
+    const geo = new T.BoxGeometry(0.2, 1, 0.2), up = mk(1, false), dn = mk(0.34, true);
+    for (let i = 0; i < NB; i++) { const a = (i + 0.5) / NB * Math.PI * 2 + Math.PI / 2, x = Math.cos(a) * RING, z = Math.sin(a) * RING; const m1 = new T.Mesh(geo, up), m2 = new T.Mesh(geo, dn); m1.position.set(x, 0, z); m2.position.set(x, 0, z); m1.rotation.y = m2.rotation.y = -a; sc.add(m1); sc.add(m2); cols.push(m1); mir.push(m2); }
+    // floor: dark and glossy — a translucent sheet over the mirrored world
+    const floor = new T.Mesh(new T.PlaneGeometry(90, 90), new T.MeshBasicMaterial({ color: '#06040e', transparent: true, opacity: 0.62, depthWrite: false })); floor.rotation.x = -Math.PI / 2; floor.position.y = 0.001; floor.renderOrder = 2; sc.add(floor);
+    // history tiles
+    tiles = new T.InstancedMesh(new T.BoxGeometry(0.2, 0.02, 0.17), new T.MeshBasicMaterial({ transparent: true, blending: T.AdditiveBlending, depthWrite: false }), NB * K); tiles.renderOrder = 3; tiles.frustumCulled = false; sc.add(tiles); dummy = new T.Object3D(); colr = new T.Color();
+    for (let k = 0; k < K; k++) for (let i = 0; i < NB; i++) tiles.setColorAt(k * NB + i, colr.set('#000'));
+    hud = Stage.canvas2d({ z: 2, dpr: 2 });
+  },
+
+  frame(t) {
+    const f = Math.min(FR - 1, Math.round(t * FPS)), fall = 1 - 0.75 * smoothstep(17.6, 19.6, t);
+    for (let i = 0; i < NB; i++) { const v = SPEC[f * NB + band(i)], h = 0.06 + MAXH * Math.pow(v, 1.5) * fall; cols[i].scale.y = h; cols[i].position.y = h / 2; mir[i].scale.y = h; mir[i].position.y = -h / 2; }
+    for (let k = 0; k < K; k++) { const ff = Math.max(0, f - (k + 1) * 4), r = RING + 0.5 + k * 0.36, fade = Math.pow(1 - k / K, 1.6);
+      for (let i = 0; i < NB; i++) { const v = SPEC[ff * NB + band(i)], a = (i + 0.5) / NB * Math.PI * 2 + Math.PI / 2, e = Math.pow(v, 2.2) * fade * fall; dummy.position.set(Math.cos(a) * r, 0.02, Math.sin(a) * r); dummy.rotation.set(0, -a, 0); dummy.scale.set(r / RING * (0.5 + 0.6 * v), 1, 0.6 + 0.5 * v); dummy.updateMatrix(); tiles.setMatrixAt(k * NB + i, dummy.matrix); const cs = RAMP(clamp01(v * 0.95)); colr.set(cs).multiplyScalar(e * 0.34); tiles.setColorAt(k * NB + i, colr); } }
+    tiles.instanceMatrix.needsUpdate = true; tiles.instanceColor.needsUpdate = true;
+    const a = 0.5 + t * 0.085, d = 17.2 - 1.6 * smoothstep(8, 12, t), cam = T3.camera; cam.position.set(Math.sin(a) * d, 2.5 + 0.5 * Math.sin(t * 0.21), Math.cos(a) * d); cam.lookAt(0, 1.25, 0);
+    T3.render();
+    const c = hud; c.clearRect(0, 0, 1920, 1080); const on = prog(t, 1.2, 1.0) * (1 - prog(t, 18.4, 1.0)); c.font = '500 13px "JetBrains Mono Variable"'; c.textAlign = 'right'; c.textBaseline = 'alphabetic'; c.fillStyle = `rgba(214,200,255,${0.55 * on})`; c.fillText('6 4   B A N D S   ·   4 0  H z  –  1 4  k H z   ·   2 0 4 8 - P T   F F T', 1824, 992);
+    // a thin live strip of the same spectrum
+    for (let k = 0; k < NB; k++) { const v = SPEC[f * NB + k]; c.fillStyle = Stage.color.alpha(RAMP(v), 0.8 * on); c.fillRect(1824 - (NB - k) * 6, 968 - 26 * v, 4, 26 * v + 1); }
+  }
+});
+</script>
+</body>
+</html>

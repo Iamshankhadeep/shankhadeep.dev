@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 040 — Thousand Cubes</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/three.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 040 — THOUSAND CUBES
+ * A white field of 3 600 columns behaves like a liquid, then one of them turns red (three.js instancing).
+ * White on white: form is drawn only by soft shadow. Every piano note is a drop that sends a ring across the
+ * field; a diagonal swell crosses on bar 6. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const BAR = 2.5, G = 60, SP = 0.56, HALF = (G - 1) * SP / 2, RED = [34, 27];
+let T3, inst, dummy, drops = [], col;
+
+Stage.create({
+  no: 40, title: 'Thousand Cubes', subtitle: 'three.js · instancing · 96 bpm',
+  duration: 20, background: '#ecebe7', grain: 0.045, poster: 14.3,
+  fade: { in: 1.0, out: 1.6, color: '#ecebe7' },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(40,40,44,.75)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 40 });
+    M.master({ reverb: { decay: 3.2, size: 1.1, damp: 0.4 }, fadeOut: 2.2 });
+    const pno = M.track('piano', { reverb: 0.5, gain: 1.0, delay: { time: 1.5, fb: 0.25, mix: 0.16 } }), tick = M.track('tick', { reverb: 0.2, gain: 0.3, params: { tone: 1900 } });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.55 }), pad = M.track('warmpad', { reverb: 0.6, gain: (t) => 0.3 + 0.35 * smoothstep(6, 14, t) }), bell = M.track('bell', { reverb: 0.8, gain: 0.7 }), str = M.track('strings', { reverb: 0.6, gain: 0.55, params: { cutoff: 2800, A: 1.0, R: 1.6 } });
+    // A minor: a pattern that fills in bar by bar
+    const prog = ['Am9', 'Fmaj7', 'Cmaj7', 'G6', 'Am9', 'Fmaj9', 'Dm9', 'Am9'], roots = ['A1', 'F1', 'C2', 'G1', 'A1', 'F1', 'D1', 'A1'];
+    const pats = ['x.......', 'x...x...', 'x..x..x.', 'x.x.x.x.', 'x.xxx.x.', 'xxxxxxxx', 'x...x...', 'x.......'];
+    prog.forEach((c, i) => {
+      const b = i * 4, n = S.chord(c, 4), seq = [n[0], n[2], n[1] + 12, n[2], n[0] + 12, n[2], n[1] + 12, n[3] || n[2]];
+      pats[i].split('').forEach((ch, j) => { if (ch === 'x') pno.note(b + j * 0.5, seq[j], 1.6, j === 0 ? 0.7 : 0.5); });
+      if (i >= 1 && i < 7) tick.pattern(b, 0.25, 'x...x.x.x...x.xx', { vel: 0.5 });
+      if (i >= 1) sub.note(b, roots[i], 3.6, i === 5 ? 0.9 : 0.6); pad.chord(b, c, 4, 0.5, { octave: 3 }); if (i >= 4 && i < 7) str.chord(b, c, 4, i === 5 ? 0.6 : 0.4, { octave: 4 });
+    });
+    bell.note(M.b(17.2), 'E6', 4, 0.8); bell.note(M.b(17.2), 'A5', 4, 0.5);
+    return M;
+  },
+
+  setup() {
+    const T = THREE;
+    T3 = Stage.three({ fov: 24, composer: true, exposure: 1.02, z: 1 });
+    const { scene, renderer, camera } = T3;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+    scene.background = new T.Color('#dddbd6'); scene.fog = new T.Fog('#dddbd6', 50, 86);
+    const geo = new T.BoxGeometry(SP * 0.9, 1, SP * 0.9); geo.translate(0, 0.5, 0);
+    inst = new T.InstancedMesh(geo, new T.MeshStandardMaterial({ color: '#ffffff', roughness: 0.92, metalness: 0 }), G * G); inst.castShadow = inst.receiveShadow = true; inst.frustumCulled = false;
+    inst.instanceColor = new T.InstancedBufferAttribute(new Float32Array(G * G * 3).fill(1), 3); scene.add(inst);
+    const key = new T.DirectionalLight('#fff7ee', 3.3); key.position.set(-30, 15, 10); key.castShadow = true; key.shadow.mapSize.set(4096, 4096); key.shadow.radius = 3.5; key.shadow.bias = -0.0005; key.shadow.normalBias = 0.03;
+    const sc = key.shadow.camera; sc.left = -26; sc.right = 26; sc.top = 26; sc.bottom = -26; sc.near = 1; sc.far = 90; scene.add(key);
+    scene.add(new T.HemisphereLight('#f4f6ff', '#d9d2c8', 1.0));
+    dummy = new T.Object3D(); col = new T.Color();
+    // one drop per piano note, each at its own place
+    Stage.events('piano').forEach((e, i) => drops.push({ t: e.t, x: (hash(i, 1) - 0.5) * HALF * 1.5, z: (hash(i, 2) - 0.5) * HALF * 1.5, a: 0.5 + 0.7 * e.vel }));
+  },
+
+  frame(t) {
+    const { camera } = T3;
+    const swell = Math.exp(-Math.pow((t - BAR * 5.4) / 1.5, 2)), calm = smoothstep(BAR * 6.4, BAR * 7.2, t), dome = win(t, BAR * 3.4, BAR * 4.8, 1.4, 1.4, E.inOutSine);
+    const sx = lerp(-HALF * 1.6, HALF * 1.6, prog(t, BAR * 4.6, 4.6));
+    for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
+      const x = i * SP - HALF, z = j * SP - HALF, id = j * G + i;
+      let h = 0.14 * Math.sin(x * 0.5 + t * 0.9) * Math.sin(z * 0.4 - t * 0.7);
+      for (const d of drops) { const age = t - d.t; if (age < 0 || age > 5) continue; const r = Math.hypot(x - d.x, z - d.z), front = age * 5.2; h += d.a * 2.3 * Math.exp(-age * 0.75) * Math.exp(-Math.pow((r - front) / 1.1, 2)) * Math.cos((r - front) * 2.4) / (1 + r * 0.12); }
+      h *= 1 - 0.9 * calm;
+      h += 3.6 * dome * Math.exp(-(x * x + z * z) / 70);                                    // the surface gathers into a smooth dome…
+      h += 3.6 * swell * Math.exp(-Math.pow((x + z) * 0.7071 - sx, 2) / 9);                  // …and a swell crosses on the diagonal
+      const red = i === RED[0] && j === RED[1], rise = red ? prog(t, 17.2, 1.6, E.outBack) : 0;
+      dummy.position.set(x, 0, z); dummy.scale.set(1, Math.max(0.05, 1.3 + h + 3.6 * rise), 1); dummy.updateMatrix(); inst.setMatrixAt(id, dummy.matrix);
+      if (red) { col.set(Stage.color.mix('#ffffff', '#e2341d', clamp01(rise * 1.6))); inst.setColorAt(id, col); }
+    }
+    inst.instanceMatrix.needsUpdate = true; inst.instanceColor.needsUpdate = true;
+    const o = 0.55 + 0.35 * prog(t, 0, 20, E.inOutSine), dist = lerp(64, 54, prog(t, 0, 20, E.inOutSine));
+    camera.position.set(Math.sin(o) * dist * 0.8, dist * 0.46, Math.cos(o) * dist * 0.8); camera.lookAt(0.5, 0.4, 0);
+    T3.render();
+  }
+});
+</script>
+</body>
+</html>

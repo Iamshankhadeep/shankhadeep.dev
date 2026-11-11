@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 017 — Seahorse Valley</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 017 — SEAHORSE VALLEY
+ * One continuous descent into the Mandelbrot set, ending on a miniature copy of the whole.
+ * The target is found at start-up: Newton's method locates the nucleus of a small "minibrot" near the seahorse
+ * valley in double precision. The shader then iterates by perturbation — every pixel is a small offset from
+ * that nucleus' periodic orbit — so 32-bit GPU floats stay sharp far beyond their usual zoom limit.
+ * Twelve bars at 120 bpm (2 s each). */
+const { ease: E, prog, clamp01, lerp, smoothstep } = Stage;
+let sh, orbitTex, P = 0, nucleus = [0, 0], finalScale = 1e-5;
+
+function findMinibrot() {
+  // Newton iteration on z_p(c) = 0 for many periods p, starting in the valley; keep the nucleus nearest the start
+  const sx = -0.7466, sy = 0.1042; let best = null;
+  for (let p = 24; p <= 240; p++) {
+    let cx = sx, cy = sy, ok = false;
+    for (let it = 0; it < 40; it++) {
+      let zx = 0, zy = 0, dx = 0, dy = 0;
+      for (let i = 0; i < p; i++) { const ndx = 2 * (zx * dx - zy * dy) + 1, ndy = 2 * (zx * dy + zy * dx); dx = ndx; dy = ndy; const nzx = zx * zx - zy * zy + cx; zy = 2 * zx * zy + cy; zx = nzx; if (zx * zx + zy * zy > 1e6) break; }
+      const d2 = dx * dx + dy * dy; if (!(d2 > 0) || !isFinite(d2)) break;
+      const stx = (zx * dx + zy * dy) / d2, sty = (zy * dx - zx * dy) / d2; cx -= stx; cy -= sty;
+      if (stx * stx + sty * sty < 1e-30) { ok = true; break; }
+    }
+    if (!ok) continue;
+    // true period (reject divisors that converged to a lower-period nucleus) and size estimate
+    let zx = 0, zy = 0, lx = 1, ly = 0, bx = 1, by = 0, low = false;
+    for (let i = 1; i < p; i++) { const nzx = zx * zx - zy * zy + cx; zy = 2 * zx * zy + cy; zx = nzx; if (zx * zx + zy * zy < 1e-18) { low = true; break; } const nlx = 2 * (zx * lx - zy * ly), nly = 2 * (zx * ly + zy * lx); lx = nlx; ly = nly; const l2 = lx * lx + ly * ly; bx += lx / l2; by += -ly / l2; }
+    if (low) continue;
+    const l2x = lx * lx - ly * ly, l2y = 2 * lx * ly, qx = bx * l2x - by * l2y, qy = bx * l2y + by * l2x, size = 1 / Math.hypot(qx, qy);
+    const dist = Math.hypot(cx - sx, cy - sy);
+    if (dist < 0.02 && size > 2e-7 && size < 4e-5 && (!best || size > best.size)) best = { p, cx, cy, size, dist };
+  }
+  return best;
+}
+
+const FRAG = `
+uniform sampler2D uOrbit; uniform int uP, uMaxIter; uniform vec2 uOff; uniform float uScale, uRot, uGlow;
+vec3 ramp(float t){
+  // ink navy → teal → warm gold → ivory → back, as one smooth cycle
+  vec3 a = vec3(.035, .060, .160), b = vec3(.050, .380, .420), c = vec3(.880, .640, .240), d = vec3(.980, .950, .860);
+  t = fract(t) * 4.; float f = fract(t); f = f * f * (3. - 2. * f);
+  return t < 1. ? mix(a, b, f) : t < 2. ? mix(b, c, f) : t < 3. ? mix(c, d, f) : mix(d, a, f);
+}
+vec3 shade(vec2 dc){
+  vec2 e = vec2(0.), z = vec2(0.); float n = 0.; bool out_ = false;
+  for (int i = 0; i < 1100; i++) {
+    if (i >= uMaxIter) break;
+    vec2 Z = texelFetch(uOrbit, ivec2(i % uP, 0), 0).xy;
+    z = Z + e;
+    if (dot(z, z) > 4096.) { out_ = true; break; }
+    e = vec2(2. * (Z.x * e.x - Z.y * e.y) + e.x * e.x - e.y * e.y, 2. * (Z.x * e.y + Z.y * e.x) + 2. * e.x * e.y) + dc;
+    n += 1.;
+  }
+  if (!out_) return vec3(.012, .016, .040);
+  float mu = n + 1. - log2(.5 * log2(dot(z, z)));
+  float t = .26 * log2(mu + 6.) * 2.2 - .12 * log2(1. / uScale) + .08;
+  vec3 col = ramp(t);
+  col *= .72 + .28 * smoothstep(0., 14., mu);              // the far exterior falls back into ink
+  return col;
+}
+void main(){
+  vec3 acc = vec3(0.);
+  for (int s = 0; s < 4; s++) {                              // rotated-grid supersampling: silky filaments, no shimmer
+    vec2 o = vec2(s == 0 ? .125 : s == 1 ? -.375 : s == 2 ? .375 : -.125, s == 0 ? .375 : s == 1 ? .125 : s == 2 ? -.125 : -.375);
+    vec2 p = (gl_FragCoord.xy + o - .5 * uRes) / uRes.y;
+    p = rot(uRot) * p;
+    acc += shade(uOff + p * uScale);
+  }
+  vec3 c = acc / 4.;
+  vec2 v = vUv - .5; c *= 1. - .55 * dot(v, v);
+  c *= 1. + .07 * uGlow;
+  fragColor = vec4(pow(c, vec3(.94)) + dither(gl_FragCoord.xy, float(uFrame)), 1.);
+}`;
+
+Stage.create({
+  no: 17, title: 'Seahorse Valley', subtitle: 'mandelbrot · perturbation shader · 120 bpm',
+  duration: 24, background: '#060a1c', grain: 0.045, poster: 15,
+  fade: { in: 1.2, out: 1.6 }, slate: { at: 0.9, hold: 3.2 },
+
+  music(S) {
+    const M = S.score({ bpm: 120, duration: 24, seed: 17 });
+    M.master({ reverb: { decay: 3.0, size: 1.1, damp: 0.4 }, fadeOut: 2.4 });
+    const org = M.track('organ', { reverb: 0.45, gain: (t) => 0.45 + 0.3 * Math.min(1, t / 14), pan: -0.15, lowpass: (t) => 1200 + 2600 * Math.min(1, t / 16) });
+    const pno = M.track('piano', { reverb: 0.4, gain: 0.85, pan: 0.15 }), str = M.track('strings', { reverb: 0.6, gain: (t) => 0.3 + 0.5 * smoothstep(8, 20, t), params: { cutoff: 3200 } });
+    const sub = M.track('sub', { reverb: 0.05, gain: 0.7 }), bell = M.track('bell', { reverb: 0.8, gain: 0.5 });
+    // an original pattern in the minimalist manner: broken chords regrouped 3+3+2, the harmony turning slowly
+    const prog = ['Am', 'Am', 'F', 'F', 'C', 'C', 'G', 'Em', 'Am', 'F', 'Dm', 'Am'], roots = ['A1', 'A1', 'F1', 'F1', 'C2', 'C2', 'G1', 'E1', 'A1', 'F1', 'D1', 'A1'];
+    prog.forEach((c, i) => {
+      const b = i * 4, n = S.chord(c, 3), top = S.chord(c, 4);
+      if (i < 11) {
+        const pat = [n[0], n[1], n[2], n[0] + 12, n[2], n[1], n[2], n[0] + 12];
+        org.seq(b, 0.5, pat, { vel: 0.5, gate: 0.95, vels: [0.7, 0.45, 0.45, 0.65, 0.45, 0.45, 0.62, 0.45] });
+        if (i >= 2) pno.seq(b, 0.25, [top[0], top[2], top[1] + 12, top[0], top[2], top[1] + 12, top[2], top[0] + 12, top[0], top[2], top[1] + 12, top[0], top[2], top[1] + 12, top[2], top[0] + 12], { vel: 0.34 + 0.03 * Math.min(i, 8), gate: 0.9, vels: [1, 0.6, 0.6, 0.9, 0.6, 0.6, 0.85, 0.6].map((v) => v * (0.34 + 0.03 * Math.min(i, 8))) });
+        if (i >= 1) for (let q = 0; q < 4; q++) sub.note(b + q, roots[i], 0.8, q === 0 ? 0.85 : 0.5);
+        if (i >= 4) str.chord(b, c, 4, 0.55, { octave: 4 });
+      } else { org.chord(b, c, 4, 0.6, { octave: 3 }); pno.chord(b, ['A3', 'E4', 'A4', 'C5', 'E5'], 4, 0.6, { strum: 0.08 }); sub.note(b, 'A1', 4, 0.9); str.chord(b, c, 4, 0.6, { octave: 4 }); bell.note(b, 'E6', 4, 0.5); }
+    });
+    return M;
+  },
+
+  setup() {
+    const m = findMinibrot();
+    if (!m) throw new Error('no minibrot found');
+    P = m.p; nucleus = [m.cx, m.cy]; finalScale = m.size * 5.5;
+    sh = Stage.shader({ frag: FRAG, z: 1 });
+    // reference orbit (one full period) as a float texture
+    const gl = sh.gl, data = new Float32Array(P * 4); let zx = 0, zy = 0;
+    for (let i = 0; i < P; i++) { data[i * 4] = zx; data[i * 4 + 1] = zy; const n = zx * zx - zy * zy + m.cx; zy = 2 * zx * zy + m.cy; zx = n; }
+    orbitTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, orbitTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, P, 1, 0, gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    console.log('minibrot period ' + P + ' size ' + m.size.toExponential(2) + ' at ' + m.cx + ', ' + m.cy);
+  },
+
+  frame(t) {
+    // exponential zoom: quiet at first, fastest through bars 7–10, easing onto the minibrot
+    const u = prog(t, 1.8, 20.2, Stage.ease.bezier(0.32, 0.36, 0.3, 1.0)), s0 = 3.1;
+    const scale = Math.exp(lerp(Math.log(s0), Math.log(finalScale), u));
+    const k = (scale - finalScale) / (s0 - finalScale);                 // 1 → 0: the framing slides from the whole set onto the nucleus
+    const off = [(-0.62 - nucleus[0]) * k, (0 - nucleus[1]) * k];
+    sh.draw(t, {
+      uOrbit: orbitTex, uP: { int: P }, uMaxIter: { int: Math.round(Math.min(1000, 190 + 62 * Math.log2(s0 / scale))) },
+      uOff: off, uScale: scale, uRot: 0.55 * prog(t, 0, 24, E.inOutSine) - 0.2, uGlow: Stage.hit('sub', t, 0.25)
+    });
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 074 — The Long Arrangement</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 074 — THE LONG ARRANGEMENT
+ * Opening titles for a film noir that doesn't exist, in mid-century cut paper: black, warm cream, one
+ * red-orange. Diagonal bars slice the frame; blinds, a staircase, a hat and a hand, a keyhole. Everything
+ * is animated "on twos" (time quantised to 12 steps a second) with hard snaps, shapes have hand-cut wobble
+ * and a paper shadow, and the lettering sits on an off-kilter baseline. Cards change on the bar line with a
+ * rim shot. The cast and crew are invented. Fourteen bars at 140 bpm, swung (1.71 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 4 * 60 / 140, K = '#15120f', C = '#efe3c8', R = '#e3472a';
+const CUTS = [0, 2, 4, 6, 8, 10, 11, 12].map((b) => b * BAR);     // card starts, in bars
+const NAME = '"Big Shoulders Display Variable"', SMALL = '"Instrument Serif"';
+let ctx, paper, mask;
+const q = (u) => Math.floor(u * 12) / 12;                                 // on twos
+const snap = (u, at, dur = 0.25) => E.outCubic(clamp01((q(u) - at) / dur));
+
+// a hand-cut polygon with a paper shadow
+function cut(c, pts, col, seed = 1, wob = 5) {
+  const p = pts.map(([x, y], i) => [x + (hash(i, seed) - 0.5) * wob, y + (hash(i, seed + 9) - 0.5) * wob]);
+  const path = (dx, dy) => { c.beginPath(); p.forEach(([x, y], i) => (i ? c.lineTo(x + dx, y + dy) : c.moveTo(x + dx, y + dy))); c.closePath(); };
+  c.fillStyle = 'rgba(0,0,0,.2)'; path(6, 8); c.fill(); c.fillStyle = col; path(0, 0); c.fill();
+}
+const rect = (c, x, y, w, h, col, seed) => cut(c, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], col, seed);
+// lettering on an off-kilter baseline; `a` reveals letters one by one
+function kilter(c, str, x, y, size, col, seed, a = 1, align = 'left', track = 0.02) {
+  c.font = `800 ${size}px ${NAME}`; c.textBaseline = 'alphabetic'; c.textAlign = 'left';
+  const ws = str.split('').map((ch) => c.measureText(ch).width + size * track), tot = ws.reduce((s, w) => s + w, 0); let xx = align === 'right' ? x - tot : align === 'center' ? x - tot / 2 : x;
+  str.split('').forEach((ch, i) => { const on = clamp01(a * (str.length + 3) - i); if (on > 0 && ch !== ' ') { c.save(); c.translate(xx + ws[i] / 2, y + (hash(i, seed) - 0.5) * size * 0.1 + (1 - E.outCubic(on)) * size * 0.35); c.rotate((hash(i, seed + 3) - 0.5) * 0.075); c.fillStyle = col; c.fillText(ch, -ws[i] / 2, 0); c.restore(); } xx += ws[i]; });
+  return tot;
+}
+function small(c, str, x, y, col, a = 1, size = 50, align = 'left') { c.globalAlpha = a; c.font = `italic 400 ${size}px ${SMALL}`; c.textAlign = align; c.textBaseline = 'alphabetic'; c.fillStyle = col; c.fillText(str, x, y + 10 * (1 - a)); c.globalAlpha = 1; }
+function keyhole(c, x, y, s, col) { c.fillStyle = col; c.beginPath(); c.arc(x, y - 70 * s, 118 * s, 0, TAU); c.fill(); c.beginPath(); c.moveTo(x - 52 * s, y - 20 * s); c.lineTo(x + 52 * s, y - 20 * s); c.lineTo(x + 104 * s, y + 250 * s); c.lineTo(x - 104 * s, y + 250 * s); c.closePath(); c.fill(); }
+
+const CARDS = [
+  // 0 · bars slice in; the presenting company rides the widest bar
+  (c, u) => {
+    c.fillStyle = K; c.fillRect(0, 0, W, H); c.save(); c.translate(W / 2, H / 2); c.rotate(-0.3);
+    [[-470, 130, C, 1], [-290, 56, R, -1], [-40, 250, C, 1], [250, 96, R, -1], [420, 60, C, 1], [560, 150, K, -1]].forEach(([y, th, col, dir], i) => { const a = snap(u, 0.08 + i * 0.17, 0.3), out = snap(u, 3.05 + i * 0.03, 0.2), x = dir * 2700 * (1 - a) - dir * 2700 * out; cut(c, [[-1500 + x, y], [1500 + x, y - 8], [1500 + x, y + th], [-1500 + x, y + th + 6]], col, 20 + i, 9); });
+    const a = snap(u, 1.25, 0.5), out = snap(u, 3.05, 0.2); if (a > 0 && out < 1) { c.translate(-2700 * out, 0); kilter(c, 'KESTREL PICTURES', -640, 142, 170, K, 3, a); small(c, 'presents', 470, 150, K, snap(u, 1.9, 0.3), 64); }
+    c.restore();
+  },
+  // 1 · blinds
+  (c, u) => {
+    c.fillStyle = C; c.fillRect(0, 0, W, H); const w = snap(u, 0.1, 0.3); cut(c, [[1180, 60 + 900 * (1 - w)], [1700, 40 + 900 * (1 - w)], [1730, 1020], [1150, 1040]], R, 31, 8);
+    for (let i = 0; i < 9; i++) { const a = snap(u, 0.25 + i * 0.07, 0.2), y = 70 + i * 112, x = 2000 * (1 - a); cut(c, [[1060 + x, y + 44], [1960 + x, y - 60], [1960 + x, y - 4], [1060 + x, y + 102]], K, 40 + i, 6); }
+    small(c, 'starring', 150, 446, K, snap(u, 0.7, 0.3)); kilter(c, 'MARGOT', 140, 676, 240, K, 5, snap(u, 0.8, 0.4)); kilter(c, 'VALE', 140, 896, 240, K, 55, snap(u, 1.0, 0.4)); kilter(c, 'COLE BANNERMAN', 146, 1004, 92, R, 6, snap(u, 1.45, 0.5));
+  },
+  // 2 · staircase
+  (c, u) => {
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 8; i++) { const a = snap(u, 0.12 + i * 0.09, 0.16), x = 610 + i * 166, top = 960 - i * 88; rect(c, x, top - 1200 * (1 - a), 170, 1200, i === 5 ? R : C, 50 + i); }
+    const d = snap(u, 1.0, 0.25); cut(c, [[1700, 110], [1840, 104], [1846, 344 * d + 110 * (1 - d)], [1696, 350 * d + 110 * (1 - d)]], R, 61); if (d > 0.9) { c.fillStyle = K; c.beginPath(); c.arc(1722, 232, 8, 0, TAU); c.fill(); }
+    small(c, 'with', 150, 150, C, snap(u, 0.5, 0.3)); kilter(c, 'DESMOND ARKWRIGHT', 140, 310, 150, C, 7, snap(u, 0.6, 0.5)); kilter(c, 'ILSE HARTMANN', 144, 470, 150, R, 8, snap(u, 1.2, 0.5));
+  },
+  // 3 · a hat and a hand
+  (c, u) => {
+    c.fillStyle = R; c.fillRect(0, 0, W, H); const m = snap(u, 0.08, 0.25); c.fillStyle = 'rgba(0,0,0,.18)'; c.beginPath(); c.arc(1296, 432, 330 * m, 0, TAU); c.fill(); c.fillStyle = C; c.beginPath(); c.arc(1290, 424, 330 * m, 0, TAU); c.fill();
+    const hd = snap(u, 0.35, 0.3), wob = Math.exp(-Math.max(0, q(u) - 0.6) * 5) * Math.sin(q(u) * 22) * 0.07; c.save(); c.translate(1290, 430 - 700 * (1 - hd)); c.rotate(-0.13 + wob);
+    cut(c, [[-360, 40], [-250, 4], [250, -8], [372, 26], [300, 66], [-290, 78]], K, 70, 7); cut(c, [[-196, 10], [-172, -200], [-60, -236], [10, -206], [84, -240], [182, -196], [200, 4]], K, 71, 6); cut(c, [[-192, -34], [198, -44], [199, -8], [-194, 4]], R, 72, 3); c.restore();
+    const ha = snap(u, 0.75, 0.45); c.save(); c.translate(430, 1140 - 560 * ha); c.rotate(0.42); rect(c, -110, 0, 220, 600, K, 80); [[-110, -150, 46, 170], [-56, -196, 46, 216], [0, -180, 46, 200], [56, -130, 46, 150]].forEach(([x, y, w, h], i) => rect(c, x + 4, y, w, h + 20, K, 81 + i)); cut(c, [[104, 40], [196, -40], [224, -10], [112, 150]], K, 86); rect(c, -122, 260, 244, 70, C, 87); c.restore();
+    small(c, 'screenplay by', 1800, 852, C, snap(u, 1.0, 0.3), 50, 'right'); kilter(c, 'NORA WHITLOCK', 1806, 1000, 150, K, 9, snap(u, 1.1, 0.5), 'right');
+  },
+  // 4 · the title
+  (c, u) => {
+    c.fillStyle = C; c.fillRect(0, 0, W, H); c.save(); c.translate(W / 2, H / 2); c.rotate(-0.3);
+    [[-640, 190, K, 1], [520, 200, K, -1], [404, 60, R, 1]].forEach(([y, th, col, dir], i) => { const a = snap(u, 0.02 + i * 0.08, 0.2), x = dir * 2700 * (1 - a); cut(c, [[-1600 + x, y], [1600 + x, y - 8], [1600 + x, y + th], [-1600 + x, y + th + 6]], col, 90 + i, 9); }); c.restore();
+    kilter(c, 'THE', 250, 330, 150, R, 11, snap(u, 0.12, 0.2));
+    const l = snap(u, 0.3, 0.45); if (l > 0) { c.save(); c.translate(236, 640); c.scale(lerp(0.35, 1.72, l), 1); kilter(c, 'LONG', 0, 0, 380, K, 12, 1, 'left', 0.03); c.restore(); }
+    kilter(c, 'ARRANGEMENT', 250, 850, 214, K, 13, snap(u, 0.75, 0.6)); const b = snap(u, 1.45, 0.3); if (b > 0) cut(c, [[250, 892], [250 + 1180 * b, 886], [250 + 1180 * b, 914], [250, 918]], R, 95, 4);
+  },
+  // 5 · music
+  (c, u) => {
+    c.fillStyle = K; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 13; i++) { const a = snap(u, 0.05 + i * 0.045, 0.14), x = 260 + i * 128; rect(c, x, 1080 - 400 * a, 116, 460, C, 100 + i); if (i % 7 !== 2 && i % 7 !== 6 && i < 12) { const bq = snap(u, 0.3 + i * 0.045, 0.14); rect(c, x + 84, 1080 - 400 * bq - 2, 74, 250 * bq, K, 120 + i); } }
+    const d = snap(u, 0.2, 0.3); c.save(); c.translate(1560, 300); c.scale(d, d); c.rotate(q(u) * 2.2); c.fillStyle = R; c.beginPath(); c.arc(0, 0, 210, 0, TAU); c.fill(); c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 3; for (const r of [150, 170, 190]) { c.beginPath(); c.arc(0, 0, r, 0.3, 2.2); c.stroke(); } c.fillStyle = C; c.beginPath(); c.arc(0, 0, 70, 0, TAU); c.fill(); c.fillStyle = K; c.beginPath(); c.arc(0, 0, 10, 0, TAU); c.fill(); c.fillRect(-4, -62, 8, 30); c.restore();
+    small(c, 'music by', 150, 200, C, snap(u, 0.25, 0.3)); kilter(c, 'THEO MARCHETTI', 140, 390, 190, C, 14, snap(u, 0.3, 0.5));
+  },
+  // 6 · the keyhole
+  (c, u) => {
+    c.fillStyle = C; c.fillRect(0, 0, W, H); const p = snap(u, 0.05, 0.25); c.save(); c.translate(1400, 540); c.rotate(0.05); rect(c, -250, -470 - 1200 * (1 - p), 500, 940, R, 130); c.restore();
+    const k = snap(u, 0.3, 0.2); if (k > 0) keyhole(c, 1400, 470, k, K);
+    small(c, 'directed by', 150, 420, K, snap(u, 0.3, 0.3)); kilter(c, 'AUGUST', 140, 640, 250, K, 15, snap(u, 0.4, 0.4)); kilter(c, 'PELLETIER', 144, 850, 210, K, 16, snap(u, 0.75, 0.5));
+  }
+];
+
+Stage.create({
+  no: 74, title: 'The Long Arrangement', subtitle: 'titles for a noir that isn’t · 140 bpm, swung',
+  duration: 24, background: K, grain: 0.06, poster: 15.6,
+  fonts: [`800 200px ${NAME}`, `italic 400 50px ${SMALL}`],
+  fade: { in: 0.3, out: 0.8 },
+  slate: { at: 23.5, hold: 0.1, pos: 'bl', color: 'rgba(239,227,200,0)' },
+
+  music(S) {
+    const M = S.score({ bpm: 140, duration: 24, seed: 74, swing: 0.3 });
+    M.master({ reverb: { decay: 1.5, size: 0.8, damp: 0.5 }, fadeOut: 1.0 });
+    const bass = M.track('fmbass', { reverb: 0.08, gain: 0.62, humanize: 0.008 }), ride = M.track('ride', { reverb: 0.2, gain: 0.42 }), br = M.track('brush', { reverb: 0.2, gain: 0.58 }), vib = M.track('vibes', { reverb: 0.4, gain: 0.6, pan: 0.25 }), lead = M.track('softlead', { reverb: 0.3, gain: 0.3, pan: -0.2, lowpass: 4200 }), rim = M.track('rim', { reverb: 0.25, gain: 0.7 }), kick = M.track('softkick', { reverb: 0.05, gain: 0.5 }), crash = M.track('crash', { reverb: 0.4, gain: 0.26 });
+    const walk = [['C2', 'Eb2', 'G2', 'A2'], ['C3', 'Bb2', 'A2', 'G2'], ['F2', 'Ab2', 'C3', 'Eb3'], ['F3', 'Eb3', 'C3', 'Ab2'], ['D2', 'F2', 'Ab2', 'C3'], ['G2', 'B2', 'D3', 'F3'], ['C3', 'G2', 'Eb2', 'D2'], ['C2', 'D2', 'Eb2', 'G2'], ['Ab2', 'C3', 'Eb3', 'G3'], ['G2', 'F2', 'D2', 'B1'], ['C2', 'Eb2', 'G2', 'A2'], ['F2', 'Ab2', 'C3', 'Eb3'], ['D2', 'Ab2', 'G2', 'B1'], ['C2', null, null, null]];
+    const ch = [['Eb4', 'G4', 'A4', 'D5'], ['Eb4', 'G4', 'A4', 'D5'], ['Eb4', 'Ab4', 'C5'], ['Eb4', 'Ab4', 'C5'], ['F4', 'Ab4', 'C5'], ['F4', 'B4', 'D5'], ['Eb4', 'G4', 'A4', 'D5'], ['Eb4', 'G4', 'A4'], ['Eb4', 'G4', 'C5'], ['F4', 'B4', 'Eb5'], ['Eb4', 'G4', 'A4', 'D5'], ['Eb4', 'Ab4', 'C5'], ['F4', 'Ab4', 'B4'], ['Eb4', 'G4', 'A4', 'D5']];
+    walk.forEach((w, i) => { const b = i * 4; w.forEach((n, k) => { if (n) bass.note(b + k, n, i === 13 ? 4 : 0.9, k === 0 ? 0.85 : 0.7); });
+      if (i < 13) { ride.pattern(b, 0.5, 'x.xxx.xx', { vel: 0.55 }); br.pattern(b, 1, '.x.x', { vel: 0.7 }); br.pattern(b, 0.5, 'x.x.x.x.', { vel: 0.25 }); }
+      if (i >= 1 && i < 13) { vib.chord(b + 1.5, ch[i], 0.35, 0.45); if (i % 2) vib.chord(b + 3.5, ch[i], 0.3, 0.4); } });
+    // cuts: a rim shot and a stab on every new card
+    CUTS.forEach((t, k) => { const b = M.b(t); rim.hit(b, 1); if (k) { kick.hit(b, 0.8); vib.chord(b, ch[Math.round(b / 4) % 14], k === 4 ? 2 : 0.6, k === 4 ? 0.8 : 0.6); } });
+    crash.hit(32, 0.8, 3); rim.hit(31.5, 0.6); rim.hit(31, 0.5);
+    // the theme, muted
+    [[8, 'G4', 1.5], [9.5, 'Bb4', 0.5], [10, 'C5', 1], [11, 'Eb5', 1], [12, 'D5', 1.5], [13.5, 'C5', 0.5], [14, 'Ab4', 2], [16, 'F4', 1.5], [17.5, 'Ab4', 0.5], [18, 'C5', 1], [19, 'D5', 1], [20, 'B4', 1.5], [21.5, 'G4', 0.5], [22, 'F4', 1], [23, 'D4', 1], [24, 'Eb4', 1.5], [25.5, 'G4', 0.5], [26, 'C5', 2], [28, 'Bb4', 1], [29, 'G4', 1], [30, 'Eb4', 1], [31, 'G4', 1],
+     [32, 'C5', 2], [34, 'Eb5', 1], [35, 'G5', 1], [36, 'F5', 1.5], [37.5, 'D5', 0.5], [38, 'B4', 2], [40, 'C5', 1.5], [41.5, 'G4', 0.5], [42, 'Eb4', 2], [44, 'Ab4', 1.5], [45.5, 'G4', 0.5], [46, 'F4', 2], [48, 'D4', 1.5], [49.5, 'F4', 0.5], [50, 'B3', 2], [52, 'C4', 4]].forEach(([b, n, d]) => lead.note(b, n, d, 0.5));
+    vib.chord(52, ['C4', 'Eb4', 'G4', 'A4', 'D5'], 4, 0.6); rim.hit(M.b(22.55), 0.9); kick.hit(M.b(22.55), 0.9);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1 }); paper = Stage.canvas2d({ z: 2 }); mask = Stage.buffer(W, H);
+    const r = Stage.rng(74); for (let i = 0; i < 16000; i++) { paper.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,250,235'},${0.02 + 0.045 * r()})`; paper.fillRect(r() * W, r() * H, 1 + r() * 5, 1 + (r() < 0.2)); }
+  },
+
+  frame(t) {
+    const c = ctx; let k = 0; while (k < CUTS.length - 1 && t >= CUTS[k + 1]) k++;
+    const u = t - CUTS[k];
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1;
+    // a little gate weave, on twos
+    const wv = Math.floor(t * 12); c.translate((hash(wv, 1) - 0.5) * 2.4, (hash(wv, 2) - 0.5) * 2.4);
+    if (k < 7) CARDS[k](c, u);
+    else {   // iris-out through the keyhole
+      CARDS[6](c, 9); const s = lerp(13, 1.0, E.inOutCubic(clamp01(q(u) / 1.9))), black = clamp01((q(u) - 1.95) / 0.1);
+      const m = mask; m.globalCompositeOperation = 'source-over'; m.fillStyle = K; m.fillRect(0, 0, W, H); m.globalCompositeOperation = 'destination-out'; keyhole(m, 1400, 470, s, '#000'); m.globalCompositeOperation = 'source-over'; c.drawImage(m.canvas, 0, 0);
+      if (black > 0) { c.fillStyle = K; c.fillRect(-20, -20, W + 40, H + 40); const f = snap(u, 2.3, 0.3); small(c, 'fin', W / 2, 560, C, f, 72, 'center'); if (f > 0) { c.fillStyle = R; c.fillRect(W / 2 - 40 * f, 590, 80 * f, 5); } }
+    }
+    // the cut: a red slash crossing in three steps
+    if (k > 0 && u < 0.17) { const p = q(u) / 0.17, x = lerp(-600, W + 300, p); c.fillStyle = k % 2 ? R : K; c.beginPath(); c.moveTo(x, -20); c.lineTo(x + 900, -20); c.lineTo(x + 560, H + 20); c.lineTo(x - 340, H + 20); c.closePath(); c.fill(); }
+  }
+});
+</script>
+</body>
+</html>

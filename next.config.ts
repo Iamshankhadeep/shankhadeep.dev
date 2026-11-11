@@ -19,10 +19,12 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // The Carrying City is a standalone Vite build in public/carrying-city/; serve its index for the bare path.
+  // Standalone static sites in public/ (The Carrying City is a Vite build; 100-films is a gallery of
+  // one hundred live HTML films): serve each one's index for the bare path.
   async rewrites() {
     return [
       { source: '/carrying-city', destination: '/carrying-city/index.html' },
+      { source: '/100-films', destination: '/100-films/index.html' },
     ];
   },
 };

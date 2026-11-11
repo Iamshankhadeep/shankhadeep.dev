@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 069 — Kintsugi</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+<script src="../lib/vendor/d3.js"></script>
+<script src="../assets/img/069-bowl.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 069 — KINTSUGI
+ * A broken bowl is rejoined with seams of gold. One generated photograph of a celadon bowl is cut into fifteen
+ * shards — Voronoi cells (d3-delaunay) whose shared edges are roughened so both neighbours break along the
+ * same jagged line. They start scattered on dark linen and glide home one by one, each join a koto note. Then
+ * gold is poured: it runs through the seam network from the centre outward (shortest-path arrival times on
+ * the graph of cracks), white-hot at the head, settling into a raised line that catches a slowly turning light.
+ * Six bars at 72 bpm (3.33 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, RS = 410, CX = 960, CY = 545, NS = 15, T_JOIN = 3.4, STEP = 0.625, GLIDE = 1.5, T_GOLD = 16 * 60 / 72, GOLD_DUR = 2.7;
+const GEO = geometry();
+let bg, ctx, glow;
+
+function geometry() {
+  const r = Stage.rng(690), sites = [];
+  for (let i = 0; i < NS; i++) { let best = null, bd = -1; for (let k = 0; k < 50; k++) { const a = r() * TAU, q = Math.sqrt(r()) * 0.88 * RS, p = [Math.cos(a) * q, Math.sin(a) * q]; let d = 1e9; for (const s of sites) d = Math.min(d, Math.hypot(s[0] - p[0], s[1] - p[1])); if (d > bd) { bd = d; best = p; } } sites.push(best); }
+  const del = d3.Delaunay.from(sites), BB = RS + 40, vor = del.voronoi([-BB, -BB, BB, BB]), polys = sites.map((_, i) => vor.cellPolygon(i));
+  const key = (p) => Math.round(p[0] * 4) + ',' + Math.round(p[1] * 4);
+  // shared, roughened edges
+  const edges = [], adj = sites.map(() => []);
+  for (let i = 0; i < NS; i++) for (const j of del.neighbors(i)) if (j > i) {
+    const set = new Set(polys[j].map(key)), com = []; for (let k = 0; k < polys[i].length - 1; k++) if (set.has(key(polys[i][k]))) com.push(polys[i][k]);
+    if (com.length !== 2) continue; const [a, b] = com, len = Math.hypot(b[0] - a[0], b[1] - a[1]); if (len < 6) continue;
+    const n = Math.max(2, Math.round(len / 24)), nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len, pts = [a];
+    for (let k = 1; k < n; k++) { const u = k / n, d = (hash(i * 31 + j, k) - 0.5) * 13; pts.push([lerp(a[0], b[0], u) + nx * d, lerp(a[1], b[1], u) + ny * d]); } pts.push(b);
+    edges.push({ i, j, ka: key(a), kb: key(b), pts }); adj[i].push(j); adj[j].push(i);
+  }
+  // each shard's outline, following the roughened edges
+  const outline = polys.map((poly, i) => { const out = []; for (let k = 0; k < poly.length - 1; k++) { const p = poly[k], q = poly[k + 1], kp = key(p), kq = key(q), e = edges.find((e) => (e.i === i || e.j === i) && ((e.ka === kp && e.kb === kq) || (e.ka === kq && e.kb === kp))); if (e) { const pts = e.ka === kp ? e.pts : e.pts.slice().reverse(); for (let m = 0; m < pts.length - 1; m++) out.push(pts[m]); } else out.push(p); } return out; });
+  // join order: breadth-first from the lowest shard, so every piece lands against one already there
+  let start = 0; for (let i = 1; i < NS; i++) if (sites[i][1] > sites[start][1]) start = i;
+  const order = [start], seen = new Set([start]); for (let h = 0; h < order.length; h++) for (const j of adj[order[h]].slice().sort((a, b) => sites[a][0] - sites[b][0])) if (!seen.has(j)) { seen.add(j); order.push(j); }
+  for (let i = 0; i < NS; i++) if (!seen.has(i)) order.push(i);
+  const shards = sites.map((s, i) => { const k = order.indexOf(i), l = Math.hypot(s[0], s[1]) || 1, piv = [s[0] * Math.min(1, 0.86 * RS / l), s[1] * Math.min(1, 0.86 * RS / l)]; return { i, k, T: T_JOIN + k * STEP, piv, off: [s[0] * 0.95 + (s[0] < 0 ? -1 : 1) * (150 + 190 * r()), s[1] * 0.2 + (r() - 0.5) * 150], rot: (r() - 0.5) * 1.5, out: outline[i] }; });
+  // the seams as a graph, clipped to the bowl; gold arrival by shortest path from the node nearest the centre
+  const RC = RS - 4, seams = [], nodes = {};
+  const node = (k, p) => (nodes[k] || (nodes[k] = { k, p, nb: [], d: Infinity }));
+  edges.forEach((e, ei) => {
+    const pts = []; for (let m = 0; m < e.pts.length; m++) { const p = e.pts[m], inside = Math.hypot(p[0], p[1]) < RC; if (m > 0) { const q = e.pts[m - 1], qi = Math.hypot(q[0], q[1]) < RC; if (qi !== inside) { let lo = 0, hi = 1; for (let it = 0; it < 20; it++) { const u = (lo + hi) / 2, x = lerp(q[0], p[0], u), y = lerp(q[1], p[1], u); if ((Math.hypot(x, y) < RC) === qi) lo = u; else hi = u; } pts.push([lerp(q[0], p[0], lo), lerp(q[1], p[1], lo), 'rim']); } } if (inside) pts.push(p); }
+    if (pts.length < 2) return; let len = 0; const cum = [0]; for (let m = 1; m < pts.length; m++) { len += Math.hypot(pts[m][0] - pts[m - 1][0], pts[m][1] - pts[m - 1][1]); cum.push(len); }
+    const k0 = pts[0][2] ? 'rim' + ei + 'a' : key(pts[0]), k1 = pts[pts.length - 1][2] ? 'rim' + ei + 'b' : key(pts[pts.length - 1]), s = { i: e.i, j: e.j, pts, cum, len, n0: node(k0, pts[0]), n1: node(k1, pts[pts.length - 1]) };
+    s.n0.nb.push([s.n1, len]); s.n1.nb.push([s.n0, len]); seams.push(s);
+  });
+  const all = Object.values(nodes); let src = all[0]; for (const n of all) if (Math.hypot(n.p[0], n.p[1]) < Math.hypot(src.p[0], src.p[1])) src = n;
+  src.d = 0; const todo = new Set(all); while (todo.size) { let u = null; for (const n of todo) if (!u || n.d < u.d) u = n; todo.delete(u); if (u.d === Infinity) break; for (const [v, l] of u.nb) if (u.d + l < v.d) v.d = u.d + l; }
+  const far = Math.max(...all.filter((n) => n.d < Infinity).map((n) => n.d)), speed = far / GOLD_DUR;
+  for (const n of all) n.t = n.d === Infinity ? T_GOLD + GOLD_DUR : T_GOLD + n.d / speed;
+  return { shards, seams, nodes: all, speed, src };
+}
+
+Stage.create({
+  no: 69, title: 'Kintsugi', subtitle: 'mended with gold · 72 bpm',
+  duration: 20, background: '#1b1d20', grain: 0.05, poster: 15.6,
+  fade: { in: 0.9, out: 1.6 },
+  slate: { at: 0.7, hold: 2.6, pos: 'bl' },
+
+  music(S) {
+    const M = S.score({ bpm: 72, duration: 20, seed: 69 });
+    M.master({ reverb: { decay: 3.4, size: 1.1, damp: 0.42 }, fadeOut: 2.2 });
+    const koto = M.track('koto', { reverb: 0.4, gain: 0.9, humanize: 0 }), bell = M.track('bell', { reverb: 0.6, gain: 0.4, humanize: 0 }), pad = M.track('warmpad', { reverb: 0.6, gain: 0.44 }), rim = M.track('rim', { reverb: 0.25, gain: 0.26, humanize: 0 }), sub = M.track('sub', { reverb: 0.05, gain: 0.4 }), gl = M.track('glass', { reverb: 0.7, gain: 0.3, humanize: 0 });
+    const line = ['D3', 'A3', 'D4', 'G4', 'A4', 'C5', 'D5', 'Eb5', 'D5', 'C5', 'A4', 'C5', 'D5', 'G5', 'A5'];
+    for (let k = 0; k < NS; k++) { const b = M.b(T_JOIN + k * STEP); koto.note(b, line[k], 2.2, 0.55 + 0.02 * k, { pan: (k % 2 ? 0.25 : -0.25) }); rim.hit(b, 0.5); if (k % 4 === 0) koto.note(b, S.midi(line[k]) - 12, 2.5, 0.4); }
+    pad.chord(0, ['D2', 'A2', 'D3', 'G3'], 8, 0.45); pad.chord(8, ['Eb2', 'Bb2', 'G3', 'C4'], 4, 0.45); pad.chord(12, ['G2', 'D3', 'A3', 'C4'], 4, 0.5); pad.chord(16, ['D2', 'A2', 'G3', 'D4', 'A4'], 4, 0.6); pad.chord(20, ['D2', 'A2', 'D3', 'A3'], 4, 0.5);
+    sub.note(16, 'D1', 4, 0.8); sub.note(20, 'D1', 3.5, 0.5);
+    // gold reaching each junction rings a small bell, rising
+    const sc = S.scale('D5', 'insen', 2), ns = GEO.nodes.filter((n) => n.d < Infinity).sort((a, c) => a.t - c.t);
+    ns.forEach((n, q) => { if (q % 2 === 0) gl.note(M.b(n.t), sc[Math.min(sc.length - 1, Math.floor(q / 2) % sc.length)], 1.5, 0.34); });
+    bell.chord(16, ['D5', 'A5'], 4, 0.5); bell.chord(20, ['D5', 'G5', 'D6'], 4, 0.5); koto.note(20, 'D3', 4, 0.6); koto.note(20.5, 'A3', 3.5, 0.45); koto.note(21, 'D4', 3, 0.42); koto.note(22, 'A4', 2, 0.36);
+    return M;
+  },
+
+  async setup() {
+    bg = Stage.canvas2d({ z: 1 }); ctx = Stage.canvas2d({ z: 2 }); glow = Stage.buffer(W, H);
+    // dark linen, woven in code so nothing of the photograph remains under the shards
+    const c = bg, g = c.createRadialGradient(720, 380, 100, 960, 540, 1300); g.addColorStop(0, '#34373b'); g.addColorStop(0.6, '#23262a'); g.addColorStop(1, '#121416'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const r = Stage.rng(69); for (let y = 0; y < H; y += 2) { c.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${0.01 + 0.028 * r()})`; c.fillRect(0, y, W, 1); } for (let x = 0; x < W; x += 2) { c.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${0.01 + 0.026 * r()})`; c.fillRect(x, 0, 1, H); }
+    for (let i = 0; i < 2600; i++) { c.fillStyle = `rgba(255,255,255,${0.02 + 0.05 * r()})`; c.fillRect(r() * W, r() * H, 2 + 9 * r(), 1); }
+    // find the bowl in the photograph and lift it out
+    const img = await Stage.image('069-bowl'), iw = img.naturalWidth, ih = img.naturalHeight, probe = Stage.buffer(iw / 4, ih / 4); probe.drawImage(img, 0, 0, iw / 4, ih / 4); const pd = probe.getImageData(0, 0, iw / 4, ih / 4).data;
+    const qw = iw / 4, qh = ih / 4, colN = new Int32Array(qw), rowN = new Int32Array(qh);
+    for (let y = 0; y < qh; y++) for (let x = 0; x < qw; x++) { const i = (y * qw + x) * 4; if ((pd[i] + pd[i + 1] + pd[i + 2]) / 765 > 0.4 && pd[i + 1] - (pd[i] + pd[i + 2]) / 2 > 3) { colN[x]++; rowN[y]++; } }
+    let x0 = 0, x1 = qw - 1, y0 = 0, y1 = qh - 1; while (colN[x0] < 6) x0++; while (colN[x1] < 6) x1--; while (rowN[y0] < 6) y0++; while (rowN[y1] < 6) y1--;
+    const bcx = (x0 + x1) * 2, bcy = (y0 + y1) * 2, br = ((x1 - x0) + (y1 - y0)) * 1.0, sc = RS / br, S2 = RS * 2 + 24;
+    const bowl = Stage.buffer(S2, S2); bowl.save(); bowl.beginPath(); bowl.arc(S2 / 2, S2 / 2, RS + 3, 0, TAU); bowl.clip(); bowl.imageSmoothingQuality = 'high'; bowl.drawImage(img, S2 / 2 - bcx * sc, S2 / 2 - bcy * sc, iw * sc, ih * sc); bowl.restore();
+    // cut the shards (each with its own soft shadow)
+    for (const s of GEO.shards) {
+      let ax = 1e9, bx = -1e9, ay = 1e9, by = -1e9; for (const p of s.out) { ax = Math.min(ax, p[0]); bx = Math.max(bx, p[0]); ay = Math.min(ay, p[1]); by = Math.max(by, p[1]); }
+      ax = Math.max(ax, -RS - 6) - 2; ay = Math.max(ay, -RS - 6) - 2; bx = Math.min(bx, RS + 6) + 2; by = Math.min(by, RS + 6) + 2; const w = Math.ceil(bx - ax), h = Math.ceil(by - ay), cv = Stage.buffer(w, h);
+      cv.save(); cv.translate(-ax, -ay); cv.beginPath(); s.out.forEach((p, k) => (k ? cv.lineTo(p[0], p[1]) : cv.moveTo(p[0], p[1]))); cv.closePath(); cv.clip(); cv.drawImage(bowl.canvas, -S2 / 2, -S2 / 2);
+      cv.strokeStyle = 'rgba(244,240,228,.5)'; cv.lineWidth = 2.2; cv.stroke(); cv.restore(); cv.globalCompositeOperation = 'destination-in'; cv.drawImage(bowl.canvas, -S2 / 2 - ax, -S2 / 2 - ay); cv.globalCompositeOperation = 'source-over';
+      const sd = Stage.buffer(w + 80, h + 80); sd.filter = 'blur(13px)'; sd.drawImage(cv.canvas, 40, 40); sd.filter = 'none'; sd.globalCompositeOperation = 'source-in'; sd.fillStyle = '#000'; sd.fillRect(0, 0, w + 80, h + 80);
+      Object.assign(s, { cv: cv.canvas, sd: sd.canvas, ax, ay });
+    }
+  },
+
+  frame(t) {
+    const c = ctx, push = 1 + 0.045 * E.inOutSine(clamp01(t / 20)); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, W, H); c.translate(CX, CY); c.scale(push, push);
+    const st = GEO.shards.map((s) => { const a = E.inOutCubic(prog(t, s.T - GLIDE, GLIDE)); return { s, a, lift: Math.sin(Math.PI * a), hit: Math.exp(-Math.max(0, t - s.T) * 7) * (t >= s.T ? 1 : 0) }; });
+    const home = st.filter((q) => q.a >= 1).length / NS;
+    // the bowl's own shadow gathers as it becomes whole
+    if (home > 0) { const g = c.createRadialGradient(16, 24, RS * 0.7, 16, 24, RS * 1.16); g.addColorStop(0, `rgba(0,0,0,${0.5 * home})`); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(-RS * 1.4, -RS * 1.4, RS * 2.8, RS * 2.8); }
+    // shards: those already home first, travellers on top
+    st.sort((p, q) => (p.a >= 1 ? 0 : 1) - (q.a >= 1 ? 0 : 1) || q.s.k - p.s.k);
+    for (const { s, a, lift, hit } of st) {
+      const ox = s.off[0] * (1 - a), oy = s.off[1] * (1 - a) - 26 * lift, rot = s.rot * (1 - a) + 0.012 * hit * Math.sin(t * 60), so = 8 + 30 * lift;
+      c.save(); c.translate(s.piv[0] + ox, s.piv[1] + oy); c.rotate(rot); c.translate(-s.piv[0], -s.piv[1]);
+      if (a < 1) { c.globalAlpha = lerp(0.6, 0.34, lift); c.drawImage(s.sd, s.ax - 40 + so * 0.7, s.ay - 40 + so); c.globalAlpha = 1; }
+      c.drawImage(s.cv, s.ax, s.ay); c.restore();
+    }
+    // seams: a hairline crack once both sides are home, then gold
+    const gl = glow; gl.setTransform(1, 0, 0, 1, 0, 0); gl.globalCompositeOperation = 'source-over'; gl.clearRect(0, 0, W, H); gl.translate(CX, CY); gl.scale(push, push); gl.lineCap = 'round'; gl.lineJoin = 'round';
+    const light = 0.9 + 0.5 * (t - T_GOLD), part = (ct, s, l0, l1) => { if (l1 <= l0) return; ct.beginPath(); let started = false; for (let m = 1; m < s.pts.length; m++) { const a = s.cum[m - 1], b = s.cum[m]; if (b < l0 || a > l1) continue; const u0 = clamp01((l0 - a) / (b - a)), u1 = clamp01((l1 - a) / (b - a)), p = s.pts[m - 1], q = s.pts[m]; if (!started) { ct.moveTo(lerp(p[0], q[0], u0), lerp(p[1], q[1], u0)); started = true; } ct.lineTo(lerp(p[0], q[0], u1), lerp(p[1], q[1], u1)); } ct.stroke(); };
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const s of GEO.seams) {
+      const tj = Math.max(GEO.shards[s.i].T, GEO.shards[s.j].T); if (t < tj) continue;
+      c.strokeStyle = `rgba(20,24,22,${0.6 * clamp01((t - tj) / 0.3)})`; c.lineWidth = 1.5; part(c, s, 0, s.len);
+      const f0 = clamp01((t - s.n0.t) * GEO.speed / s.len), f1 = clamp01((t - s.n1.t) * GEO.speed / s.len); if (f0 <= 0 && f1 <= 0) continue;
+      const full = f0 + f1 >= 1, runs = full ? [[0, s.len]] : [[0, f0 * s.len], [(1 - f1) * s.len, s.len]], heat = Math.exp(-Math.max(0, t - Math.min(s.n0.t, s.n1.t) - s.len / GEO.speed) * 0.9);
+      for (const [l0, l1] of runs) {
+        c.strokeStyle = 'rgba(30,18,4,.5)'; c.lineWidth = 6.4; c.save(); c.translate(1.6, 2.2); part(c, s, l0, l1); c.restore();
+        c.strokeStyle = Stage.color.mix('#c8962c', '#fff0b8', 0.75 * heat); c.lineWidth = 5; part(c, s, l0, l1);
+        gl.strokeStyle = Stage.color.alpha('#ffb648', 0.25 + 0.6 * heat); gl.lineWidth = 9; part(gl, s, l0, l1);
+      }
+      // raised highlight: each stretch answers the turning light by its own direction
+      for (let m = 1; m < s.pts.length; m++) { const a = s.cum[m - 1], b = s.cum[m], vis = runs.some(([l0, l1]) => a >= l0 - 0.5 && b <= l1 + 0.5); if (!vis) continue; const p = s.pts[m - 1], q = s.pts[m], th = Math.atan2(q[1] - p[1], q[0] - p[0]), k = Math.pow(Math.abs(Math.sin(th - light)), 3); c.strokeStyle = `rgba(255,244,200,${0.25 + 0.7 * k})`; c.lineWidth = 1.5; c.beginPath(); c.moveTo(p[0] - 0.8, p[1] - 1.1); c.lineTo(q[0] - 0.8, q[1] - 1.1); c.stroke(); }
+      // the molten head
+      if (!full) for (const [f, n] of [[f0, 0], [f1, 1]]) { if (f <= 0 || f >= 1) continue; const l = n ? (1 - f) * s.len : f * s.len; let m = 1; while (m < s.pts.length - 1 && s.cum[m] < l) m++; const u = clamp01((l - s.cum[m - 1]) / (s.cum[m] - s.cum[m - 1])), x = lerp(s.pts[m - 1][0], s.pts[m][0], u), y = lerp(s.pts[m - 1][1], s.pts[m][1], u); c.fillStyle = '#fffbe6'; c.beginPath(); c.arc(x, y, 4.6, 0, TAU); c.fill(); gl.fillStyle = 'rgba(255,214,120,1)'; gl.beginPath(); gl.arc(x, y, 20, 0, TAU); gl.fill(); }
+    }
+    // a soft light turning over the glaze once it is whole
+    const fin = smoothstep(T_GOLD + GOLD_DUR - 0.5, T_GOLD + GOLD_DUR + 1.5, t); if (fin > 0) { const lx = Math.cos(light * 0.6 - 2.2) * RS * 0.45, ly = Math.sin(light * 0.6 - 2.2) * RS * 0.45, g = c.createRadialGradient(lx, ly, 0, lx, ly, RS * 0.75); g.addColorStop(0, `rgba(255,252,240,${0.16 * fin})`); g.addColorStop(1, 'rgba(255,252,240,0)'); c.save(); c.beginPath(); c.arc(0, 0, RS, 0, TAU); c.clip(); c.fillStyle = g; c.fillRect(-RS, -RS, RS * 2, RS * 2); c.restore(); }
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'lighter'; c.filter = 'blur(10px)'; c.drawImage(gl.canvas, 0, 0); c.filter = 'none'; c.globalCompositeOperation = 'source-over';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 015 — Harmonograph</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 015 — HARMONOGRAPH
+ * A table of Lissajous figures converges into one damped harmonograph drawing.
+ * Eight bars at 96 bpm (2.5 s): the 5×5 table breathes in phase waves (bars 1–3), the cells fly together (bar 4),
+ * then two slowly dying pendulums trace nested loops for four bars, the line thinning as the swing decays. */
+const { ease: E, prog, win, clamp01, lerp, smoothstep, hash } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5, CX = 960, CY = 548;
+const GOLD = '232,198,112', CELL = 152, GAP = 178;
+let ctx, hg = [];
+const T_MERGE = BAR * 3, T_DRAW = BAR * 4, T_END = 18.3;
+
+function harmonograph(tau) {      // two damped pendulums per axis, frequencies near 2:3
+  const e1 = Math.exp(-0.0105 * tau), e2 = Math.exp(-0.0140 * tau);
+  return [520 * (0.66 * e1 * Math.sin(3.000 * tau + Math.PI / 2) + 0.34 * e2 * Math.sin(2.010 * tau + 0.3)),
+          410 * (0.66 * e1 * Math.sin(2.000 * tau) + 0.34 * e2 * Math.sin(3.014 * tau + 1.2)), e1];
+}
+
+Stage.create({
+  no: 15, title: 'Harmonograph', subtitle: 'lissajous · canvas 2d · 96 bpm',
+  duration: 20, background: '#0a1029', grain: 0.05, poster: 16.5, vignette: 0.35,
+  fonts: ['500 15px "JetBrains Mono Variable"', '400 13px "JetBrains Mono Variable"', 'italic 400 30px "Fraunces Variable"'],
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(232,198,112,.9)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 15 });
+    M.master({ reverb: { decay: 3.6, size: 1.2, damp: 0.4 }, fadeOut: 2.2 });
+    const vib = M.track('vibes', { reverb: 0.5, gain: 0.95, delay: { time: 0.75, fb: 0.3, mix: 0.2 } });
+    const s1 = M.track('s1', { inst: 'sine', reverb: 0.5, gain: 0.34, params: { A: 1.2, R: 2 }, pan: -0.3 }), s2 = M.track('s2', { inst: 'sine', reverb: 0.5, gain: 0.3, params: { A: 1.2, R: 2 }, pan: 0.3 });
+    const sub = M.track('sub', { reverb: 0.08, gain: 0.6 }), wh = M.track('whoosh', { reverb: 0.5, gain: 0.45 }), ch = M.track('chime', { reverb: 0.75, gain: 0.5 });
+    // pure intervals: octave 1:2, fifth 2:3, fourth 3:4, major third 4:5 — the same small ratios as the table
+    s1.note(0, 'D3', 12, 0.6); s2.note(2, 'A3', 10, 0.5); s1.note(12, 'D3', 20, 0.6); s2.note(12, 'A3', 20, 0.55); s2.note(16, 'F#4', 16, 0.4);
+    sub.note(16, 'D1', 14, 0.8);
+    const tbl = ['D4', 'D5', 'A4', 'D5', 'F#5', 'A5', 'F#5', 'A4'];
+    for (let bar = 0; bar < 3; bar++) vib.seq(bar * 4, 0.5, tbl.map((n, i) => (bar === 0 && i % 2) ? null : n), { vel: 0.5, gate: 2 });
+    vib.seq(12, 0.5, ['A5', 'F#5', 'D5', 'A4', 'F#4', 'D4', 'A3', null], { vel: 0.55, gate: 2 });           // the cells fall together
+    wh.hit(12.5, 0.7, 3.5); ch.note(16, 'D6', 3, 0.5);
+    const mel = ['D5', null, 'A5', null, 'F#5', 'E5', 'D5', null, 'B4', null, 'D5', null, 'A4', null, null, null, 'G4', null, 'B4', 'D5', null, 'F#5', null, 'E5', 'D5', null, 'A4', null, 'D4', null, null, null];
+    vib.seq(16, 0.5, mel, { vel: 0.6, gate: 2.4 });
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    for (let i = 0; i <= 16000; i++) hg.push(harmonograph(i * 0.0125));
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    const bg = c.createRadialGradient(CX, CY, 60, CX, CY, 1000); bg.addColorStop(0, 'rgba(40,58,120,.34)'); bg.addColorStop(1, 'rgba(10,16,41,0)'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    const merge = prog(t, T_MERGE, BAR, E.inOutCubic), tableA = 1 - prog(t, T_MERGE + 1.3, 1.2, E.inQuad);
+    // ── the table
+    if (tableA > 0) {
+      for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) {
+        const a = i + 1, b = j + 1, k = i + j, on = prog(t, 0.5 + k * 0.16, 1.1, E.outCubic); if (on <= 0) continue;
+        const d = clamp01(merge * 1.35 - (4 - Math.abs(i - 2) - Math.abs(j - 2) + 4) * 0.035);
+        const x0 = CX + (i - 2) * GAP, y0 = CY + (j - 2) * GAP, e = E.inOutCubic(d);
+        const x = lerp(x0, CX, e), y = lerp(y0, CY, e), sc = lerp(CELL / 2 * 0.88, 290, e), ph = t * 0.85 + k * 0.42 + 2.2 * e;
+        const draw = (lw, al) => { c.lineWidth = lw; c.strokeStyle = `rgba(${GOLD},${al})`; c.beginPath(); const n = 80 + 26 * Math.max(a, b), m = Math.ceil(n * on); for (let q = 0; q <= m; q++) { const th = q / n * TAU, px = x + sc * Math.sin(a * th + ph), py = y + sc * Math.sin(b * th); q ? c.lineTo(px, py) : c.moveTo(px, py); } c.stroke(); };
+        const al = tableA * (0.9 - 0.5 * e);
+        draw(5, 0.07 * al); draw(1.5, al);
+      }
+      // row / column labels: the frequency ratio a : b
+      const la = (1 - prog(t, T_MERGE - 0.2, 0.7)) * prog(t, 1.2, 1.2, E.outCubic);
+      if (la > 0) {
+        c.font = '500 15px "JetBrains Mono Variable"'; c.fillStyle = `rgba(${GOLD},${0.55 * la})`; c.textAlign = 'center'; c.textBaseline = 'middle';
+        for (let i = 0; i < 5; i++) { c.fillText(String(i + 1), CX + (i - 2) * GAP, CY - 2 * GAP - 112); c.fillText(String(i + 1), CX - 2 * GAP - 118, CY + (i - 2) * GAP); }
+        c.font = '400 13px "JetBrains Mono Variable"'; c.fillStyle = `rgba(${GOLD},${0.4 * la})`;
+        c.fillText('a', CX - 2 * GAP - 118, CY - 2 * GAP - 112 + 0); c.textAlign = 'left'; c.fillText('x = sin(aθ + φ)     y = sin(bθ)', CX + 2 * GAP + 130, CY - 2 * GAP - 112);
+        c.strokeStyle = `rgba(${GOLD},${0.18 * la})`; c.lineWidth = 1; c.beginPath(); c.moveTo(CX - 2 * GAP - 90, CY - 2 * GAP - 90); c.lineTo(CX + 2 * GAP + 90, CY - 2 * GAP - 90); c.moveTo(CX - 2 * GAP - 90, CY - 2 * GAP - 90); c.lineTo(CX - 2 * GAP - 90, CY + 2 * GAP + 90); c.stroke();
+      }
+    }
+    // ── the harmonograph
+    const u = prog(t, T_DRAW - 0.6, T_END - T_DRAW + 0.6, E.inOutSine), m = Math.floor(u * 16000), lift = prog(t, T_END, 1.2, E.outCubic);
+    if (m > 1) {
+      const sway = 0.05 * Math.sin(t * 0.3);
+      c.save(); c.translate(CX, CY); c.rotate(sway);
+      const CH = 250;                                   // draw in chunks so weight follows the dying amplitude
+      for (let s = 0; s < m; s += CH) {
+        const e = hg[s][2], end = Math.min(m, s + CH + 1);
+        c.beginPath(); c.moveTo(hg[s][0], hg[s][1]); for (let q = s + 1; q <= end; q++) c.lineTo(hg[q][0], hg[q][1]);
+        c.strokeStyle = `rgba(${GOLD},${0.055 + 0.03 * e})`; c.lineWidth = 4.5 * e + 1.5; c.stroke();
+        c.strokeStyle = `rgba(${GOLD},${0.34 + 0.5 * e})`; c.lineWidth = 0.55 + 1.15 * e; c.stroke();
+      }
+      const p = hg[m];
+      if (lift < 1) { c.fillStyle = `rgba(255,240,200,${0.16 * (1 - lift)})`; c.beginPath(); c.arc(p[0], p[1] - 40 * lift, 16, 0, TAU); c.fill(); c.fillStyle = `rgba(255,244,214,${1 - lift})`; c.beginPath(); c.arc(p[0], p[1] - 40 * lift, 4.5, 0, TAU); c.fill(); }
+      c.restore();
+      const ca = prog(t, T_DRAW + 0.6, 1, E.outCubic) * (1 - prog(t, 19, 0.8));
+      c.textAlign = 'right'; c.textBaseline = 'alphabetic'; c.fillStyle = `rgba(${GOLD},${0.72 * ca})`; c.font = 'italic 400 30px "Fraunces Variable"'; c.fillText('two pendulums, slowly dying', W - 150, 962);
+      c.fillStyle = `rgba(${GOLD},${0.42 * ca})`; c.font = '500 15px "JetBrains Mono Variable"'; c.fillText('2 : 3   ·   DAMPING ' + (hg[m][2] * 100).toFixed(0).padStart(3, ' ') + ' %', W - 150, 996);
+    }
+  }
+});
+</script>
+</body>
+</html>

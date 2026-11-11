@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nº 011 — Epicycles</title>
+<link rel="stylesheet" href="../lib/fonts/fonts.css">
+<script src="../lib/stage.js"></script>
+<script src="../lib/synth.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+/* Nº 011 — EPICYCLES
+ * A chain of rotating circles draws a calligraphic flourish — Fourier series as a drawing machine.
+ * The figure (a slanted 2:3 knot with two curls) is sampled and transformed (DFT); the film redraws
+ * it five times with 1, 3, 7, 20 and 60 circles, each pass more faithful. Eight bars at 96 bpm (2.5 s each). */
+const { ease: E, prog, win, clamp01, lerp, smoothstep } = Stage;
+const W = 1920, H = 1080, TAU = Math.PI * 2, BAR = 2.5;
+const PAPER = '#f1ead9', INK = '#1c2d5c', GOLD = '#b8862b', GRAPH = '60,62,74';
+const STAGES = [                       // n circles, start, duration of the trace
+  { n: 1, t0: 0.7, d: 1.7 }, { n: 3, t0: BAR, d: 2.3 }, { n: 7, t0: BAR * 2, d: 2.3 },
+  { n: 20, t0: BAR * 3, d: 3.5 }, { n: 60, t0: BAR * 4.5, d: 6.3 }
+];
+let ctx, coef = [], center, paths = [], N = 1024;
+
+function flourish() {
+  // the figure to draw: a 2:3 knot with a calligraphic lean and two small curls — smooth enough for a handful of
+  // circles to suggest it, intricate enough that it takes sixty to get it right
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    const th = i / N * TAU, g = (c, w) => Math.exp(-Math.pow(Math.atan2(Math.sin(th - c), Math.cos(th - c)) / w, 2));
+    let x = 470 * Math.sin(2 * th + 0.35) * (1 + 0.26 * Math.cos(th + 0.4)), y = 330 * Math.sin(3 * th) * (1 + 0.22 * Math.sin(th - 0.2));
+    const c1 = g(0.95, 0.30), c2 = g(4.05, 0.26), c3 = g(2.62, 0.2);
+    x += 74 * c1 * Math.cos(11 * th) + 58 * c2 * Math.cos(-12 * th + 1) + 34 * c3 * Math.cos(15 * th);
+    y += 74 * c1 * Math.sin(11 * th) + 58 * c2 * Math.sin(-12 * th + 1) + 34 * c3 * Math.sin(15 * th);
+    const sk = -0.16; out.push([x + sk * y, y]);                                  // slant, like an italic hand
+  }
+  return out;
+}
+
+function point(n, th) {               // pen position with the first n circles; returns joints too
+  let x = center[0], y = center[1]; const j = [[x, y]];
+  for (let k = 0; k < n; k++) { const c = coef[k], a = c.f * th + c.ph; x += c.r * Math.cos(a); y += c.r * Math.sin(a); j.push([x, y]); }
+  return j;
+}
+
+Stage.create({
+  no: 11, title: 'Epicycles', subtitle: 'fourier series · canvas 2d · 96 bpm',
+  duration: 20, background: PAPER, grain: 0.045, poster: 16.4,
+  fonts: ['500 30px "JetBrains Mono Variable"', 'italic 400 34px "Fraunces Variable"'],
+  fade: { in: 0.8, out: 1.2, color: PAPER },
+  slate: { at: 0.8, hold: 3.0, color: 'rgba(28,45,92,.85)' },
+
+  music(S) {
+    const M = S.score({ bpm: 96, duration: 20, seed: 11 });
+    M.master({ reverb: { decay: 1.9, size: 0.8, damp: 0.4 }, fadeOut: 1.4 });
+    const up = M.track('upper', { inst: 'harp', reverb: 0.3, gain: 1.0, pan: 0.18 }), lo = M.track('lower', { inst: 'pluck', reverb: 0.28, gain: 0.95, pan: -0.18, params: { decay: 2.2, bright: 0.5 } });
+    const bass = M.track('bass', { inst: 'bass', reverb: 0.12, gain: 0.95, params: { cutoff: 520, envAmt: 1.2, R: 0.25 } });
+    const tick = M.track('tick', { reverb: 0.2, gain: 0.5, params: { tone: 1800 } }), pad = M.track('strings', { reverb: 0.5, gain: 0.34, params: { A: 0.5, cutoff: 1800 } });
+    // an original two-part invention in G: a subject in running sixteenths, answered below, then in parallel
+    const G = S.scale('G3', 'major', 3), deg = (d) => G[d];            // scale degrees from G3
+    const subject = [7, 8, 9, 7, 11, 9, 7, 9, 10, 8, 6, 8, 11, 10, 9, 8];  // one bar of 16ths
+    const harm = [0, 5, 3, 4, 0, 1, 4, 0];                                // G Em C D G Am D G (as root degrees)
+    for (let bar = 0; bar < 8; bar++) {
+      const b = bar * 4, r = harm[bar];
+      const shift = [0, -2, -4, -3, 0, 1, -3, 0][bar];
+      if (bar < 7) {
+        const voiceUp = bar !== 1 && bar !== 3, line = subject.map((d) => deg(d + shift + (voiceUp ? 0 : -7)));
+        (voiceUp ? up : lo).seq(b, 0.25, line, { vel: 0.6, gate: 0.9, vels: [0.72, 0.5, 0.56, 0.5] });
+        const other = voiceUp ? lo : up, base = voiceUp ? r : r + 7;
+        other.seq(b, 0.5, [deg(base), deg(base + 4), deg(base + 2), deg(base + 4), deg(base + 7), deg(base + 4), deg(base + 2), deg(base + 4)], { vel: 0.5, gate: 0.85 });
+        if (bar >= 4) pad.chord(b, [deg(r), deg(r + 2), deg(r + 4)], 4, 0.45);
+        if (bar >= 1) { bass.note(b, deg(r) - 12, 1.8, 0.8); bass.note(b + 2, deg(r + 4) - 24, 1.8, 0.6); }
+      } else { up.chord(b, ['G4', 'B4', 'D5', 'G5'], 4, 0.7, { strum: 0.06 }); lo.note(b, 'G2', 4, 0.7); bass.note(b, 'G1', 4, 0.9); lo.note(b + 0.1, 'D3', 4, 0.5); pad.chord(b, 'G', 4, 0.5); }
+    }
+    for (const s of STAGES) tick.hit(M.b(s.t0), 0.8);
+    return M;
+  },
+
+  setup() {
+    ctx = Stage.canvas2d({ z: 1, dpr: 2 });
+    const pts = flourish();
+    // discrete Fourier transform of the closed path (complex samples), then order the circles by size
+    const cs = [];
+    for (let k = -N / 2 + 1; k <= N / 2; k++) { let re = 0, im = 0; for (let n = 0; n < N; n++) { const a = -TAU * k * n / N; re += pts[n][0] * Math.cos(a) - pts[n][1] * Math.sin(a); im += pts[n][0] * Math.sin(a) + pts[n][1] * Math.cos(a); } cs.push({ f: k, r: Math.hypot(re, im) / N, ph: Math.atan2(im, re) }); }
+    const dc = cs.find((c) => c.f === 0); center = [W / 2 + dc.r * Math.cos(dc.ph), H / 2 - 10 + dc.r * Math.sin(dc.ph)];
+    coef = cs.filter((c) => c.f !== 0).sort((a, b) => b.r - a.r).slice(0, 60);
+    for (const s of STAGES) { const p = []; for (let i = 0; i <= 720; i++) { const j = point(s.n, i / 720 * TAU); p.push(j[j.length - 1]); } paths.push(p); }
+  },
+
+  frame(t) {
+    const c = ctx; c.clearRect(0, 0, W, H);
+    // ruled guide lines, like a copybook
+    c.strokeStyle = 'rgba(28,45,92,.07)'; c.lineWidth = 1; c.beginPath(); for (const y of [262, 540, 818]) { c.moveTo(150, y); c.lineTo(W - 150, y); } c.moveTo(W / 2, 150); c.lineTo(W / 2, H - 150); c.stroke();
+    let cur = -1; for (let i = 0; i < STAGES.length; i++) if (t >= STAGES[i].t0) cur = i;
+    const machineOut = prog(t, 17.6, 1.2, E.inOutCubic);
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (let i = 0; i <= cur; i++) {
+      const s = STAGES[i], p = paths[i], u = prog(t, s.t0, s.d, E.inOutSine), last = i === cur, m = Math.floor(u * 720);
+      // earlier passes stay as pale ghosts; the current one is wet ink
+      const ghost = last ? 1 : 0.16 * (1 - prog(t, STAGES[i + 1].t0 + 0.3, 2.4, E.outCubic) * (i < STAGES.length - 2 ? 1 : 0.4));
+      if (ghost <= 0.004) continue;
+      c.strokeStyle = INK; c.globalAlpha = ghost; c.lineWidth = last ? (i === STAGES.length - 1 ? 5.5 : 4) : 2.5;
+      c.beginPath(); c.moveTo(p[0][0], p[0][1]); for (let k = 1; k <= m; k++) c.lineTo(p[k][0], p[k][1]);
+      if (m < 720) { const f = u * 720 - m; c.lineTo(lerp(p[m][0], p[m + 1][0], f), lerp(p[m][1], p[m + 1][1], f)); }
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+    if (cur >= 0 && machineOut < 1) {
+      const s = STAGES[cur], u = prog(t, s.t0, s.d, E.inOutSine), j = point(s.n, u * TAU), a = (1 - machineOut) * prog(t, s.t0, 0.35, E.outCubic);
+      // circles and arms
+      for (let k = 0; k < s.n; k++) {
+        const r = coef[k].r; if (r < 1.2) continue;
+        c.strokeStyle = `rgba(${GRAPH},${(0.34 - 0.2 * Math.min(1, k / 24)) * a})`; c.lineWidth = k < 4 ? 1.6 : 1.1;
+        c.beginPath(); c.arc(j[k][0], j[k][1], r, 0, TAU); c.stroke();
+      }
+      c.strokeStyle = `rgba(${GRAPH},${0.7 * a})`; c.lineWidth = 1.7; c.beginPath(); c.moveTo(j[0][0], j[0][1]); for (let k = 1; k < j.length; k++) c.lineTo(j[k][0], j[k][1]); c.stroke();
+      c.fillStyle = `rgba(${GRAPH},${0.8 * a})`; for (let k = 0; k < Math.min(j.length - 1, 8); k++) { c.beginPath(); c.arc(j[k][0], j[k][1], 3.2 - k * 0.25, 0, TAU); c.fill(); }
+      // the pen: a gold nib with a soft halo
+      const pen = j[j.length - 1];
+      c.fillStyle = `rgba(184,134,43,${0.18 * a})`; c.beginPath(); c.arc(pen[0], pen[1], 22, 0, TAU); c.fill();
+      c.fillStyle = GOLD; c.globalAlpha = a; c.beginPath(); c.arc(pen[0], pen[1], 8, 0, TAU); c.fill(); c.globalAlpha = 1;
+    }
+    // caption: how many circles
+    if (cur >= 0) {
+      const s = STAGES[cur], inn = prog(t, s.t0, 0.5, E.outExpo), out = 1 - prog(t, 18.2, 0.8, E.inCubic);
+      c.textAlign = 'right'; c.textBaseline = 'alphabetic';
+      c.fillStyle = `rgba(28,45,92,${0.9 * out})`; c.font = '500 30px "JetBrains Mono Variable"';
+      c.save(); c.beginPath(); c.rect(W - 520, 880, 420, 60); c.clip(); c.fillText('n = ' + s.n, W - 150, 925 + (1 - inn) * 44); c.restore();
+      c.fillStyle = `rgba(28,45,92,${0.5 * out})`; c.font = 'italic 400 34px "Fraunces Variable"'; c.fillText(s.n === 1 ? 'one circle' : s.n + ' circles, turning', W - 150, 975);
+    }
+    if (t > 18.3) { const a = prog(t, 18.3, 0.8, E.outCubic); c.textAlign = 'right'; c.fillStyle = `rgba(28,45,92,${0.55 * a})`; c.font = 'italic 400 34px "Fraunces Variable"'; c.fillText('drawn by sixty circles', W - 150, 975); }
+  }
+});
+</script>
+</body>
+</html>
